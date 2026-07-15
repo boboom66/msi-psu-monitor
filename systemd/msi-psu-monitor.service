@@ -1,0 +1,17 @@
+[Unit]
+Description=MSI PSU Monitor - read sensors from MSI MPG Ai1600TS
+Documentation=https://github.com/msi-psu-monitor/msi-psu-monitor
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/msi-psu-monitor --format prometheus --output /var/lib/node_exporter/msi-psu.prom
+User=root
+Group=root
+# ProtectSystem=full
+# ProtectHome=yes
+# NoNewPrivileges=yes
+# PrivateDevices=no  # Needs access to /dev/hidraw*
+
+[Install]
+WantedBy=multi-user.target

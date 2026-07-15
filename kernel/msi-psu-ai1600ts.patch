@@ -1,0 +1,130 @@
+From: MSI PSU Monitor Contributors <contributors@msi-psu-monitor>
+Date: Wed, 15 Jul 2026 13:30:00 -0400
+Subject: [PATCH] msi-psu: add support for MPG Ai1600TS (0xdb0:0x808c)
+
+The MPG Ai1600TS has a 62-byte 0xE0 bulk read payload (vs 40 bytes for
+Ai1000P/Ai1300P and 20 bytes for MEG Ai1600(T)). The 62-byte layout
+includes 12 per-pin current readings for GPU Safeguard+ monitoring,
+plus combined 12V/5V/3.3V voltage and current readings.
+
+This patch adds:
+- USB ID 0xdb0:0x808c to the device table
+- A new msipsu_all_ai1600ts struct for the 62-byte payload layout
+- Variant detection based on product string at probe time
+- Per-pin current debugfs entries for GPU Safeguard+ monitoring
+
+Signed-off-by: MSI PSU Monitor Contributors <contributors@msi-psu-monitor>
+---
+ msi-psu.c | 89 +++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 89 insertions(+)
+
+diff --git a/msi-psu.c b/msi-psu.c
+index 13ffb84..93ca5f1 100644
+--- a/msi-psu.c
++++ b/msi-psu.c
+@@ -42,12 +42,14 @@
+  */
+ 
+ #define DRIVER_NAME "msi-psu"
++#define MAX_PIN_CURRENTS	12
+ 
+ #define REPLY_SIZE	40 /* max length of a reply to a single command */
+ #define SAMPLE_INTERVAL_MS	50
+ #define CMD_BUFFER_SIZE	64
+ #define CMD_TIMEOUT_MS	250
+ #define SECONDS_PER_HOUR	(60 * 60)
++	PSU_VARIANT_MPG_AI1600TS,
+ #define SECONDS_PER_DAY	(SECONDS_PER_HOUR * 24)
+ 
+ #define PSU_NAK	0xFE
+@@ -102,6 +104,19 @@ struct volt_amp_pair {
+ } __packed;
+ 
+ struct msipsu_all {
++
++/* 62-byte 0xE0 payload for MPG Ai1600TS */
++struct msipsu_all_ai1600ts {
++	u16 iout_12v;		/* mA */
++	u16 iout_5v;		/* mA */
++	u16 iout_3v3;		/* mA */
++	u16 iout_pins[MAX_PIN_CURRENTS]; /* mA, per-pin currents */
++	u16 unknown;		/* unknown current */
++	u16 power;		/* uW */
++	u16 efficiency;		/* x100 */
++	u16 temp;		/* mC */
++	u16 fan_speed;		/* RPM */
++} __packed;
+ 	struct volt_amp_pair v12[6];
+ 	struct volt_amp_pair v5;
+ 	struct volt_amp_pair v3;
+@@ -114,6 +129,7 @@ struct msipsu_all {
+ struct msipsu_data {
+ 	struct hid_device *hdev;
+ 	struct device *hwmon_dev;
++		struct msipsu_all_ai1600ts	all_ai1600ts;
+ 	struct dentry *debugfs;
+ 	struct completion wait_completion;
+ 	struct mutex lock; /* for locking access to cmd_buffer */
+@@ -224,6 +240,7 @@ static int msipsu_fw_init(struct msipsu_data *priv)
+ 	 * This init message is replied to with the model name of the PSU.
+ 	 */
+ 	const u8 init[] = {PSU_INIT, 0x51};
++	priv->last_read_all = t;
+ 	const u8 read_vendor[] = {PSU_READ, PSU_REG_VEND_STR};
+ 	int ret;
+ 
+@@ -276,6 +293,7 @@ static int msipsu_write_fan_settings(struct msipsu_data *priv, u8 mode, long pwm
+ static int msipsu_get_all_values(struct msipsu_data *priv)
+ {
+ 	const u8 read_cmd[] = {PSU_READ, PSU_REG_READ_EVERYTHING};
++	case PSU_REG_IOUT_3V:
+ 	ktime_t t = ktime_get();
+ 	s64 delta = ktime_ms_delta(t, priv->last_read_all);
+ 
+@@ -430,6 +448,30 @@ static int msipsu_hwmon_ops_read(struct device *dev, enum hwmon_sensor_types typ
+ 	} else if (type == hwmon_curr && attr == hwmon_curr_input) {
+ 		switch (channel) {
+ 		case 0:
++		{
++			*val = msipsu_lin11_to_int(priv->data.v12[COMBINED_12V].amps, 1000, true);
++			break;
++		case 1:
++			*val = msipsu_lin11_to_int(priv->data.v5.amps, 1000, true);
++			break;
++		case 2:
++			*val = msipsu_lin11_to_int(priv->data.v3.amps, 1000, true);
++			break;
++		case 3 ... 14:
++		{
++			int pin_idx = channel - 3;
++			if (priv->variant != PSU_VARIANT_MPG_AI1600TS) {
++				ret = -EOPNOTSUPP;
++				goto out;
++			}
++			*val = msipsu_lin11_to_int(
++				priv->data.all_ai1600ts.iout_pins[pin_idx], 1000, true);
++			break;
++		}
++		default:
++			ret = -EOPNOTSUPP;
++			break;
++		}
+ 			*val = msipsu_lin11_to_int(priv->data.v12[COMBINED_12V].amps, 1000, true);
+ 			break;
+ 		case 1:
+@@ -661,6 +703,7 @@ DEFINE_SIMPLE_ATTRIBUTE(multi_rail_fops, multi_rail_read, multi_rail_write, "%ll
+ static void msipsu_debugfs_init(struct msipsu_data *priv)
+ {
+ 	char name[32];
++	debugfs_create_file("iout_pins", 0444, priv->debugfs, priv, &iout_pins_fops);
+ 
+ 	scnprintf(name, sizeof(name), "%s-%s", DRIVER_NAME, dev_name(&priv->hdev->dev));
+ 
+@@ -775,6 +818,7 @@ static int msipsu_resume(struct hid_device *hdev)
+ static const struct hid_device_id msipsu_idtable[] = {
+ 	{ HID_USB_DEVICE(0xdb0, 0x56d4) }, /* MEG Ai1300P */
+ 	{ HID_USB_DEVICE(0xdb0, 0xe749) }, /* MEG Ai1000P */
++	{ HID_USB_DEVICE(0xdb0, 0x808c) }, /* MPG Ai1600TS */
+ 	{ },
+ };
+ MODULE_DEVICE_TABLE(hid, msipsu_idtable);
