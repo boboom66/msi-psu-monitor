@@ -44,6 +44,16 @@
   MEG 上的 `Zero Fan` 状态是**编造**出来的（拿未定义字节当开关）；现 MEG 报
   `None`（text 显示 `unknown`），TS 仍出四元组。另按 MSI 的 `Mode == 3 ? RxData[5] : 0`
   只在 customized 模式导出 `fan_duty`（auto 模式下残存的设定值不是风扇实际转速）。
+- **配置文件不再「静默失效」或「把 CLI 打断」（本轮）**：
+  - `--config /typo.conf` 以前被 `configparser.read()` 悄悄忽略 → 用户按自己写的配置
+    期待行为，实际跑的是内置默认值（`state_dir` 尤其危险：daemon 会写到别处）。现
+    显式指定却读不到时抛 `ConfigError`，`main()` 干净地 exit 1 并报出文件名；
+    格式错误的 INI（缺 section 头之类）同理，不再冒 traceback。
+  - `[monitor] format = xml` 这种自由文本值以前直接进 `FORMATTERS[...]` → KeyError 炸在
+    读取中途。现 `resolve_format()` 白名单校验，未知值告警并回落 text（与 `[fan] mode`
+    的既有处理方式一致），且解析发生在 `setup_logging()` **之后**，告警才真的看得见。
+  - `[daemon] port` 越界（如 99999）会让 bind 抛 `OverflowError`；现配置层钳回默认值，
+    `dashboard.serve()` 也把 bind 失败（端口被占、特权端口）变成一行错误 + exit 1。
 - **拔插不再拖垮 daemon（本轮）**：`HIDDevice.send_command()` 里的 `os.write`／`os.read`／
   `select` 全裸奔——电源一拔就 `OSError(ENODEV)` 穿到 `sample()` → `tick()`（只挡了
   prom/history 的写盘）→ 主循环直接崩。systemd 的 `Restart=always` 会把它伪装成「正常」，
@@ -74,7 +84,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 289 passed
+uv run --group dev pytest -q                     → 295 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 30 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues

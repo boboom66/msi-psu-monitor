@@ -10,6 +10,11 @@ import os
 
 logger = logging.getLogger('msi_psu.config')
 
+
+class ConfigError(ValueError):
+    """A config file the user asked for cannot be used (missing or malformed)."""
+
+
 # Kept as literal strings so config.py stays importable on its own; monitor.py
 # owns the byte mapping (1 = auto, 3 = customized).
 FAN_MODES = ('auto', 'customized')
@@ -49,7 +54,15 @@ def load_config(path=None):
     cfg = dict(DEFAULTS)
     files = [path] if path else [f for f in CONFIG_FILES if os.path.exists(f)]
     parser = configparser.ConfigParser()
-    parser.read(files)
+    try:
+        read = parser.read(files)
+    except configparser.Error as exc:
+        # A malformed file would otherwise escape as a traceback from main().
+        raise ConfigError(f'invalid config file: {exc}') from exc
+    if path and not read:
+        # Silently falling back to the defaults would leave the user staring at
+        # settings that are not the ones they wrote.
+        raise ConfigError(f'config file not found or unreadable: {path}')
     monitor = parser['monitor'] if parser.has_section('monitor') else {}
     alerts = parser['alerts'] if parser.has_section('alerts') else {}
     cfg['interval'] = _as_float(monitor.get('interval'), cfg['interval'])
@@ -69,6 +82,8 @@ def load_config(path=None):
     cfg['state_dir'] = daemon.get('state_dir', cfg['state_dir']) or None
     cfg['prom_path'] = daemon.get('prom_path', cfg['prom_path']) or None
     cfg['port'] = _as_int(daemon.get('port'), cfg['port'])
+    if not 1 <= cfg['port'] <= 65535:
+        cfg['port'] = DEFAULTS['port']
     cfg['sample_interval'] = _as_float(daemon.get('sample_interval'), cfg['sample_interval'])
     cfg['prom_interval'] = _as_float(daemon.get('prom_interval'), cfg['prom_interval'])
     cfg['history_interval'] = _as_float(daemon.get('history_interval'), cfg['history_interval'])

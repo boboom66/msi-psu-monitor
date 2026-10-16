@@ -22,12 +22,15 @@ missing-file failure mode) and the server is one file to audit.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from msi_psu_monitor import state as stats
+
+logger = logging.getLogger('msi_psu.dashboard')
 
 DEFAULT_HOST = '127.0.0.1'
 DEFAULT_PORT = 8899
@@ -351,7 +354,12 @@ def make_server(host=DEFAULT_HOST, port=DEFAULT_PORT, state_dir=None):
 
 def serve(host=DEFAULT_HOST, port=DEFAULT_PORT, state_dir=None):
     """Serve the dashboard until interrupted; return the process exit code."""
-    httpd = make_server(host, port, state_dir)
+    try:
+        httpd = make_server(host, port, state_dir)
+    except OSError as exc:
+        # A second --dashboard, or a privileged port: report it, do not traceback.
+        logger.error(f'Error: cannot serve on {host}:{port}: {exc}')
+        return 1
     print(f'msi-psu-monitor dashboard: http://{host}:{httpd.server_port}/  (Ctrl-C to stop)')
     try:
         httpd.serve_forever()

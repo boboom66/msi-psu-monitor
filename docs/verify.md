@@ -43,19 +43,18 @@ uv run --group dev ruff format --check .
 | `tests/test_psu_sensors.py` | 62 B / 40 B / 20 B 三种载荷解析、P 系五轨、未知机型拒解 |
 | `tests/test_alerts.py` | 阈值判定、`consecutive_required` 去抖、严重度、告警行格式 |
 | `tests/test_state.py` | 累计统计、`rail_watts()`、历史追加/裁剪、`--export` 列 |
-| `tests/test_config.py` | INI 解析、`[daemon]`、`[fan]` 段与非法值回落 |
+| `tests/test_config.py` | INI 解析、`[daemon]`、`[fan]` 段与非法值回落；显式 `--config` 缺失/格式错误必须报错而非静默用默认值；越界 port 回落 |
 | `tests/test_monitor_format.py` | text / json / prometheus 三种 formatter 输出串 |
 | `tests/test_cli_alerts.py` | CLI 告警路径与退出码 2 |
 | `tests/test_cli_features.py` | `--watch`/`-O`/`--serial`/`--show-log`/`--fan-*`/`--export`/互斥校验 |
 | `tests/test_ocp.py` | 0xC0 阈值 / 0xC1 状态 / 单多轨标志的三格式输出与机型门 |
-| `tests/test_daemon.py` | 采样节拍、原子写、重扫、历史、风扇 Profile 恢复 |
-| `tests/test_dashboard.py` | HTTP 端点、历史/状态载荷、CSV 导出、HEAD 与错误码一致 |
+| `tests/test_daemon.py` | 采样节拍、原子写、重扫、历史、风扇 Profile 恢复；`OSError`（拔插）计入重扫而非崩主循环；只答 ident 的样本判为读失败 |
+| `tests/test_dashboard.py` | HTTP 端点、历史/状态载荷、CSV 导出、HEAD 与错误码一致；端口被占时一行错误 + exit 1 |
 | `tests/test_demo.py` | 合成电源、5 机型切换、告警位注入 |
 | `tests/test_schema.py` | JSON / prometheus 输出结构契约 |
 | `tests/test_monitor.py` | 遗留冒烟（兼容旧接口，勿删） |
 | `tests/test_pid_consistency.py` | 五处 USB PID 列表 + README 载荷大小一致性 |
 | `tests/test_stdlib_only.py` | `python -I` 子进程导入全部模块（零第三方依赖） |
-| `tests/test_daemon.py` | `OSError`（拔插）计入 5 次重扫而不是崩主循环；只答 ident 的样本判为读失败 |
 | `tests/test_docs_consistency.py` | 文档里的用例数、测试文件名、CLI 参数清单、版本号双重来源不得与事实不符 |
 
 `tests/test_docs_consistency.py` 是这轮新加的「文档防伪」，四项检查：
@@ -75,7 +74,7 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。当前基线：**289 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
+三条全绿即通过。当前基线：**295 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
 
 > `ruff format --check` **不要全仓跑**：`protocol.py`/`__init__.py`/`__main__.py`/`tests/test_monitor.py`
 > 等历史文件混用引号风格，全仓 format 会产生大量无意义 diff。只对本次改动的文件跑。

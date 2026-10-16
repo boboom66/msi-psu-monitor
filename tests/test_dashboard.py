@@ -144,3 +144,14 @@ def test_head_of_export_keeps_the_download_headers(live_server):
     assert status == 200
     assert headers['Content-Type'] == 'text/csv; charset=utf-8'
     assert headers['Content-Disposition'] == 'attachment; filename="msi-psu.csv"'
+
+
+def test_serve_reports_a_port_that_is_already_taken(tmp_path, caplog):
+    """A second --dashboard must print one line, not a traceback."""
+    first = dashboard.make_server('127.0.0.1', 0, tmp_path)
+    try:
+        code = dashboard.serve('127.0.0.1', first.server_port, tmp_path)
+    finally:
+        first.server_close()
+    assert code == 1
+    assert any('cannot serve' in record.message for record in caplog.records)

@@ -28,7 +28,7 @@ from msi_psu_monitor import __version__
 from msi_psu_monitor import demo
 from msi_psu_monitor import state as stats
 from msi_psu_monitor.alerts import AlertEngine, evaluate_pin_alerts, format_alert_line
-from msi_psu_monitor.config import load_config
+from msi_psu_monitor.config import ConfigError, load_config
 from msi_psu_monitor.protocol import MSIPSU, DeviceBusyError, HIDDevice, detect_device
 
 EXIT_OK = 0
@@ -891,6 +891,19 @@ def _write_csv(stream, header, rows):
     writer.writerows(rows)
 
 
+def resolve_format(configured):
+    """Return the output format, falling back to text for an unknown name.
+
+    ``--format`` is argparse-validated, but the config file is free text: an
+    unknown value must not reach ``FORMATTERS[...]`` as a KeyError mid-run.
+    """
+    name = str(configured or 'text').strip().lower()
+    if name in STREAM_FORMATS:
+        return name
+    logger.warning(f'Ignoring unknown format {configured!r}; using text.')
+    return 'text'
+
+
 def run_dashboard(args, cfg):
     """Start the local chart server (blocks until interrupted)."""
     from msi_psu_monitor import dashboard
@@ -1059,9 +1072,11 @@ def main():
     args = parser.parse_args()
     _validate_args(parser, args)
 
-    cfg = load_config(args.config)
-    if args.format is None:
-        args.format = cfg['format']
+    try:
+        cfg = load_config(args.config)
+    except ConfigError as exc:
+        logger.error(f'Error: {exc}')
+        sys.exit(EXIT_ERROR)
     if args.output is None:
         args.output = cfg['output']
     if args.port is None:
@@ -1074,6 +1089,10 @@ def main():
     verbose = args.verbose or (cfg['verbose'] and not args.quiet)
     quiet = args.quiet or (cfg['quiet'] and not args.verbose)
     setup_logging(verbose=verbose, quiet=quiet)
+
+    # Resolved after logging is configured, so the warning is actually shown.
+    if args.format is None:
+        args.format = resolve_format(cfg['format'])
 
     if args.dashboard:
         sys.exit(run_dashboard(args, cfg))

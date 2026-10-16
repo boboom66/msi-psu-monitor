@@ -2,12 +2,14 @@
 
 import logging
 
-from msi_psu_monitor.config import DEFAULTS, load_config
+import pytest
+
+from msi_psu_monitor.config import DEFAULTS, ConfigError, load_config
 
 
-def test_defaults_without_files(tmp_path):
-    cfg = load_config(str(tmp_path / 'missing.conf'))
-    assert cfg == DEFAULTS
+def test_defaults_without_files():
+    """No config anywhere (the default search) is fine and yields the defaults."""
+    assert load_config() == DEFAULTS
 
 
 def test_explicit_file_values(tmp_path):
@@ -43,6 +45,12 @@ def test_bool_spellings(tmp_path):
 # ---- [fan] profile restore ----------------------------------------------
 
 
+def _write(tmp_path, body, name='psu.conf'):
+    conf = tmp_path / name
+    conf.write_text(body)
+    return conf
+
+
 def _fan_conf(tmp_path, body):
     conf = tmp_path / 'fan.conf'
     conf.write_text('[fan]\n' + body)
@@ -51,8 +59,11 @@ def _fan_conf(tmp_path, body):
 
 def test_fan_is_opt_in(tmp_path):
     """No [fan] section: the daemon must never write to the PSU."""
-    assert load_config(str(tmp_path / 'missing.conf'))['fan_mode'] is None
-    assert load_config(str(tmp_path / 'missing.conf'))['fan_duty'] is None
+    conf = tmp_path / 'nofan.conf'
+    conf.write_text('[monitor]\ninterval = 3\n')
+    cfg = load_config(str(conf))
+    assert cfg['fan_mode'] is None
+    assert cfg['fan_duty'] is None
 
 
 def test_fan_customized_with_duty(tmp_path):
@@ -90,3 +101,27 @@ def test_fan_unknown_mode_is_ignored(tmp_path, caplog):
     assert cfg['fan_mode'] is None
     assert cfg['fan_duty'] is None
     assert 'Ignoring unknown [fan] mode' in caplog.text
+
+
+def test_an_explicit_config_file_must_exist(tmp_path):
+    """Silently using the defaults would hide every setting the user wrote."""
+    with pytest.raises(ConfigError) as exc:
+        load_config(str(tmp_path / 'missing.conf'))
+    assert 'missing.conf' in str(exc.value)
+
+
+def test_a_malformed_config_file_is_reported_not_raised(tmp_path):
+    """configparser's own error must surface as ConfigError, not a traceback."""
+    conf = tmp_path / 'broken.conf'
+    conf.write_text('interval = 5\n')  # no section header
+    with pytest.raises(ConfigError):
+        load_config(str(conf))
+
+
+def test_an_out_of_range_port_falls_back(tmp_path):
+    conf = _write(tmp_path, '[daemon]\nport = 99999\n')
+    assert load_config(str(conf))['port'] == DEFAULTS['port']
+    conf = _write(tmp_path, '[daemon]\nport = -1\n', name='neg.conf')
+    assert load_config(str(conf))['port'] == DEFAULTS['port']
+    conf = _write(tmp_path, '[daemon]\nport = 9000\n', name='ok.conf')
+    assert load_config(str(conf))['port'] == 9000

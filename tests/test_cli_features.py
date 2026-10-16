@@ -321,3 +321,23 @@ def test_meg_fan_line_reports_an_unknown_zero_fan(monkeypatch, capsys):
     stub.read_fan_state = lambda: {'mode': 1, 'duty': None, 'zero_fan': None}
     _, captured = run_main(monkeypatch, capsys, stub, ['--once'])
     assert 'Zero Fan: unknown   Mode: auto' in captured.out
+
+
+def test_an_unknown_format_in_the_config_falls_back_to_text(tmp_path, monkeypatch, capsys):
+    """A free-text config value must not reach FORMATTERS[...] as a KeyError."""
+    conf = tmp_path / 'psu.conf'
+    conf.write_text('[monitor]\nformat = xml\n')
+    stub = StubPSU(sensors())
+    code, captured = run_main(monkeypatch, capsys, stub, ['--once', '--config', str(conf)])
+    assert code == EXIT_OK
+    assert 'MSI PSU: MPG Ai1600TS' in captured.out  # the text formatter ran
+    assert "Ignoring unknown format 'xml'" in captured.err
+
+
+def test_a_missing_config_file_exits_one(tmp_path, monkeypatch, capsys):
+    stub = StubPSU(sensors())
+    code, captured = run_main(
+        monkeypatch, capsys, stub, ['--once', '--config', str(tmp_path / 'nope.conf')]
+    )
+    assert code == EXIT_ERROR
+    assert 'nope.conf' in captured.err
