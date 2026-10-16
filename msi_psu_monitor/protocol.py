@@ -12,6 +12,10 @@ PSU_VENDOR_ID = 0x0DB0
 # 0x808C = Ai1600TS (1600W), 0xAA6F = Ai1300TS (1300W) per CWT REV6 spec.
 # 0x56D4/0xE749/0xC9EB = legacy MEG/Ai-P models (layouts unverified, read-only compat).
 PSU_PRODUCT_IDS = [0x808C, 0xAA6F, 0x56D4, 0xE749, 0xC9EB]
+# One uevent per hidraw node; the node name is this path's grandparent
+# (".../hidraw5/device/uevent" -> "hidraw5"). Split out so tests can point the
+# scan at a fake sysfs tree instead of stubbing the parser out.
+SYSFS_HIDRAW_GLOB = "/sys/class/hidraw/hidraw*/device/uevent"
 
 CMD_TIMEOUT_MS = 250
 CMD_BUFFER_SIZE = 64
@@ -184,16 +188,16 @@ def _bulk_lin11(data, offset, scale=1000, signed=False):
     raw = struct.unpack("<H", data[offset : offset + 2])[0]
     return lin11_to_int(raw, scale, signed)
 
-
 def detect_devices():
     """Auto-detect all PSU hidraw devices by scanning sysfs.
 
-    Searches /sys/class/hidraw/hidraw*/device/uevent for the PSU's
-    USB vendor/product ID. Returns device paths in a stable (sorted)
-    order, e.g. ['/dev/hidraw5'].
+    Searches ``SYSFS_HIDRAW_GLOB`` for the PSU's USB vendor/product ID and
+    returns device node paths in a stable (sorted) order, e.g.
+    ``['/dev/hidraw5']``. Unreadable or non-PSU uevents are skipped, so an
+    empty list means "no MSI PSU found", never "found something unusable".
     """
     found = []
-    for uevent in sorted(glob.glob("/sys/class/hidraw/hidraw*/device/uevent")):
+    for uevent in sorted(glob.glob(SYSFS_HIDRAW_GLOB)):
         try:
             with open(uevent) as f:
                 content = f.read()
@@ -201,7 +205,7 @@ def detect_devices():
             continue
         for line in content.splitlines():
             if line.startswith("HID_ID="):
-                parts = line.split("=")
+                parts = line.split("=", 1)
                 if len(parts) == 2:
                     hid_id = parts[1].strip()
                     # Format: 0003:00000DB0:0000808C
@@ -211,9 +215,12 @@ def detect_devices():
                             vendor = int(fields[1], 16)
                             product = int(fields[2], 16)
                             if vendor == PSU_VENDOR_ID and product in PSU_PRODUCT_IDS:
-                                # Extract hidrawN from the uevent path
-                                hidraw_dir = os.path.basename(os.path.dirname(uevent))
-                                found.append("/dev/" + hidraw_dir)
+                                # .../hidraw5/device/uevent -> hidraw5. The node is
+                                # the *parent of "device"*, not "device" itself.
+                                node = os.path.basename(os.path.dirname(os.path.dirname(uevent)))
+                                path = "/dev/" + node
+                                if node and path not in found:
+                                    found.append(path)
                     except (ValueError, IndexError):
                         continue
     return found

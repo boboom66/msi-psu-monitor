@@ -9,7 +9,7 @@
 | 🧪 待真机 | 代码完成、单测覆盖，但结论必须样机复核（见 [`verify.md`](verify.md) §8） |
 | ⏸ 冻结 | 明确留待后续批准批次，本轮不做 |
 
-> 回归命令：`uv run --group dev pytest -q` → **437 passed**（19 个测试模块）。
+> 回归命令：`uv run --group dev pytest -q` → **453 passed**（19 个测试模块）。
 > 无硬件全链路自检见 [`verify.md`](verify.md)。
 
 ---
@@ -18,7 +18,7 @@
 
 | 需求 | 实现位置 | 测试 | 状态 |
 |------|----------|------|------|
-| PSU 自動發現（hidraw 掃描） | `protocol.detect_devices()`、`monitor.resolve_device()` | `test_psu_sensors.py`、`test_demo.py` | ✅ 已实现 |
+| PSU 自動發現（hidraw 掃描） | `protocol.detect_devices()`（sysfs `uevent` → `/dev/hidrawN`）、`monitor.resolve_device()` | `test_protocol_discovery.py`（真解析器 + 假 sysfs 樹）、`test_demo.py` | ✅ 已实现 |
 | 多機型相容解析（不同資料長度） | `protocol.MSIPSU.VARIANTS[*]["payload_size"]` + `get_sensors()` | `test_psu_sensors.py`（62/40/20B + 拒解） | 🧪 待真机 |
 | 廠商 / 型號 / 韌體 / 序號 | `protocol.MSIPSU.init()`（0x10/0x11/0x12/0x13，FW 為 2 位 ASCII 數字 + 讀取方補小數點、序號按首字節切片） | `test_psu_sensors.py` | ✅ 已实现 |
 | 雙 12V-2x6 每針電流（TS 專屬） | `get_sensors()` TS 分支（44 B 内联切片）→ `iout_pins` | `test_psu_sensors.py`、`test_monitor_format.py` | 🧪 待真机 |
@@ -107,7 +107,7 @@
 ## 7. 无硬件可覆盖的验证方式
 
 所有 🧪 项在无样机时的最大覆盖：`bash scripts/smoke.sh` 一条命令跑完全链路（CI 也跑），`MSI_PSU_DEMO=1` 合成电源（`MSI_PSU_DEMO_MODEL` 可切
-全部 5 机型、`MSI_PSU_DEMO_ALERT` 可卡任意告警位），配合 437 个单测覆盖解析、告警、
+全部 5 机型、`MSI_PSU_DEMO_ALERT` 可卡任意告警位），配合 453 个单测覆盖解析、告警、
 落盘、导出的全部分支。**每一条待真机项的判定标准与命令见 [`verify.md`](verify.md) §8（共 11 项）。**
 
 ## 非需求交付物（如实标注）
