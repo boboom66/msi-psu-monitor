@@ -208,9 +208,7 @@ def _rail(volts, amps, exponent=-7):
     """
     scale = 1 << -exponent
     exp_bits = exponent & 0x1F
-    return _u16(_encode(int(volts * scale), exp_bits)) + _u16(
-        _encode(int(amps * scale), exp_bits)
-    )
+    return _u16(_encode(int(volts * scale), exp_bits)) + _u16(_encode(int(amps * scale), exp_bits))
 
 
 def _e0_payload_multi_rail():

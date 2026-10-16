@@ -21,9 +21,15 @@ jobs:
       # in pyproject.toml and the runtime itself has zero dependencies).
       - name: Install deps
         run: uv sync --group dev
-      - name: Ruff
+      - name: Ruff (lint)
         run: uv run --group dev ruff check .
+      # Safe repo-wide now that [tool.ruff.format] excludes the legacy files and
+      # force-exclude makes the exclusion stick for explicitly named paths.
+      - name: Ruff (format)
+        run: uv run --group dev ruff format --check .
       - name: Mypy
         run: uv run --group dev mypy msi_psu_monitor/
       - name: Pytest
         run: uv run --group dev pytest -q
+      - name: Build the .deb
+        run: bash scripts/build_deb.sh

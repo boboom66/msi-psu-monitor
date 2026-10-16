@@ -27,7 +27,21 @@ uv run --group dev ruff check .
 uv run --group dev mypy msi_psu_monitor/
 ```
 
-三条全绿即通过。当前基线：**241 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
+现在 `ruff format --check .` 也安全了（`[tool.ruff.format] exclude` +
+`force-exclude = true` 把 4 个历史文件挡在外面），CI 已把它加进门禁：
+
+```bash
+uv run --group dev ruff format --check .
+```
+
+另有两条结构性回归在 `pytest` 里（无需额外命令）：
+
+* `tests/test_pid_consistency.py`：`PSU_PRODUCT_IDS` / `VARIANTS[*]["pid"]` /
+  `systemd/99-msi-psu.rules` / `scripts/install.sh` / README 硬件表五处的 PID 必须一致
+  （少一处就是「某个机型拿不到 uaccess」这类静默缺陷）。
+* `tests/test_stdlib_only.py`：在 `python -I` 子进程里导入全部模块，第三方依赖混入即失败。
+
+三条全绿即通过。当前基线：**249 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
 
 > `ruff format --check` **不要全仓跑**：`protocol.py`/`__init__.py`/`__main__.py`/`tests/test_monitor.py`
 > 等历史文件混用引号风格，全仓 format 会产生大量无意义 diff。只对本次改动的文件跑。
@@ -245,6 +259,12 @@ dpkg-deb -c dist/msi-psu-monitor_1.0.0_all.deb | awk '{print $6}'
 应包含 `usr/bin/msi-psu-monitor`、`usr/bin/msi-psu-monitor-daemon`、
 `usr/lib/python3/dist-packages/msi_psu_monitor/*.py`、`lib/systemd/system/msi-psu-monitor.service`、
 `lib/udev/rules.d/99-msi-psu.rules`、`usr/share/doc/msi-psu-monitor/*`。
+
+同时确认包根目录不是 0700（`mktemp` 会给 0700 而 `dpkg-deb` 原样收录，脚本已 `chmod 755` 修掉）：
+
+```bash
+dpkg-deb -c dist/msi-psu-monitor_1.0.0_all.deb | head -1   # 期望 drwxr-xr-x ... ./
+```
 
 ```bash
 rm -rf /tmp/debroot && mkdir -p /tmp/debroot

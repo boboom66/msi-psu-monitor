@@ -32,6 +32,9 @@ DEB="$OUT/${PKG}_${VERSION}_${ARCH}.deb"
 
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
+# mktemp hands out 0700, and dpkg-deb records the staging root as the package's
+# "./" entry -- upload that verbatim and the archive ships with a 0700 root.
+chmod 755 "$STAGE"
 
 LIBDIR="$STAGE/usr/lib/python3/dist-packages/msi_psu_monitor"
 install -d "$STAGE/DEBIAN" "$LIBDIR" "$STAGE/usr/bin" \

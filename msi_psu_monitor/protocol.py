@@ -283,11 +283,23 @@ class MSIPSU:
     # is the shortest frame that can still be decoded (the MPG models pad their
     # 44-byte payload out to 62 bytes).
     VARIANTS = {
-        "ai1000p": {"name": "MEG Ai1000P", "bulk_size": 40, "payload_size": 40},
-        "ai1300p": {"name": "MEG Ai1300P", "bulk_size": 40, "payload_size": 40},
-        "meg_ai1600": {"name": "MEG Ai1600(T)", "bulk_size": 20, "payload_size": 20},
-        "mpg_ai1300ts": {"name": "MPG Ai1300TS", "bulk_size": 62, "payload_size": 44},
-        "mpg_ai1600ts": {"name": "MPG Ai1600TS", "bulk_size": 62, "payload_size": 44},
+        # ``pid`` is the USB product ID; tests/test_pid_consistency.py keeps it in
+        # step with PSU_PRODUCT_IDS, the udev rule, the installer and the README.
+        "ai1000p": {"name": "MEG Ai1000P", "pid": 0xE749, "bulk_size": 40, "payload_size": 40},
+        "ai1300p": {"name": "MEG Ai1300P", "pid": 0x56D4, "bulk_size": 40, "payload_size": 40},
+        "meg_ai1600": {"name": "MEG Ai1600(T)", "pid": 0xC9EB, "bulk_size": 20, "payload_size": 20},
+        "mpg_ai1300ts": {
+            "name": "MPG Ai1300TS",
+            "pid": 0xAA6F,
+            "bulk_size": 62,
+            "payload_size": 44,
+        },
+        "mpg_ai1600ts": {
+            "name": "MPG Ai1600TS",
+            "pid": 0x808C,
+            "bulk_size": 62,
+            "payload_size": 44,
+        },
     }
     SEVEN_ZPU_VARIANTS = ("mpg_ai1600ts", "mpg_ai1300ts")
     # Only the MEG P models answer the 1-byte multirail OCP flag (`CPSU.cs:823`);

@@ -42,6 +42,9 @@ dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+# Apply the format excludes even to paths named explicitly on the command line,
+# so `ruff format msi_psu_monitor/protocol.py` cannot silently churn 350 lines.
+force-exclude = true
 
 [tool.ruff.lint]
 # Baseline for legacy code: only pyflakes + pycodestyle errors fail CI.
@@ -50,9 +53,17 @@ select = ["E", "F"]
 ignore = ["E501"]
 
 [tool.ruff.format]
-# Legacy files mix quote styles; a repo-wide format pass would churn the diff.
-# Formatting stays opt-in per file until the refactor lands.
 quote-style = "single"
+# These files predate the formatter and mix quote styles. Formatting them is a
+# few hundred lines of churn that hides the real change in review, so the
+# formatter is barred from them by name -- the guardrail is machine-checked
+# instead of remembered. `ruff check` still lints them normally.
+exclude = [
+    "msi_psu_monitor/protocol.py",
+    "msi_psu_monitor/__init__.py",
+    "msi_psu_monitor/__main__.py",
+    "tests/test_monitor.py",
+]
 
 [tool.mypy]
 python_version = "3.10"

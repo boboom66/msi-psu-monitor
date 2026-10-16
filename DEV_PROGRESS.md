@@ -42,10 +42,22 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q              → 227 passed
-uv run --group dev ruff check .           → All checks passed
-uv run --group dev mypy msi_psu_monitor/  → 10 files, no issues
+uv run --group dev pytest -q                     → 249 passed
+uv run --group dev ruff check .                  → All checks passed
+uv run --group dev ruff format --check .         → 30 files already formatted
+uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
+bash scripts/build_deb.sh                        → dist/msi-psu-monitor_1.0.0_all.deb
 ```
+
+护栏（机器强制，不靠人记）：
+
+- `[tool.ruff.format] exclude` + `force-exclude = true`：4 个历史文件不被格式化，
+  所以 `ruff format --check .` 可以进 CI（此前只能逐文件跑）。
+- `tests/test_pid_consistency.py`：五处 USB PID 列表 + README 载荷大小必须与解析器一致。
+- `tests/test_stdlib_only.py`：`python -I` 子进程导入全部模块，第三方依赖混入即失败。
+- `ast.parse(feature_version=(3, 10))`：全部 `.py` 通过 3.10 语法校验（本机只有 3.12/3.13）。
+- CI 含 3.10 / 3.12 双矩阵 + `ruff check` + `ruff format --check` + `mypy` + `pytest`
+  + **构建 `.deb`**。
 
 运行期零第三方依赖（`pyproject.toml` 的 `dependencies = []`），仅 dev 组含 pytest/ruff/mypy。
 
@@ -69,8 +81,20 @@ uv run --group dev mypy msi_psu_monitor/  → 10 files, no issues
 8. `--ocp` 阈值与 MSI Center/出厂规格一致，且连接器状态与 `12V-2x6 Status` 行不矛盾。
 9. `--ocp` 在 MEG 机型上打印「not available」并 exit 0（不发 NAK、不超时）。
 
+## 决策记录（本轮新增）
+
+- **单多轨检视提前落地**：需求把「單多軌模式檢視」列在二期，但它是同一个 `0xC0`
+  地址的只读读法（`CPSU.cs:823`，1 字节，`==2` 为多轨），零写入风险，因此与一期
+  `--ocp` 一并做出：MPG TS 出 12V-2x6 阈值，MEG P 系出单多轨模式，Ai1600T 打印原因。
+- **demo 覆盖全机型**：`MSI_PSU_DEMO_MODEL` 让多轨/单轨两条路径在无硬件时可端到端跑
+  （CLI/daemon/prometheus/history/export），此前它们只有单测覆盖。
+- **风扇 Profile 恢复放在 daemon**：`[fan] mode` 是 opt-in，daemon 每次打开/重连 PSU
+  重发 41h + F1h；不配置则永不写电源。
+- **打包根目录权限**：`mktemp -d` 的 0700 会被 `dpkg-deb` 收进 `./`，已在
+  `build_deb.sh` 里 `chmod 755`。
+
 ### 可选增强（非阻塞）
 
 - dashboard 页内 JS 抽到独立 `static/`，并补 `do_HEAD` 语义。
-- `0xC0` OCP 阈值写入（三期专批，需样机确认写入安全）。
-- `.github/workflows/ci.yml` 已引用 `uv sync --group dev`（dev 组已恢复，可直接用）。
+- `0xC0` OCP 阈值写入 / 单多轨切换（三期专批，需样机确认写入安全）。
+- `0xE1` 告警位图之外的二级告警源（当前 E1h + 软件镜像足够）。

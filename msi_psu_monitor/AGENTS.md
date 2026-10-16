@@ -66,14 +66,20 @@ runtime imports.
 
 - Do NOT add pip runtime dependencies.
 - Do NOT touch `BULK_*` for non-TS variants.
-- Do NOT pass `protocol.py` to `ruff format` (it rewrites ~200 unrelated lines of
-  quote style); format only the files you touched, and re-apply semantic edits on top
-  of `git checkout` when a formatter run slips in.
+- `protocol.py` (and the other three legacy files) are listed in
+  `[tool.ruff.format] exclude` with `force-exclude = true`, so the formatter cannot
+  churn their quote style even when they are named explicitly. Re-apply semantic
+  edits on top of `git checkout` if a formatter run ever slips through.
 - Do NOT gate `0xC0` on payload length: `supports_ocp_config` (8 bytes, MPG TS) and
   `supports_multirail_ocp` (1 byte, MEG P) are complementary variant checks.
 - Fan writes go through `monitor.apply_fan_setting(psu, mode, duty)` — one place for the
   41h write + F1h save + read-back verify, shared by `--fan-mode` and the daemon's
   `[fan]` restore. Never add a second write path.
+- USB IDs live in five places that `tests/test_pid_consistency.py` cross-checks:
+  `PSU_PRODUCT_IDS`, `MSIPSU.VARIANTS[*]["pid"]`, `systemd/99-msi-psu.rules`,
+  `scripts/install.sh` and the README table. Adding a model means touching all five.
+- `tests/test_stdlib_only.py` imports every shipped module in a `python -I`
+  subprocess: the stdlib-only promise is enforced, not just declared.
 - The demo's model table lives in `demo.MODEL_WATTS`; a new variant must be added
   there too, or `MSI_PSU_DEMO_MODEL` cannot reach it.
 - Do NOT harden `systemd/*.service` with `PrivateDevices` (needs `/dev/hidraw*`).
