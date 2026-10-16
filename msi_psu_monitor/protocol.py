@@ -449,12 +449,29 @@ class MSIPSU:
                 0
             ]
 
+        # An unknown model cannot be decoded at any length: bail out before the
+        # payload check so the reason is explicit rather than a generic "short
+        # read" (the byte order of every register is model-dependent).
+        if self.variant is None:
+            sensors["error"] = (
+                f"unsupported PSU variant (product={self.product!r}, "
+                "variant=None): refusing to parse E0 payload"
+            )
+            return sensors
+
         # Read bulk data
         bulk_data = self.hid.read_all()
         payload_size = self.VARIANTS.get(self.variant, {}).get('payload_size', BULK_DATA_SIZE)
         if bulk_data is None or len(bulk_data) < payload_size:
             # A short frame cannot be decoded: reading zeros out of the padding
-            # would look like a healthy PSU (REQ-P0-2).
+            # would look like a healthy PSU (REQ-P0-2). Distinguish "no answer"
+            # from "answered but too short" so a wrong-length device is
+            # diagnosable instead of looking like a dead link.
+            if bulk_data is not None:
+                sensors["payload_error"] = (
+                    f"0xE0 payload too short for {self.variant}: "
+                    f"got {len(bulk_data)} of {payload_size} bytes"
+                )
             return sensors
 
         data = bulk_data[:BULK_FRAME_SIZE]
@@ -658,12 +675,6 @@ class MSIPSU:
             sensors["fan_rpm"] = (
                 int(lin11_to_int(struct.unpack("<H", data[38:40])[0], 1, False)),
                 "RPM",
-            )
-
-        else:
-            sensors["error"] = (
-                f"unsupported PSU variant (product={self.product!r}, "
-                "variant=None): refusing to parse E0 payload"
             )
 
         return sensors

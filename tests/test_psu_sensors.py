@@ -261,6 +261,44 @@ def test_multi_rail_short_payload_is_not_decoded():
     assert 'vout_12v' not in sensors
 
 
+def test_multi_rail_short_payload_names_the_length_mismatch():
+    """A wrong-length device must be diagnosable, not look like a dead link."""
+    psu = _psu_1300p(commands={(0x51, 0xE0): bytes(40 - 1)})
+    sensors = psu.get_sensors()
+    assert 'payload_error' in sensors
+    assert 'got 39 of 40 bytes' in sensors['payload_error']
+    assert 'error' not in sensors  # answered, so not a hard protocol error
+
+
+def test_no_answer_at_all_is_not_reported_as_a_length_mismatch():
+    """None means the PSU stayed silent: no payload_error, keep it transient."""
+    psu = _psu_1300p()
+    sensors = psu.get_sensors()
+    assert 'payload_error' not in sensors
+    assert 'error' not in sensors
+
+
+def test_a_short_payload_for_an_unknown_model_stays_an_error():
+    """Unknown model: refuse on the variant, whatever the payload length is."""
+    registers = {
+        0x10: b'MSI\x00',
+        0x11: b'MSI PSU 9000\x00',
+        0x12: b'1.0',
+        0x13: bytes([4]) + b'SN01',
+    }
+    psu = MSIPSU(
+        FakeHID(
+            registers=registers,
+            commands={(0xFA, 0x51): b'MSI PSU 9000\x00', (0x51, 0xE0): bytes(8)},
+        )
+    )
+    psu.init()
+    assert psu.variant is None
+    sensors = psu.get_sensors()
+    assert 'error' in sensors
+    assert 'payload_error' not in sensors
+
+
 def test_single_rail_model_reports_no_discrete_rails():
     psu = _psu_1300ts(commands={(0x51, 0xE0): _e0_payload()})
     sensors = psu.get_sensors()

@@ -44,6 +44,14 @@
   MEG 上的 `Zero Fan` 状态是**编造**出来的（拿未定义字节当开关）；现 MEG 报
   `None`（text 显示 `unknown`），TS 仍出四元组。另按 MSI 的 `Mode == 3 ? RxData[5] : 0`
   只在 customized 模式导出 `fan_duty`（auto 模式下残存的设定值不是风扇实际转速）。
+- **载荷长度不对时不再只会说「读取失败」（本轮）**：`get_sensors()` 现在区分三件事——
+  设备没应答（`read_all()` 返回 `None`，保持可容忍的瞬时态）、**应答了但长度不对**
+  （新增 `payload_error`，带上「got 20 of 44 bytes」这类实测数字）、机型未知（变体判定
+  前移，直接 `error` 拒解，不再因为「长度也不够」而混成同一个笼统提示）。`run_once`
+  以 exit 1 报出真实原因，`--watch`/daemon 各自沿用既有的「容忍一帧 / 计入重扫」策略但
+  打印同一条具体原因；text 输出也带上该行，让 `-O` 存下来的产物能自证。
+  动机：机型误判（例如产品串含 `MPG Ai1600` 却是 20 字节的 MEG 布局）**不会**产出错数据
+  （长度门先拒），但以前只能看到「0xE0 read failed」，等于把一个可诊断的错配说成掉线。
 - **`StateDirectory=` 与代码里的状态目录不再各说各话（本轮）**：`state.default_state_dir()`
   改为认 systemd 导出的 `STATE_DIRECTORY`（多个用 `:` 分隔时取第一个），优先级
   `MSI_PSU_STATE_DIR` > `STATE_DIRECTORY` > `/var/lib/msi-psu-monitor` > XDG。以前两者
@@ -90,7 +98,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 297 passed
+uv run --group dev pytest -q                     → 301 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 30 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues

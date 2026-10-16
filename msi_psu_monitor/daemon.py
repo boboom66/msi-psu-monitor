@@ -175,7 +175,9 @@ class MonitorDaemon:
         if 'error' in sensors:
             return self._read_failed(str(sensors['error']))
         if not monitor.has_readings(sensors):
-            return self._read_failed('no sensor payload (0xE0 read failed)')
+            return self._read_failed(
+                sensors.get('payload_error') or 'no sensor payload (0xE0 read failed)'
+            )
         self.failures = 0
 
         sensors.update(monitor.read_fan_fields(psu))

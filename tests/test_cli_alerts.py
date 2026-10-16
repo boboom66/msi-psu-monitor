@@ -140,3 +140,20 @@ def test_once_reports_an_alert_even_without_a_sensor_payload(monkeypatch, capsys
     assert code == EXIT_ALERT
     assert 'ALERT [warning] ocp_pin3' in out.err
     assert '0xE0 read failed' in out.err
+
+
+def test_once_reports_a_wrong_length_payload_with_the_actual_numbers(monkeypatch, capsys):
+    """A mis-sized device should name the mismatch, not claim the read failed."""
+    stub = StubPSU(
+        {
+            'product': 'MPG Ai1600TS',
+            'payload_error': '0xE0 payload too short for mpg_ai1600ts: got 20 of 44 bytes',
+        },
+        alerts={'ocp_12v': False},
+    )
+    code, out = _run_main(monkeypatch, capsys, stub, ['prog', '--once'])
+    assert code == EXIT_ERROR
+    assert 'got 20 of 44 bytes' in out.err
+    assert '0xE0 read failed' not in out.err
+    # The text output carries the same reason, so a saved artifact explains itself.
+    assert 'got 20 of 44 bytes' in out.out

@@ -93,8 +93,9 @@ def format_text(sensors):
     lines.append(f'  FW: {sensors.get("fw_revision", "")}  Serial: {sensors.get("serial", "")}')
     lines.append('')
 
-    if 'error' in sensors:
-        lines.append(f'  ERROR   : {sensors["error"]}')
+    reason = sensors.get('error') or sensors.get('payload_error')
+    if reason:
+        lines.append(f'  ERROR   : {reason}')
         return '\n'.join(lines)
 
     for key, label in _VOLTAGE_LABELS.items():
@@ -118,7 +119,6 @@ def format_text(sensors):
                 lines.append(f'{prefix}: {rail_value:8.3f} {unit}')
             else:
                 lines.append(f'{prefix}: {volts:8.3f} V {rail_value:8.3f} {unit}')
-        watts = stats.rail_watts(sensors)
         watts = stats.rail_watts(sensors)
         if watts is not None:
             for label, value in zip(('CPU', 'GPU'), watts):
@@ -606,6 +606,14 @@ def has_readings(sensors):
     return any(key in sensors for key in CORE_READING_KEYS)
 
 
+def _missing_payload(sensors):
+    """Explain a payload-less sample, keeping the specific reason when there is one."""
+    short = sensors.get('payload_error')
+    if short:
+        return short
+    return 'no sensor payload in this sample (0xE0 read failed)'
+
+
 def _valid_sample(sensors):
     """Return (watts, efficiency) when both readings are usable, else None."""
     power = _value(sensors.get('power_total'))
@@ -707,10 +715,10 @@ def run_once(psu, args, cfg, monitor_state, engine):
     # when the sensor payload is missing.
     if sensors.get('alerts'):
         if not complete:
-            logger.error('Warning: no sensor payload in this sample (0xE0 read failed).')
+            logger.error(f'Warning: {_missing_payload(sensors)}')
         return EXIT_ALERT
     if not complete:
-        logger.error('Error: the PSU did not return its sensor payload (0xE0 read failed).')
+        logger.error(f'Error: {_missing_payload(sensors)}.')
         return EXIT_ERROR
     return EXIT_OK
 
@@ -727,7 +735,7 @@ def run_watch(psu, args, cfg, monitor_state, engine):
                 return EXIT_ERROR
             if not has_readings(sensors):
                 # A stream survives one missed frame; the next one may land.
-                logger.error('Warning: no sensor payload in this frame (0xE0 read failed).')
+                logger.error(f'Warning: {_missing_payload(sensors)} (frame skipped).')
                 time.sleep(interval)
                 continue
             sensors.update(read_fan_fields(psu))
