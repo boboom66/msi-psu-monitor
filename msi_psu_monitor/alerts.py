@@ -13,10 +13,19 @@ ALERT_DESCRIPTIONS = {
     'ocp_12v': '12V rail over-current (≥105% rated)',
     'ocp_5v': '5V rail over-current (≥105% rated)',
     'ocp_3v3': '3.3V rail over-current (≥105% rated)',
+    'ovp_12v': '12V rail over-voltage',
+    'ovp_5v': '5V rail over-voltage',
+    'ovp_3v3': '3.3V rail over-voltage',
+    'uvp_12v': '12V rail under-voltage',
+    'uvp_5v': '5V rail under-voltage',
+    'uvp_3v3': '3.3V rail under-voltage',
     'opp': 'total power over-power (≥105% rated)',
     'otp': 'over-temperature (>OTP-5°C)',
     'fan': 'fan blocked, shutdown imminent',
+    'ac': 'AC input lost, running on hold-up',
 }
+for _rail in range(1, 6):
+    ALERT_DESCRIPTIONS[f'ocp_12v{_rail}'] = f'12V{_rail} rail over-current'
 for _pin in range(1, 13):
     ALERT_DESCRIPTIONS[f'ocp_pin{_pin}'] = f'12+4 pin {_pin} over-current'
 

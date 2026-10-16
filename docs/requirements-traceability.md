@@ -9,7 +9,7 @@
 | 🧪 待真机 | 代码完成、单测覆盖，但结论必须样机复核（见 [`verify.md`](verify.md) §8） |
 | ⏸ 冻结 | 明确留待后续批准批次，本轮不做 |
 
-> 回归命令：`uv run --group dev pytest -q` → **259 passed**（18 个测试模块）。
+> 回归命令：`uv run --group dev pytest -q` → **267 passed**（18 个测试模块）。
 > 无硬件全链路自检见 [`verify.md`](verify.md)。
 
 ---
@@ -49,6 +49,7 @@
 | 需求 | 实现位置 | 测试 | 状态 |
 |------|----------|------|------|
 | 12V-2x6 狀態列（Normal / 告警名；閾值單針 12 A、針差 5 A） | `alerts.evaluate_pin_alerts()`、`monitor.status_from()` | `test_alerts.py` | ✅ 已实现 |
+| E1h 告警位图按机型解名（MPG TS / MEG P / MEG Ai1600T 三套字节序） | `protocol.ALERT_INDEXES`、`MSIPSU.alert_names` | `test_psu_sensors.py`（对照 `CPSU.cs` 三张索引数组） | ✅ 已实现 |
 | 告警結束碼與連續判定（0/2/1，連續 2 次才算） | `alerts.AlertEngine(consecutive_required=2)`、`EXIT_ALERT=2` | `test_alerts.py`、`test_cli_alerts.py` | ✅ 已实现 |
 | 黑盒最近 10 條（`--show-log`，新到舊，空提示；与 `-f/--watch/--export` 互斥） | `monitor.format_blackbox()` + `protocol.read_blackbox()`（0xC1 InfoID 1..10） | `test_cli_features.py` | 🧪 待真机（黑盒内容） |
 | 按序號選多電源（`--serial`，默认第一颗，对不上报错并列列表） | `resolve_device()` | `test_demo.py`、`test_psu_sensors.py` | ✅ 已实现 |
@@ -105,5 +106,5 @@
 ## 7. 无硬件可覆盖的验证方式
 
 所有 🧪 项在无样机时的最大覆盖：`bash scripts/smoke.sh` 一条命令跑完全链路（CI 也跑），`MSI_PSU_DEMO=1` 合成电源（`MSI_PSU_DEMO_MODEL` 可切
-全部 5 机型、`MSI_PSU_DEMO_ALERT` 可卡任意告警位），配合 259 个单测覆盖解析、告警、
+全部 5 机型、`MSI_PSU_DEMO_ALERT` 可卡任意告警位），配合 267 个单测覆盖解析、告警、
 落盘、导出的全部分支。**每一条待真机项的判定标准与命令见 [`verify.md`](verify.md) §8（共 10 项）。**

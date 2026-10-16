@@ -2,7 +2,9 @@
 
 import struct
 
-from msi_psu_monitor.protocol import MSIPSU
+import pytest
+
+from msi_psu_monitor.protocol import ALERT_NAMES, MSIPSU
 
 
 def _encode(mantissa_u11, exponent_s5):
@@ -325,3 +327,103 @@ def test_ai1600t_decodes_its_own_20_byte_payload():
 def test_ai1600t_truncated_payload_is_not_decoded():
     psu = _psu_1600t(commands={(0x51, 0xE0): bytes(19)})
     assert 'vout_12v' not in psu.get_sensors()
+
+
+def _bitmap(**set_bytes):
+    raw = bytearray(30)
+    for index, value in set_bytes.items():
+        raw[int(index)] = value
+    return bytes(raw)
+
+
+# MSI Center names an E1h bit with a per-PID index array (CPSU.cs:1046-1057),
+# so the same byte is a different protection on each family. Hardcoded here as
+# the reference: reading all models with the TS table silently relabels every
+# MEG alert (byte 0 would print as "12V OCP" instead of "12V OVP").
+_CS_ALERT_INDEX_P = tuple(range(18))
+_CS_ALERT_INDEX_T = (0, 1, 2, 3, 4, 5, 6, 7, 8, 14, 15, 16, 17)
+_CS_ALERT_INDEX_TS = (6, 7, 8, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 14, 15, 16)
+_CS_ALERT_ENUM = (
+    'ovp_12v',
+    'ovp_5v',
+    'ovp_3v3',
+    'uvp_12v',
+    'uvp_5v',
+    'uvp_3v3',
+    'ocp_12v',
+    'ocp_5v',
+    'ocp_3v3',
+    'ocp_12v1',
+    'ocp_12v2',
+    'ocp_12v3',
+    'ocp_12v4',
+    'ocp_12v5',
+    'opp',
+    'otp',
+    'fan',
+    'ac',
+    'ocp_pin1',
+    'ocp_pin2',
+    'ocp_pin3',
+    'ocp_pin4',
+    'ocp_pin5',
+    'ocp_pin6',
+    'ocp_pin7',
+    'ocp_pin8',
+    'ocp_pin9',
+    'ocp_pin10',
+    'ocp_pin11',
+    'ocp_pin12',
+)
+
+
+@pytest.mark.parametrize(
+    ('variant_id', 'index_array'),
+    [
+        ('TS', _CS_ALERT_INDEX_TS),
+        ('T', _CS_ALERT_INDEX_T),
+        ('P', _CS_ALERT_INDEX_P),
+    ],
+)
+def test_alert_names_follow_the_msi_center_index_array(variant_id, index_array):
+    factory = {'TS': _psu_1300ts, 'T': _psu_1600t, 'P': _psu_1300p}[variant_id]
+    assert factory().alert_names == tuple(_CS_ALERT_ENUM[i] for i in index_array)
+
+
+def test_meg_p_model_does_not_reuse_the_ts_alert_order():
+    """The two families disagree on byte 0, 3 and 13 — a shared table is a lie."""
+    raw = _bitmap(**{'0': 1, '3': 1, '13': 1})
+    status = _psu_1300p(registers={0xE1: raw}).read_alert_status()
+    assert [name for name, active in status.items() if active] == [
+        'ovp_12v',
+        'uvp_12v',
+        'ocp_12v5',
+    ]
+    assert 'ocp_pin1' not in status
+
+
+def test_meg_t_model_reads_13_bytes_and_reports_ac():
+    raw = _bitmap(**{'12': 1})
+    status = _psu_1600t(registers={0xE1: raw}).read_alert_status()
+    assert len(status) == 13
+    assert [name for name, active in status.items() if active] == ['ac']
+    # Two bytes short of the TS payload is still a complete T payload.
+    assert _psu_1600t(registers={0xE1: raw[:13]}).read_alert_status() is not None
+
+
+def test_unknown_variant_refuses_to_name_alert_bits():
+    psu = _psu_1300ts(
+        commands={(0xFA, 0x51): b'MEG Ai9999X\x00'}, registers={0x11: b'MEG Ai9999X\x00'}
+    )
+    assert psu.variant is None
+    assert psu.alert_names == ()
+    assert psu.read_alert_status() is None
+
+
+def test_every_alert_name_has_a_description():
+    """A name without a description leaks a raw identifier into the UI."""
+    from msi_psu_monitor.alerts import describe
+
+    for names in ALERT_NAMES.values():
+        for name in names:
+            assert describe(name) != name, name

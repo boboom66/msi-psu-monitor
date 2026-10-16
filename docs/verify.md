@@ -64,8 +64,8 @@ uv run --group dev ruff format --check .
 3. 每个测试文件都必须在某处文档里被提到；
 4. README 的 Usage 参数清单必须与 `build_parser()` 完全一致（少写/多写都失败）。
 
-一条命令跑完整条无硬件链路（三种格式 / 告警 exit 2 / 黑盒 / OCP / 风扇写 /
-daemon→prometheus+历史 / dashboard HTTP / 3.10 语法），失败即非零退出：
+一条命令跑完整条无硬件链路（三种格式 / 告警 exit 2 及按机型鉴名 / 黑盒 / OCP /
+风扇写 / daemon→prometheus+历史 / dashboard HTTP / 3.10 语法），共 39 项，失败即非零退出：
 
 ```bash
 bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
@@ -74,7 +74,7 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。当前基线：**259 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
+三条全绿即通过。当前基线：**267 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
 
 > `ruff format --check` **不要全仓跑**：`protocol.py`/`__init__.py`/`__main__.py`/`tests/test_monitor.py`
 > 等历史文件混用引号风格，全仓 format 会产生大量无意义 diff。只对本次改动的文件跑。
@@ -188,7 +188,9 @@ uv run --group dev pytest -q tests/test_ocp.py
 
 ## 3. 告警路径（exit 2 + stderr 单行）
 
-`MSI_PSU_DEMO_ALERT` 可让任意一条告警位置 1（取值见 `alerts.py` 的 `ALERT_DESCRIPTIONS`）。
+`MSI_PSU_DEMO_ALERT` 可让一条告警位置 1，取值须是该机型**能报**的名字
+（TS：`ocp_12v`/`ocp_pin1..12`/`opp`/`otp`/`fan`；MEG P：再加 `ovp_*`/`uvp_*`/`ocp_12v1..5`/`ac`；
+MEG Ai1600T：`ovp_*`/`uvp_*`/`ocp_12v`/`ocp_5v`/`ocp_3v3`/`opp`/`otp`/`fan`/`ac`）。
 
 ```bash
 MSI_PSU_DEMO_ALERT=fan .venv/bin/msi-psu-monitor --once; echo "exit=$?"

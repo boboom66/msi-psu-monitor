@@ -37,17 +37,23 @@
 - **LINEAR11 尾数符号**：REV6 无符号（`signed=False` 仅风扇 RPM），调用点四舍五入（V/A 3dp、W 1dp、% 2dp、RPM int）。
 - **标度真义**：MSI 的 `ValueCalc` 就是 `mantissa * 2**exponent`（`CPSU.cs:1248`），单位由指数决定；11 位尾数意味着 3.3 V 只能靠负指数表示（−7 → 3.296 V），不可写成 3300 mV。
 - **变体最小载荷**：原先 44B 硬门槛会把 **Ai1600T（20B 载荷）整段拒掉**；现按 `VARIANTS[...]['payload_size']`（TS 44 / P 40 / 1600T 20）裁定。MSI 的 `i = 10` 只是输出数组下标，不是载荷前缀跳过。
+- **E1h 告警位序按机型查表**：MSI Center 在解名之前先按 PID 选三张索引数组之一
+  （`CPSU.cs:1046-1057`），所以**同一个字节在 MEG 是 `OVP_12V`、在 TS 是 `OCP_12V`**。
+  此前全机型共用 TS 那一张表，MEG P 系每条告警名都是错的（第 0/3/13 字节尤其），
+  且 Ai1600T 实际只回 13 字节却被按 18B 门槛判为「无数据」。现按
+  `ALERT_INDEXES` 分机型解名、按各自长度收包，未知机型**拒答**（Status 显示 `Unknown`）
+  而不猜；`demo` 同步按所模拟机型出位图，否则无法在无硬件时覆盖这条路径。
 - **P 系 40B 布局**：`0-19` 是 12V1..12V5 各 (V,I)，`20-23` 是**合并** 12V (V,I)——文档此前误记为「6 轨 × 4B」，且这 5 条单轨读数此前被整段丢弃。
 
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 259 passed
+uv run --group dev pytest -q                     → 267 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 30 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
 bash scripts/build_deb.sh                        → dist/msi-psu-monitor_1.0.0_all.deb
-bash scripts/smoke.sh                            → 36 项全过（三种格式/告警/黑盒/OCP/风扇/daemon/dashboard）
+bash scripts/smoke.sh                            → 39 项全过（三种格式/告警按机型/黑盒/OCP/风扇/daemon/dashboard）
 ```
 
 护栏（机器强制，不靠人记）：

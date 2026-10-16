@@ -44,6 +44,14 @@ assert_contains() {
     esac
 }
 
+# assert_not_contains <label> <needle> <haystack>
+assert_not_contains() {
+    case "$3" in
+        *"$2"*) bad "$1" "unexpected: $2" ;;
+        *) ok "$1" ;;
+    esac
+}
+
 # assert_exit <label> <expected> <actual>
 assert_exit() {
     if [ "$2" = "$3" ]; then ok "$1 (exit $3)"; else bad "$1" "want exit $2, got $3"; fi
@@ -77,6 +85,13 @@ printf '\n\033[1m[2] 告警路径\033[0m\n'
 OUT=$(MSI_PSU_DEMO_ALERT=fan $MONITOR --once 2>"$WORK/err.txt"); RC=$?
 assert_exit "告警退出码为 2" 2 "$RC"
 assert_contains "告警写到 stderr" "ALERT [critical] fan" "$(cat "$WORK/err.txt")"
+
+# E1h byte order is per model (CPSU.cs names each bit with a per-PID array), so
+# the same alert on a MEG PSU must still come out with the MEG name.
+OUT=$(MSI_PSU_DEMO_MODEL=ai1300p MSI_PSU_DEMO_ALERT=ovp_12v $MONITOR --once 2>"$WORK/err.txt"); RC=$?
+assert_exit "MEG 系告警退出码为 2" 2 "$RC"
+assert_contains "MEG 告警用 MEG 的名字" "ALERT [warning] ovp_12v" "$(cat "$WORK/err.txt")"
+assert_not_contains "MEG 不报 TS 的针脚名" "ocp_pin1" "$(cat "$WORK/err.txt")"
 
 printf '\n\033[1m[3] 黑盒与 OCP\033[0m\n'
 OUT=$($MONITOR --show-log 2>/dev/null)

@@ -110,6 +110,20 @@ def test_alerts_are_all_clear_by_default(monkeypatch):
     assert not any(alerts.values())
 
 
+def test_demo_reports_the_emulated_models_alert_order(monkeypatch):
+    """A MEG demo must not answer with the TS bitmap (different meaning)."""
+    monkeypatch.setenv('MSI_PSU_DEMO_MODEL', 'ai1300p')
+    alerts = demo.DemoPSU(clock=Clock()).read_alert_status()
+    assert list(alerts)[:3] == ['ovp_12v', 'ovp_5v', 'ovp_3v3']
+    assert 'ocp_pin1' not in alerts
+
+    monkeypatch.setenv('MSI_PSU_DEMO_MODEL', 'meg_ai1600')
+    monkeypatch.setenv('MSI_PSU_DEMO_ALERT', 'ac')
+    alerts = demo.DemoPSU(clock=Clock()).read_alert_status()
+    assert len(alerts) == 13
+    assert alerts['ac'] is True
+
+
 def test_demo_alert_env_sticks_exactly_one_bit(monkeypatch):
     monkeypatch.setenv('MSI_PSU_DEMO_ALERT', 'fan')
     alerts = demo.DemoPSU(clock=Clock()).read_alert_status()

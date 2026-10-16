@@ -8,7 +8,8 @@ fabricated, so it must never be reachable unless ``MSI_PSU_DEMO`` is set.
 
 Environment:
     MSI_PSU_DEMO=1              enable the synthetic device
-    MSI_PSU_DEMO_ALERT=fan      make one alert bit stick (any name from alerts.py)
+    MSI_PSU_DEMO_ALERT=fan      make one alert bit stick; must be a name the
+                                emulated model can report (see protocol.ALERT_NAMES)
     MSI_PSU_DEMO_MODEL=ai1300p  emulate another supported variant (default
                                 mpg_ai1600ts); each model reports its own payload
                                 shape, so the multi-rail and single-rail code
@@ -25,7 +26,7 @@ import os
 import time
 
 from msi_psu_monitor.alerts import ALERT_DESCRIPTIONS
-from msi_psu_monitor.protocol import MSIPSU
+from msi_psu_monitor.protocol import ALERT_NAMES, MSIPSU
 
 DEVICE_PATH = 'demo:0'
 DEMO_SERIAL = 'DEMO00000001'
@@ -170,9 +171,14 @@ class DemoPSU:
 
     # ---- control surface -------------------------------------------------
 
+    @property
+    def alert_names(self):
+        """E1h byte order of the emulated model (see ``protocol.ALERT_INDEXES``)."""
+        return ALERT_NAMES.get(self.variant, ())
+
     def read_alert_status(self):
         stuck = _stuck_alert()
-        return {name: name == stuck for name in ALERT_DESCRIPTIONS}
+        return {name: name == stuck for name in self.alert_names}
 
     # ---- 12V-2x6 OCP (C0h read-only + C1h state) ------------------------
 

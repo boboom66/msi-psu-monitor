@@ -53,12 +53,34 @@ REG_MULTIRAIL = 0xC0
 REG_UPTIME = 0xD0
 REG_TOTAL_UPTIME = 0xD1
 REG_READ_EVERYTHING = 0xE0
-
-# E1h alert bitmap order (REV6 READ_ALERTSTATUS, 18 bytes, 0=OK 1=alert)
-ALERT_NAMES = (
+# E1h alert bitmap. The byte order is **model-specific**: MSI Center picks one
+# of three index arrays from the PID before it names a bit (``CPSU.cs:1046``),
+# so byte 0 means 12V OVP on a MEG PSU and 12V OCP on a MPG TS. Reading every
+# model with one table mislabels every alert on the MEG units.
+#
+# Indices refer to ``AlertStatus`` (``CPSU.cs:287-350``):
+#   0-2   OVP 12V / 5V / 3.3V      3-5   UVP 12V / 5V / 3.3V
+#   6-8   OCP 12V / 5V / 3.3V      9-13  OCP 12V1..12V5 (multi-rail MEG only)
+#   14-17 OPP / OTP / Fan / AC     18-29 OCP of the 12 pins of 12V-2x6 #1/#2
+_ALERT_ENUM_NAMES = (
+    "ovp_12v",
+    "ovp_5v",
+    "ovp_3v3",
+    "uvp_12v",
+    "uvp_5v",
+    "uvp_3v3",
     "ocp_12v",
     "ocp_5v",
     "ocp_3v3",
+    "ocp_12v1",
+    "ocp_12v2",
+    "ocp_12v3",
+    "ocp_12v4",
+    "ocp_12v5",
+    "opp",
+    "otp",
+    "fan",
+    "ac",
     "ocp_pin1",
     "ocp_pin2",
     "ocp_pin3",
@@ -71,10 +93,23 @@ ALERT_NAMES = (
     "ocp_pin10",
     "ocp_pin11",
     "ocp_pin12",
-    "opp",
-    "otp",
-    "fan",
 )
+
+# Byte -> alert, per model (the three ``Alert_Index_*`` arrays, in order).
+ALERT_INDEXES = {
+    "mpg_ai1600ts": (6, 7, 8, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 14, 15, 16),
+    "mpg_ai1300ts": (6, 7, 8, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 14, 15, 16),
+    "ai1000p": (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17),
+    "ai1300p": (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17),
+    "meg_ai1600": (0, 1, 2, 3, 4, 5, 6, 7, 8, 14, 15, 16, 17),
+}
+ALERT_NAMES = {
+    variant: tuple(_ALERT_ENUM_NAMES[i] for i in indexes)
+    for variant, indexes in ALERT_INDEXES.items()
+}
+# The TS order is the one the CLI was written against and the only one whose
+# 12V-2x6 pins are individually reported.
+ALERT_NAMES_TS = ALERT_NAMES["mpg_ai1600ts"]
 
 # 0xE0 bulk read layout for MPG Ai1600TS / Ai1300TS (62-byte payload).
 # The first 44 bytes carry data, the remaining 18 bytes are zero padding; a
@@ -612,17 +647,32 @@ class MSIPSU:
 
         return sensors
 
+    @property
+    def alert_names(self):
+        """E1h byte order for this model, ``()`` when the model is unknown.
+
+        Never guess: byte 0 is 12V OVP on a MEG and 12V OCP on a TS, so an
+        unnamed byte would be reported as the wrong protection.
+        """
+        return ALERT_NAMES.get(self.variant, ())
+
     def read_alert_status(self):
-        """Read the E1h alert bitmap (REV6 READ_ALERTSTATUS, 18 bytes).
+        """Read the E1h alert bitmap (REV6 READ_ALERTSTATUS).
+
+        The payload is as long as the model's index array: 18 bytes for the
+        MPG TS and MEG P units, 13 for the MEG Ai1600T (``CPSU.cs:1046``).
 
         Returns:
             Dict mapping alert name to bool (True = alert active),
-            or None when the PSU does not answer.
+            or None when the model is unknown or the PSU does not answer.
         """
-        data = self.hid.read_register(REG_ALERT_STATUS)
-        if data is None or len(data) < len(ALERT_NAMES):
+        names = self.alert_names
+        if not names:
             return None
-        return {name: bool(data[i]) for i, name in enumerate(ALERT_NAMES)}
+        data = self.hid.read_register(REG_ALERT_STATUS)
+        if data is None or len(data) < len(names):
+            return None
+        return {name: bool(data[i]) for i, name in enumerate(names)}
 
     def _parse_pin_currents(self, data, offset, count=6):
         """Decode count LINEAR11 pin currents (mA) from data at offset."""

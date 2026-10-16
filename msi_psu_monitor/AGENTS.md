@@ -50,6 +50,11 @@ runtime imports.
   `MAX_SAMPLE_GAP_S` (300 s) advance the clock without integrating.
 - **`collect_alerts()` returns `have_data`**; a PSU that answers neither E1h nor the
   pin mirror must render as `Unknown`, never as `Normal`.
+- **The E1h bit order is per model** (`ALERT_INDEXES`, mirroring the three
+  `Alert_Index_*` arrays at `CPSU.cs:1046`): byte 0 is 12V OVP on a MEG and 12V OCP on
+  a MPG TS, and the Ai1600T sends 13 bytes, not 18. Never index that bitmap with a
+  flat table, and never name a bit for an unknown model — return `None` and let the
+  status read `Unknown`.
 - **The demo must stay opt-in**: `demo.enabled()` reads `MSI_PSU_DEMO`; nothing may
   import synthetic data on the production path.
 - **`--watch` is text-only** and flushes each frame (pipes must see every sample).

@@ -83,7 +83,7 @@ If a command is not supported or an error occurs, the response starts with:
 | FAN_MODE | 0x41 | 3 bytes | Fan control mode + 自订占空比 `[mode, x, duty]`（1=auto，3=customized；一期读写，写走 `--fan-mode/--fan-duty` + F1h 保存） |
 | FAN_DUTY | 0x42 | 4 bytes | Fan duty 四元组[实际, MCU算, 软件设, ZeroFan==1]（一期读；ZeroFan 进 text 显示） |
 | MULTIRAIL / OCP12V2x6_CONFIG | 0xC0 | 1 or 8 bytes | **重载寄存器**，同一地址两条命令、机型门互补：MEG Ai1000P/Ai1300P 读 1 字节多轨开关（`==2` 为多轨，`CPSU.cs:823-832`）；MPG Ai1300TS/Ai1600TS 读 8 字节 12V-2x6 OCP 阈值（`CPSU.cs:840-856`）；MEG Ai1600T 两条都不支持。12V-2x6 载荷 `[enable, 单针A, 针差A, 触发s, 针差触发s, 警告s]`，前两个 A 值为 LINEAR11（exp -4，即 `value<<4` 低字节 + `0xE0` 高字节，12A→`0xE0C0`、5A→`0xE050`）；出厂 12A/5A/20s/20s/180s。一期只读展示走 `--ocp`，写（8B + F1h）三期专批 |
-| ALERT_STATUS | 0xE1 | 18 bytes | GPU Safeguard+ 状态（索引 `{6,7,8,18..29,14,15,16}`，失败回退 C1 state；Status 行 + exit 2 来源；待真机复核） |
+| ALERT_STATUS | 0xE1 | 18 / 18 / 13 bytes | GPU Safeguard+ 状态。**字节序按机型查表**（MSI Center 三张索引数组，`CPSU.cs:1046-1057`）：MPG TS `{6,7,8,18..29,14,15,16}`（18B）、MEG P `{0..17}`（18B）、MEG Ai1600T `{0..8,14,15,16,17}`（13B）。同一个字节在 MEG 是 `OVP_12V`、在 TS 是 `OCP_12V`，**绝不共用一张表**；未知机型拒答（返回 None）而非猜。Status 行 + exit 2 来源；待真机复核 |
 | ALERT_LOG | 0xC1 | 26B×10 | GPU Safeguard+ 黑盒（`--show-log` 来源，最近 10 条新→旧；待真机复核） |
 | OCP12V2x6_STATE | 0xC1 | 42 bytes | InfoID `0x00`：12V-2x6 实时状态（`--ocp` 第二段来源）。`[0]=Conn1 状态, 1-4=运行计时, 5-8=总计时, 9-20=6 针电流, 21=Conn2 状态, 22-25=运行计时, 26-29=总计时, 30-41=6 针电流]`；状态码 `0` 正常 / `1` 单针 OCP / `2` 针差 / `3` 瞬时 OC(>18A)。注意 MSI Center 此处有个 bug：`I_Out_2_6 = ValueCalc(RxData[43], RxData[43])`（应为 44/45），本实现按正确偏移取 12 针 |
 | UPTIME | 0xD0 | 4 bytes | Session uptime (seconds) |
