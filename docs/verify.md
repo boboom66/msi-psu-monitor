@@ -55,6 +55,7 @@ uv run --group dev ruff format --check .
 | `tests/test_monitor.py` | 遗留冒烟（兼容旧接口，勿删） |
 | `tests/test_pid_consistency.py` | 五处 USB PID 列表 + README 载荷大小一致性 |
 | `tests/test_stdlib_only.py` | `python -I` 子进程导入全部模块（零第三方依赖） |
+| `tests/test_daemon.py` | `OSError`（拔插）计入 5 次重扫而不是崩主循环；只答 ident 的样本判为读失败 |
 | `tests/test_docs_consistency.py` | 文档里的用例数、测试文件名、CLI 参数清单、版本号双重来源不得与事实不符 |
 
 `tests/test_docs_consistency.py` 是这轮新加的「文档防伪」，四项检查：
@@ -74,7 +75,7 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。当前基线：**282 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
+三条全绿即通过。当前基线：**289 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
 
 > `ruff format --check` **不要全仓跑**：`protocol.py`/`__init__.py`/`__main__.py`/`tests/test_monitor.py`
 > 等历史文件混用引号风格，全仓 format 会产生大量无意义 diff。只对本次改动的文件跑。

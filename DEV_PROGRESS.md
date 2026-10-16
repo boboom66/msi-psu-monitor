@@ -44,6 +44,20 @@
   MEG 上的 `Zero Fan` 状态是**编造**出来的（拿未定义字节当开关）；现 MEG 报
   `None`（text 显示 `unknown`），TS 仍出四元组。另按 MSI 的 `Mode == 3 ? RxData[5] : 0`
   只在 customized 模式导出 `fan_duty`（auto 模式下残存的设定值不是风扇实际转速）。
+- **拔插不再拖垮 daemon（本轮）**：`HIDDevice.send_command()` 里的 `os.write`／`os.read`／
+  `select` 全裸奔——电源一拔就 `OSError(ENODEV)` 穿到 `sample()` → `tick()`（只挡了
+  prom/history 的写盘）→ 主循环直接崩。systemd 的 `Restart=always` 会把它伪装成「正常」，
+  但内存里的告警 debounce 与能量积分每次都清零，而「连续 5 次失败才重扫」这条验收项
+  永远走不到。现全部设备错误统一映射为 `None`（等同 NAK），并在 `sample()` 里补
+  `OSError` 兜底；`--watch` 与 `--once` 也各自给出可读结论。
+- **「只答 ident、不答载荷」不再算成功**：`get_sensors()` 在 0xE0 读失败时返回只有
+  ident/uptime 的字典，`run_once` 因此 **exit 0**——脚本会读成「一切正常」而一个数值
+  都没有，daemon 也不计失败、永不重扫。现 `has_readings()` 判定：一次读拿不到任何
+  数值即读失败（`--once` exit 1 + stderr 说明；daemon 计入 5 次重扫）。**告警优先**：
+  E1h 是独立寄存器，即使载荷缺失，已触发的告警仍以 exit 2 报出而不是被降级成 1。
+- **`append_history()` 的「空文件」坑**：判据从 `path.exists()` 改为「不存在或大小为 0」。
+  此前若进程恰好在建文件与写表头之间被杀，第二天起该文件缺表头，`csv.DictReader` 会把
+  第一行数据当列名 → 当天所有导出静默错列。
 - **寄存器表逐字节复核（本轮）**：把 REV6 规格书（`02_官方规格/...REV6.pdf`）的文字流解出来，
   逐表核对了 C0h 8 字节配置（p.11：enable/单针 A/针差 A/触发 s/针差触发 s/警告 s，出厂
   1/12/5/20/20/180，窗口 10-14 A、4-8 A、5-30 s、5-30 s、30-240 s）、C1h 42 字节实时表
@@ -60,7 +74,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 282 passed
+uv run --group dev pytest -q                     → 289 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 30 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues

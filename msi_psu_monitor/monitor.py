@@ -590,6 +590,22 @@ def status_from(active_names, have_data):
     return STATUS_NORMAL if have_data else STATUS_UNKNOWN
 
 
+# Any of these proves the bulk payload was decoded; ident-only keys (vendor,
+# product, fw_revision, serial, uptime) survive a failed 0xE0 read.
+CORE_READING_KEYS = ('vout_12v', 'vout_5v', 'vout_3v3', 'power_total')
+
+
+def has_readings(sensors):
+    """True when the sample carries at least one decoded sensor value.
+
+    A PSU that answers its ident but not the 0xE0 payload yields an ident-only
+    dict. Rendering that as a successful read would report health we never
+    measured, so callers treat it as a read failure (exit 1 for one-shot, a
+    counted failure for the daemon).
+    """
+    return any(key in sensors for key in CORE_READING_KEYS)
+
+
 def _valid_sample(sensors):
     """Return (watts, efficiency) when both readings are usable, else None."""
     power = _value(sensors.get('power_total'))
@@ -673,6 +689,7 @@ def run_once(psu, args, cfg, monitor_state, engine):
         logger.error(f'Error: {sensors["error"]}')
         emit(FORMATTERS[args.format](sensors), args.output)
         return EXIT_ERROR
+    complete = has_readings(sensors)
 
     sensors.update(read_fan_fields(psu))
     if not args.no_alerts:
@@ -685,7 +702,17 @@ def run_once(psu, args, cfg, monitor_state, engine):
         monitor_state.save(stats.state_path(_state_dir(cfg)))
 
     emit(FORMATTERS[args.format](sensors), args.output)
-    return EXIT_ALERT if sensors.get('alerts') else EXIT_OK
+    # An active alert outranks a failed payload read: the E1h bit is a separate
+    # register and is the safety-critical signal, so it must reach exit 2 even
+    # when the sensor payload is missing.
+    if sensors.get('alerts'):
+        if not complete:
+            logger.error('Warning: no sensor payload in this sample (0xE0 read failed).')
+        return EXIT_ALERT
+    if not complete:
+        logger.error('Error: the PSU did not return its sensor payload (0xE0 read failed).')
+        return EXIT_ERROR
+    return EXIT_OK
 
 
 def run_watch(psu, args, cfg, monitor_state, engine):
@@ -698,6 +725,11 @@ def run_watch(psu, args, cfg, monitor_state, engine):
             if 'error' in sensors:
                 logger.error(f'Error: {sensors["error"]}')
                 return EXIT_ERROR
+            if not has_readings(sensors):
+                # A stream survives one missed frame; the next one may land.
+                logger.error('Warning: no sensor payload in this frame (0xE0 read failed).')
+                time.sleep(interval)
+                continue
             sensors.update(read_fan_fields(psu))
             if not args.no_alerts:
                 _, active, have_data = collect_alerts(psu, engine, sensors)

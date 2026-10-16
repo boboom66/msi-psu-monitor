@@ -456,3 +456,44 @@ def test_unknown_variant_does_not_read_fan_duty():
     )
     assert psu.variant is None
     assert psu.read_fan_duty() is None
+
+
+def _dead_device():
+    """A real HIDDevice whose fd points at a just-unplugged PSU."""
+    from msi_psu_monitor.protocol import HIDDevice
+
+    device = HIDDevice('dead:0')
+    device.fd = 0  # as if open() had succeeded before the cable came out
+    return device
+
+
+def test_send_command_maps_a_device_error_to_none(monkeypatch):
+    """Unplugging raises OSError out of os.write/select; that is a NAK, not a crash."""
+    import os
+
+    def dead_read(fd, size):
+        raise OSError(19, 'No such device')
+
+    def dead_write(fd, data):
+        raise OSError(19, 'No such device')
+
+    def dead_select(rlist, wlist, xlist, timeout):
+        raise OSError(9, 'Bad file descriptor')
+
+    monkeypatch.setattr(os, 'read', dead_read)
+    monkeypatch.setattr(os, 'write', dead_write)
+    monkeypatch.setattr('select.select', dead_select)
+
+    device = _dead_device()
+    assert device.send_command([0x51, 0xE0]) is None
+    assert device.read_all() is None
+    assert device.read_register(0xE1) is None
+    assert device.write_command([0x41, 0x01, 0x00, 0x40]) is False
+
+
+def test_send_command_without_an_open_fd_is_a_failure():
+    """A closed handle must report a failure instead of raising TypeError."""
+    device = _dead_device()
+    device.fd = None
+    assert device.send_command([0x51, 0xE0]) is None
+    assert device.write_command([0x41, 0x01, 0x00, 0x40]) is False

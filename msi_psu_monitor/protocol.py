@@ -251,6 +251,11 @@ class HIDDevice:
     def send_command(self, data, timeout_ms=CMD_TIMEOUT_MS):
         """Send a command and return the response data (excluding echo header).
 
+        A device error is a failure, never an exception: an unplugged PSU makes
+        ``os.write``/``os.read`` raise ``OSError`` (ENODEV), and a vanished fd
+        makes ``select`` raise, so all of it maps to ``None`` like a NAK. The
+        daemon's rescan logic counts those, and a crash loop would never reach it.
+
         Args:
             data: List of bytes to send
             timeout_ms: Maximum time to wait for response in milliseconds
@@ -258,29 +263,39 @@ class HIDDevice:
         Returns:
             Response bytes starting after the 2-byte echo header, or None on failure
         """
-        # Drain any pending data
+        if self.fd is None:
+            return None
+
+        # Drain any pending data (BlockingIOError is an OSError subclass).
         try:
             while os.read(self.fd, CMD_BUFFER_SIZE):
                 pass
-        except (BlockingIOError, OSError):
+        except OSError:
             pass
 
         # Send command
         buf = bytearray(CMD_BUFFER_SIZE)
         buf[: len(data)] = data
-        os.write(self.fd, bytes(buf))
+        try:
+            os.write(self.fd, bytes(buf))
+        except OSError:
+            return None
 
         # Wait for response
         deadline = time.monotonic() + timeout_ms / 1000.0
         while time.monotonic() < deadline:
-            r, _, _ = select.select([self.fd], [], [], 0.01)
-            if r:
+            try:
+                ready, _, _ = select.select([self.fd], [], [], 0.01)
+                if not ready:
+                    continue
                 resp = os.read(self.fd, CMD_BUFFER_SIZE)
-                if resp and len(resp) >= 2:
-                    # Check for NAK
-                    if len(resp) >= 3 and resp[2] == PSU_NAK:
-                        return None
-                    return resp[2:]  # Skip 2-byte echo header
+            except (OSError, ValueError):
+                return None
+            if resp and len(resp) >= 2:
+                # Check for NAK
+                if len(resp) >= 3 and resp[2] == PSU_NAK:
+                    return None
+                return resp[2:]  # Skip 2-byte echo header
         return None
 
     def read_register(self, reg):

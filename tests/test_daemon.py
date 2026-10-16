@@ -293,3 +293,51 @@ def test_a_failing_fan_write_does_not_break_the_open(tmp_path):
 def test_restore_fan_profile_is_a_noop_before_the_psu_is_open(tmp_path):
     daemon = make_daemon(tmp_path, FanPSU(sensors=clean_sensors()), fan_mode='customized')
     assert daemon.restore_fan_profile() is False
+
+
+class UnpluggedPSU:
+    """A PSU whose cable was pulled: every read raises ENODEV."""
+
+    def __init__(self, sensors=None):
+        self.opened = []
+        self.closed = False
+
+    def open(self):
+        self.opened.append(True)
+        return self
+
+    def close(self):
+        self.closed = True
+
+    def init(self):
+        return 'MPG Ai1600TS'
+
+    def get_sensors(self):
+        raise OSError(19, 'No such device')
+
+    def read_alert_status(self):
+        return None
+
+    def read_fan_state(self):
+        return {'mode': None, 'duty': None, 'zero_fan': None}
+
+
+def test_an_unplugged_psu_counts_towards_the_rescan(tmp_path, caplog):
+    """ENODEV must be a counted failure; a crash loop never reaches the rescan."""
+    daemon = make_daemon(tmp_path, UnpluggedPSU())
+    with caplog.at_level(logging.WARNING, logger='msi_psu.daemon'):
+        for expected in range(1, RESCAN_AFTER_FAILURES + 1):
+            assert daemon.tick() is True
+            assert daemon.failures == expected % RESCAN_AFTER_FAILURES
+    assert any('No such device' in record.message for record in caplog.records)
+    assert any('rescanning' in record.message for record in caplog.records)
+
+
+def test_a_psu_that_answers_its_ident_only_is_a_read_failure(tmp_path, caplog):
+    """No payload at all is not a healthy sample with an empty chart."""
+    daemon = make_daemon(tmp_path, StubPSU({'product': 'MPG Ai1600TS'}))
+    with caplog.at_level(logging.ERROR, logger='msi_psu.daemon'):
+        assert daemon.sample() is None
+    assert daemon.failures == 1
+    assert any('0xE0 read failed' in record.message for record in caplog.records)
+    assert daemon.samples == 0

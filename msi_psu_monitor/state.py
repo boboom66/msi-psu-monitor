@@ -245,10 +245,17 @@ def append_history(state_dir, sensors, ts=None):
     path = history_path(state_dir, date.fromtimestamp(ts))
     path.parent.mkdir(parents=True, exist_ok=True)
     row = _history_row(sensors, ts)
-    is_new = not path.exists()
+    # Not "does the file exist" but "does it already have a header": a file left
+    # empty by a crash between open() and the header write would otherwise be
+    # read back by DictReader with its first data row as the column names, which
+    # silently misaligns every export for that day.
+    try:
+        has_header = path.stat().st_size > 0
+    except OSError:
+        has_header = False
     with path.open('a', newline='') as handle:
         writer = csv.writer(handle)
-        if is_new:
+        if not has_header:
             writer.writerow(HISTORY_COLUMNS)
         writer.writerow(row)
     return path

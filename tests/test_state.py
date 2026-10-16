@@ -227,3 +227,25 @@ def test_build_export_reads_older_history_without_rail_columns(tmp_path):
     )
     _, rows = stats.build_export(tmp_path, since_ts=None, columns=['cpu', 'gpu'])
     assert rows[0][1:3] == ['N/A', 'N/A']
+
+
+def test_append_history_repairs_a_headerless_file(tmp_path):
+    """A day file that exists but is empty must get its header, not lose its columns.
+
+    Without this, a crash between open() and the header write leaves a file whose
+    first data row DictReader reads as column names -- every export for that day
+    silently shifts by one column.
+    """
+    path = stats.history_path(tmp_path, date.fromtimestamp(1700000000.0))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
+
+    stats.append_history(tmp_path, sensors(), ts=1700000000.0)
+    lines = path.read_text().splitlines()
+    assert lines[0] == ','.join(stats.HISTORY_COLUMNS)
+    assert len(lines) == 2
+
+    header, rows = stats.build_export(tmp_path, None, ['12v', 'cpu'])
+    assert header == ['time', '12v', 'cpu']
+    assert rows[0][1] == '12.100'
+    assert rows[0][2] == stats.NOT_AVAILABLE

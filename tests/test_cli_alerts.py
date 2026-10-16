@@ -14,6 +14,16 @@ class StubHID:
         pass
 
 
+# A real sample always carries decoded sensor values; only the ident-only dict of
+# a failed 0xE0 read has none, which the CLI reports as an error.
+READINGS = {
+    'vout_12v': (12.1, 'V'),
+    'iout_12v_total': (40.0, 'A'),
+    'power_total': (600.0, 'W'),
+    'efficiency': (94.0, '%'),
+}
+
+
 class StubPSU:
     def __init__(self, sensors, alerts=None, blackbox=None):
         self._sensors = sensors
@@ -53,7 +63,7 @@ def _run_main(monkeypatch, capsys, stub, argv):
 
 
 def test_once_clean_exits_zero(monkeypatch, capsys):
-    stub = StubPSU({'product': 'MPG Ai1600TS'}, alerts={'ocp_12v': False})
+    stub = StubPSU({'product': 'MPG Ai1600TS', **READINGS}, alerts={'ocp_12v': False})
     code, out = _run_main(monkeypatch, capsys, stub, ['prog', '--once'])
     assert code == EXIT_OK
     assert 'MPG Ai1600TS' in out.out
@@ -61,7 +71,7 @@ def test_once_clean_exits_zero(monkeypatch, capsys):
 
 
 def test_once_alert_exits_two_and_prints_line(monkeypatch, capsys):
-    stub = StubPSU({'product': 'MPG Ai1600TS'}, alerts={'ocp_pin3': True})
+    stub = StubPSU({'product': 'MPG Ai1600TS', **READINGS}, alerts={'ocp_pin3': True})
     code, out = _run_main(monkeypatch, capsys, stub, ['prog', '--once'])
     assert code == EXIT_ALERT
     assert 'ALERT [warning] ocp_pin3' in out.err
@@ -112,3 +122,21 @@ def test_prometheus_carries_alert_metric():
     out = format_prometheus({'product': 'P', 'alerts': ['opp', 'fan']})
     assert 'msi_psu_alert{alert="opp"} 1' in out
     assert 'msi_psu_alert{alert="fan"} 1' in out
+
+
+def test_once_without_a_sensor_payload_is_an_error(monkeypatch, capsys):
+    """An ident-only answer is a failed read, not a healthy PSU with no data."""
+    stub = StubPSU({'product': 'MPG Ai1600TS'}, alerts={'ocp_12v': False})
+    code, out = _run_main(monkeypatch, capsys, stub, ['prog', '--once'])
+    assert code == EXIT_ERROR
+    assert '0xE0 read failed' in out.err
+    assert 'MPG Ai1600TS' in out.out  # the ident we did get is still shown
+
+
+def test_once_reports_an_alert_even_without_a_sensor_payload(monkeypatch, capsys):
+    """E1h is a separate register: a missing payload must not swallow the alarm."""
+    stub = StubPSU({'product': 'MPG Ai1600TS'}, alerts={'ocp_pin3': True})
+    code, out = _run_main(monkeypatch, capsys, stub, ['prog', '--once'])
+    assert code == EXIT_ALERT
+    assert 'ALERT [warning] ocp_pin3' in out.err
+    assert '0xE0 read failed' in out.err

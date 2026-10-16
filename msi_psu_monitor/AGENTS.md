@@ -46,6 +46,17 @@ runtime imports.
 
 - **Exit codes**: `EXIT_OK=0`, `EXIT_ERROR=1`, `EXIT_ALERT=2`. Alerts print
   `ALERT [severity] name: description` on **stderr**; stdout stays machine-parseable.
+- **A device error is a failure, never an exception**: every ``os.read``/``os.write``/
+  ``select`` in ``HIDDevice.send_command`` maps ``OSError`` (ENODEV on unplug, EBADF on a
+  closed fd) to ``None``, exactly like a NAK. The daemon rescan counts those; a traceback
+  would kill the loop before it ever reaches five.
+- **Ident-only is not a sample**: ``get_sensors()`` returns ident+uptime when the 0xE0
+  payload never arrived, which is a failed read (``monitor.has_readings()``). One-shot
+  exits 1, the daemon counts a failure — but an active E1h alert still exits 2, because
+  alerting outranks the payload read.
+- **A history file is identified by its header, not its existence**: ``append_history()``
+  writes the header whenever the file is missing *or empty*, so a crash between open and
+  the header cannot leave a day file whose first data row DictReader reads as columns.
 - **Every write is atomic**: `path.with_name(name + '.tmp')` + `os.replace()` for
   `state.json` and the prometheus textfile. Never write the target in place.
 - **Energy integral is frozen**: `wh += watts * dt / 3600`, and gaps longer than

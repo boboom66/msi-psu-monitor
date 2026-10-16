@@ -166,16 +166,16 @@ class MonitorDaemon:
         if psu is None:
             return None
 
-        sensors = psu.get_sensors()
+        try:
+            sensors = psu.get_sensors()
+        except OSError as exc:
+            # An unplugged PSU raises ENODEV out of a read; that is a failure to
+            # count towards the rescan, never a reason to die.
+            return self._read_failed(str(exc))
         if 'error' in sensors:
-            self.failures += 1
-            logger.error(
-                f'Read failed ({self.failures}/{RESCAN_AFTER_FAILURES}): {sensors["error"]}'
-            )
-            if self.failures >= RESCAN_AFTER_FAILURES:
-                self.failures = 0
-                self._rediscover()
-            return None
+            return self._read_failed(str(sensors['error']))
+        if not monitor.has_readings(sensors):
+            return self._read_failed('no sensor payload (0xE0 read failed)')
         self.failures = 0
 
         sensors.update(monitor.read_fan_fields(psu))
@@ -189,6 +189,15 @@ class MonitorDaemon:
         monitor.apply_stats(sensors, self.state)
         self.samples += 1
         return sensors
+
+    def _read_failed(self, reason):
+        """Count one failed read and rescan after ``RESCAN_AFTER_FAILURES``."""
+        self.failures += 1
+        logger.error(f'Read failed ({self.failures}/{RESCAN_AFTER_FAILURES}): {reason}')
+        if self.failures >= RESCAN_AFTER_FAILURES:
+            self.failures = 0
+            self._rediscover()
+        return None
 
     def write_prometheus(self, sensors, output=None):
         """Atomically replace the textfile collector output."""
