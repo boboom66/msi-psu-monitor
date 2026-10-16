@@ -274,7 +274,7 @@
 ```
 uv run --group dev pytest -q                     → 454 passed
 uv run --group dev ruff check .                  → All checks passed
-uv run --group dev ruff format --check .         → 32 files already formatted
+uv run --group dev ruff format --check .         → 34 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
 bash scripts/build_deb.sh                        → dist/msi-psu-monitor_1.0.0_all.deb
 bash scripts/smoke.sh                            → 56 项全过（三种格式/告警按机型/黑盒/OCP/风扇/daemon/dashboard/.deb 内容与权限）
@@ -296,6 +296,85 @@ bash scripts/smoke.sh                            → 56 项全过（三种格式
 运行期零第三方依赖（`pyproject.toml` 的 `dependencies = []`），仅 dev 组含 pytest/ruff/mypy。
 
 ## 待办
+
+### turn7 复核剩余 11 条（下次从这里继续）
+
+已复跑成真、尚未动手（下面第 1/2/3 条在真进程上实测过：`/api/state` 无 `last_ts`、21 天前的
+数据照 200 回；`chmod 000 state.json` 后 `/api/state` 回 **200 + 全 0** 而同目录 `/api/history`
+有一条真数据，只有服务端日志知道原因；`?from=` 与 `?columns=` 空值分别回 200。第 4/5 条是
+页内 JS/CSS，属读码结论，本机无浏览器无法实测）。每条都带 file:line / 触发输入 / 错误后果，
+report 原件在
+`/tmp/review-turn7-report.tests-truth.md` 与 `/tmp/review-turn7-report.dashboard-http.md`
+（`/tmp` 会被清，复跑脚本 `/tmp/review-turn7.js` 也要重写；下面的描述自足）。
+
+**dashboard-http 车道（2 个 P1 + 3 个 P2）**
+
+1. **[P1] 停掉的 daemon / 一周前的数据在页面上仍像实时的**：`_state_payload()`
+   (`dashboard.py:304-315`) 只回 `product/serial/count/power_avg/efficiency_avg/
+   total_energy_kwh/daily`，**丢掉了 `MonitorState.last_ts`**（`state.py:263` 写盘、
+   `state.py:278` 读回），页内 `render()`(`dashboard.py:230-236`) 也只在 **HTTP 失败**
+   时才说 `Data may be stale`——而已落盘的旧数据是 HTTP 200，永远走成功分支。
+   修法：`_state_payload` 加 `last_ts`，页面渲染「last sample … ago」并按 age 标注陈旧
+   （常量如 `STALE_AFTER_S = 300`，注释说明与 daemon 30 s prom 写盘的关系）。
+2. **[P1] 目录可读但 `state.json` 不可读/不存在/坏 JSON 时仍 200 + 全 0**：
+   `_state_dir_problem()`(`dashboard.py:280-293`) 只查目录；`MonitorState.load()` 把每种
+   单文件失败都吞成空状态（`state.py:301-324`），于是 `/api/state` 回 `count: 0,
+   total_energy_kwh: 0.0, daily: {}`，而同目录 `/api/history` 有真数据——页面同时显示
+   「samples 0 · avg 0.00 W · total 0.000 kWh」和一条满曲线。这正好违背该函数自己的
+   docstring。修法：`state.py` 加 `StateError`，`load(..., strict=True)` 在「文件存在但
+   不可用」时抛（CLI/daemon 仍走宽容默认），dashboard 捕获后 503 + 原因；另在
+   `_state_dir_problem` 里补 state 文件本身的 `os.access` 检查。
+3. **[P2] 空查询值被静默换成默认**：`_query()` 用 `parse_qs(...)`（`keep_blank_values=
+   False`），所以 `?from=` 变 2h、`?columns=` 变全列、`/api/export?columns=` 静默导出全部
+   9 列；而同一输入在 CLI 是硬错误（`state.py:594-595` 的 `parse_columns('')`/`parse_from('')`
+   抛错 + `docs/verify.md:315` 记录 exit 1）。修法：`keep_blank_values=True`，让既有的
+   `except ValueError`(`dashboard.py:388-390`) 回 400；补 `?from=`/`?columns=` 空值测试。
+4. **[P2] 曲线用行号当 x 轴**：`series()`(`dashboard.py:114-118`) 取 `i`（数组下标）而非
+   `r.time`；`draw()` 的 `span = rows.length-1`(`dashboard.py:133-134`) 按条数等距铺开，
+   也没有任何 x 轴标签。后果：12:00 与 18:00 两点画得和相邻两分钟一样近，**6 小时停机
+   看起来像连续监控**，并且最新的点总被钉在最右边，强化 finding 1 的「实时」错觉。
+   修法：`series()` 携带 `Date.parse(r.time)` 的 epoch，按真实时间跨度映射 x（时间不可用
+   时回退行号）。
+5. **[P2] 周图按 150 px 画、却被 CSS 压到 120 px**：`canvas { height: 120px }`
+   (`dashboard.py:61`) 覆盖了 `<canvas id="weekly" height="150">`(`dashboard.py:79`)，
+   而 `drawWeekly` 内部按 `h = 150` 算(`dashboard.py:189`)，浏览器把 150 px 后备缓冲塞进
+   120 px 盒子 → 柱与标签纵向压 0.8×。纯观感（PNG 导出取后备缓冲，不受影响）。修法：把
+   规则收窄成 `#grid canvas { height: 120px }`，或在 `drawWeekly` 里读 `canvas.clientHeight`。
+
+**tests-truth 车道（1 个 P1 + 5 个 P2）**
+
+6. **[P1] 两条叫「atomic」的测试从没测过原子性**：`tests/test_state.py:88-92` 只断言
+   目标文件存在、`.tmp` 事后不在；`tests/test_daemon.py:322` 同形状。把
+   `state.atomic_write_text`(`state.py:133-139`) 换成原地 `path.write_text()` 后 454 条
+   单测 + 56 项冒烟**全绿**，而 `state.py:136-138`、`msi_psu_monitor/AGENTS.md:88-89`
+   把这当成规范；读侧 `state.py:286-287` 会把截断的 state.json 当空状态（= 全 0，
+   与「daemon 从没跑过」无法区分）。修法：新增「中断写」测试——monkeypatch `os.replace`
+   抛 `OSError`，断言目标仍是旧字节、没被截断、只留下临时文件；daemon 的 prometheus
+   写盘同样补一条。
+7. **[P2] `docs/verify.md:45` 与 `:58` 把覆盖算给了错的模块**：`tests/test_protocol.py`
+   8 条全是 `lin11_to_int`（帧/NAK 真覆盖在 `tests/test_psu_sensors.py:598-640,656-665,
+   693-699`），`tests/test_schema.py` 只 import `format_json`（prometheus 契约在
+   `tests/test_monitor_format.py:68-84` 与 `tests/test_cli_features.py:280-284,374-377`）。
+   `tests/test_docs_consistency.py:62-79` 只校验反引号里的**文件名存在**，表里写错内容它
+   看不见。修法：改表 + 让每行至少点名一个真测试函数并与 `pytest --collect-only` 校验。
+8. **[P2] `DEV_PROGRESS.md:291` 的「414 通过」不在计数护栏里**：`TEST_COUNT_RE`
+   (`test_docs_consistency.py:22-26`) 只认 `passed|个单测|个單測|tests?`，不认「通过」，
+   所以那句裸 3.12 环境的计数（现在应是 454）无人校验。修法：正则补 `通过|通過`，并用
+   裸 3.12 环境实跑一次把数字对齐（当时 414 是真测值，之后加了 40 条测试没人回头改）。
+9. **[P2] 零依赖探针漏了 `__main__.py`**：`tests/test_stdlib_only.py:20-28` 的模块元组是
+   写死的（`protocol/alerts/config/state/monitor/daemon/dashboard/demo`），而
+   `msi_psu_monitor/AGENTS.md:116-117` 与 `DEV_PROGRESS.md:288` 都说「导入**全部模块**」。
+   给 `__main__.py`（console-script 入口）加个第三方 import，两条护栏全绿。修法：元组加
+   `'__main__'`，并加「元组必须覆盖 `msi_psu_monitor/*.py`」的完整性断言。
+10. **[P2] `tests/test_pid_consistency.py:65-66` 比的是 `bulk_size` 而不是真正的门限
+    `payload_size`**：README 那列写 62（TS 帧长），而 `_parse_bulk` 实际门控的是
+    `VARIANTS[...]['payload_size']`（TS = 44）；`_parse_bulk` 这个函数在仓库里根本不存在
+    （只在 docstring 里）。修法：docstring 去掉幽灵函数名，断言改成 README 的「62 (44
+    data)」两个数分别对 `bulk_size`/`payload_size`。
+11. **[P2] `msi_psu_monitor/AGENTS.md:132-138` 还留着已作废的「绝不要全仓跑 ruff
+    format」**：上一轮改了根 `AGENTS.md:127-129` 与 `docs/verify.md`，漏了这份（而它是
+    `msi_psu_monitor/` 下自动加载的 agent 文件，会指示 agent 去撤销一个绿灯 CI 检查）。
+    修法：删掉该段，并让 `test_docs_consistency.py` 断言该措辞在任何文档里都不出现。
 
 ### 外部阻塞
 
@@ -442,6 +521,43 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
   也引用 10 项，而 `verify.md` §8 实际有 11 条（4b 与 Ai1600T 那条是后加的，没回头同步总数）。
   现全部改为 11 项，并加文档测试 `test_the_quoted_real_hardware_check_count_matches_verify_md`
   把「§8 里的编号条目数 == 文档里引用的总数 == DEV_PROGRESS 列表条数」变成机器护栏。
+
+### 只读复核（turn7）tests-truth 车道：真机发现路径根本没被测过（本轮，P0）
+
+第七轮只读复核开了两条新车道：`tests-truth`（测试自己是不是真的会失败）与
+`dashboard-http`（HTTP 面与页内 JS）。13 条 finding 全部先复跑成真再动手，本轮修掉
+2 条，其余 11 条列在 `## 待办` → 「turn7 复核剩余 11 条」。
+
+- **`detect_devices()` 返回 `/dev/device`（`protocol.py:216-217`）**：节点名取的是
+  uevent 的 `dirname` 再 `basename`，而 `/sys/class/hidraw/hidraw5/device/uevent` 的
+  dirname 是 `.../hidraw5/device`，于是拿到 `device`。返回值非空，调用方以为「发现成功」：
+  `--once`/`--watch`/daemon 拿到 `/dev/device` 去 `os.open` → FileNotFoundError → 退出 1；
+  `--serial` 走 `resolve_device()` 把它算进 blocked，打印「Run as root, or install the
+  udev rule」——把权限问题指给一个不存在的设备。上游基线（`807b681`）写的是
+  `uevent.split('/')[4]`，是本仓库重写协议层时引入的回归。
+  **没有任何自动化路径能发现它**：`tests/test_cli_features.py:86,229,240,395` 与
+  `tests/test_cli_alerts.py:56` 全都 monkeypatch 掉 `detect_device`/`detect_devices`，
+  `scripts/smoke.sh` 全局 `MSI_PSU_DEMO=1`（demo 在 sysfs 之前就返回），而
+  `docs/requirements-traceability.md` 那一行还写着「测试：`test_psu_sensors.py`、
+  `test_demo.py`」——两个文件里都没有发现逻辑的测试。
+  现新增 `tests/test_protocol_discovery.py`（16 条）：把扫描路径提成
+  `protocol.SYSFS_HIDRAW_GLOB`，测试用**假 sysfs 树**跑真解析器（不 stub），覆盖 5 个
+  PID、错误厂商/未知型号/畸形 `HID_ID`/空值/uevent 不可读、排序、去重，两条端到端
+  只 stub `HIDDevice`/`MSIPSU` 走 `monitor.resolve_device()`（真路径 + blocked 语义），
+  一条钉「扫描模式的两级父目录就是节点名」防漂移，一条证明 demo 模式不过 sysfs。
+  把修复改回 `/dev/device`，16 条里 12 条失败（已实测）。
+
+### 只读复核（turn7）tests-truth 车道：跑一次单测会写用户真实的 state.json（本轮，P1）
+
+- `tests/test_cli_alerts.py` 是唯一没有隔离 state 目录的 CLI 测试模块（`test_cli_features.py`
+  的 autouse fixture 只作用于自己那个文件），却把 `monitor.main()` 跑到最后：`run_once()`
+  会 `prune(days=cfg['retention_days'])` + `save()`，用的是**默认**目录与**默认** 30 天保留。
+  实测跑完该模块，`~/.local/state/msi-psu-monitor/state.json` 里出现了
+  `{"product": "MPG Ai1600TS", "serial": "", "count": 2, ...}`——用户配了 60 天也照裁 30 天。
+  测试看不见这次写入，所以一直绿。现把 autouse 的 `isolated_state` 提到
+  `tests/conftest.py`（对全套生效，新模块不可能忘记），并加一条不靠同义反复的护栏：
+  先删掉 override 证明默认目录确实不同，再桩住 `MonitorState.save` 记录本次运行写过的
+  每个路径，要求全部落在 tmp 里。
 
 ### 真机验收（`docs/verify.md` §8，共 11 项，均待样机）
 
