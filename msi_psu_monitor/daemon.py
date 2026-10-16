@@ -195,13 +195,13 @@ class MonitorDaemon:
         self.failures = 0
 
         sensors.update(monitor.read_fan_fields(psu))
-        active, have_data = [], False
+        active, have_e1h = [], False
         try:
-            _, active, have_data = monitor.collect_alerts(psu, self.engine, sensors)
+            _, active, have_e1h = monitor.collect_alerts(psu, self.engine, sensors)
         except Exception as exc:  # pragma: no cover - defensive against odd devices
             logger.debug(f'Alert poll failed: {exc}')
         sensors['alerts'] = active
-        sensors['status'] = monitor.status_from(active, have_data)
+        sensors['status'] = monitor.status_from(active, have_e1h)
         monitor.apply_stats(sensors, self.state)
         self.samples += 1
         return sensors

@@ -164,6 +164,15 @@
     也没有一行提示——需求里 `-O` 的定义是「存成文件，不打屏」。现按需求实现：追加到文件
     （行缓冲，`tail -f` 能实时看到）、stdout 保持干净、启动时在 stderr 说明一句，
     路径写不了就 exit 1。smoke 增两条检查（文件有内容 / stdout 为空）。
+- **告警状态不再由半个数据源下结论（本轮，P1）**：`collect_alerts()` 原来把「E1h 位图
+  没应答」也算成「有数据」——只要 12+4 pin 的软件镜像有读数（**哪怕全是 False，dict 也
+  是真值**），`12V-2x6 Status` 就打 `Normal`。可镜像只看得见 OCP 针脚与针差，看不见
+  E1h 独有的 `opp`/`otp`/`fan`，而 `fan`（风扇堵转、约 10 s 后关机）正是唯一的 critical
+  位。于是 E1h 读失败时：`--once` 打 `Normal` 且 exit 0、daemon 导出
+  `status="Normal"`，全程无声。现改判「E1h 位图是否应答」（`have_e1h`）：只有镜像作答
+  时状态是 `Unknown`（镜像看到的告警照常上报，exit 2 也照常），并且**读失败不会清掉
+  已经 firing 的告警**（engine 只覆盖传入的键，这条不变量现在有测试锁住）。
+
 - **看板不再把「读不到」装成「没有数据」（本轮）**：
   - `/api/*` 在 state 目录读不了时回 **503 + 原因**（页面本身仍 200，页内 JS 把原因
     显示成 `Data may be stale (HTTP 503: … is not readable by this user)`）。修前它与
@@ -246,7 +255,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 400 passed
+uv run --group dev pytest -q                     → 404 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 32 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues

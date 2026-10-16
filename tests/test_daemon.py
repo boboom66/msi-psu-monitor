@@ -150,6 +150,39 @@ def test_sample_reports_unknown_status_when_no_alert_source(tmp_path):
     assert daemon.sample()['status'] == 'Unknown'
 
 
+def test_a_silent_e1h_read_is_not_reported_as_normal(tmp_path):
+    """The pin mirror cannot see the E1h-only bits -- ``fan`` is a critical one.
+
+    ``opp``/``otp``/``fan`` exist only in the E1h bitmap, so when that read is
+    NAKed or times out, the mirror's per-pin readings are not enough to declare
+    the PSU healthy: the honest answer is Unknown.
+    """
+    daemon = make_daemon(tmp_path, StubPSU(clean_sensors(), alerts=None))
+    assert daemon.sample()['status'] == 'Unknown'
+
+
+def test_a_silent_e1h_read_still_reports_the_mirror_alerts(tmp_path):
+    """Unknown is not "say nothing": a pin the mirror does see over the limit counts."""
+    sensors = clean_sensors()
+    sensors['iout_pins'] = ([20.0] + [8.0] * 11, 'A')
+    daemon = make_daemon(tmp_path, StubPSU(sensors, alerts=None))
+    sample = daemon.sample()
+    assert sample['status'] == 'ocp_pin1, pin_imbalance'
+    assert sample['alerts'] == ['ocp_pin1', 'pin_imbalance']
+
+
+def test_a_silent_e1h_read_does_not_clear_a_fired_alert(tmp_path):
+    """A failed read leaves names out of the poll; the engine keeps its state."""
+    sensors = clean_sensors()
+    stub = StubPSU(sensors, alerts={'fan': True})
+    daemon = make_daemon(tmp_path, stub)
+    assert daemon.sample()['status'] == 'fan'
+    stub._alerts = None  # the E1h read now fails: it must not look recovered
+    sample = daemon.sample()
+    assert sample['status'] == 'fan'
+    assert sample['alerts'] == ['fan']
+
+
 def test_tick_cadence_prom_30s_history_60s(tmp_path):
     clock = Clock()
     daemon = make_daemon(

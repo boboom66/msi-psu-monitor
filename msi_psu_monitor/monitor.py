@@ -596,37 +596,48 @@ def read_fan_fields(psu):
 def collect_alerts(psu, engine, sensors):
     """Merge E1h hardware bits with the software per-pin mirror.
 
-    Returns ``(fired, active_names, have_data)``. A PSU that answers neither
-    source yields ``have_data=False`` so callers never read that as "all OK".
+    Returns ``(fired, active_names, have_e1h)``. It is True only when
+    the PSU answered the E1h status read. The software mirror is a second,
+    independent measurement, but it only sees the OCP pins and their imbalance:
+    it cannot see the E1h-only bits (``opp``, ``otp``, and ``fan`` -- the one
+    critical bit, "shutdown imminent"), so a mirror-only poll must not be
+    rendered as "Normal". A PSU that answers neither source is not complete
+    either, so callers never read a silent read failure as "all OK".
+
+    Names the caller leaves out keep the state the engine already has: a failed
+    E1h read never clears an alert that is already firing.
     """
     active = {}
-    have_data = False
+    have_e1h = False
     hardware = psu.read_alert_status()
     if hardware:
         active.update({name: bool(value) for name, value in hardware.items()})
-        have_data = True
+        have_e1h = True
 
     pins = sensors.get('iout_pins')
     software = evaluate_pin_alerts(pins[0] if isinstance(pins, tuple) else pins)
     if software:
-        have_data = True
         for name, value in software.items():
             active[name] = active.get(name, False) or value
 
-    if not have_data:
+    if not active and not have_e1h:
         return [], [], False
 
     fired = engine.update(active)
     for alert in fired:
         logger.warning(format_alert_line(alert))
-    return fired, engine.active_alerts, True
+    return fired, engine.active_alerts, have_e1h
 
 
-def status_from(active_names, have_data):
-    """Render the ``12V-2x6 Status`` label."""
+def status_from(active_names, have_e1h):
+    """Render the ``12V-2x6 Status`` label.
+
+    ``have_e1h`` says whether the E1h bitmap answered; without it the honest
+    answer is ``Unknown`` even when the pin mirror found nothing wrong.
+    """
     if active_names:
         return ', '.join(active_names)
-    return STATUS_NORMAL if have_data else STATUS_UNKNOWN
+    return STATUS_NORMAL if have_e1h else STATUS_UNKNOWN
 
 
 # Any of these proves the bulk payload was decoded; ident-only keys (vendor,
@@ -754,9 +765,9 @@ def run_once(psu, args, cfg, monitor_state, engine):
 
     sensors.update(read_fan_fields(psu))
     if not args.no_alerts:
-        _, active, have_data = collect_alerts(psu, engine, sensors)
+        _, active, have_e1h = collect_alerts(psu, engine, sensors)
         sensors['alerts'] = active
-        sensors['status'] = status_from(active, have_data)
+        sensors['status'] = status_from(active, have_e1h)
     apply_stats(sensors, monitor_state)
     if monitor_state is not None:
         monitor_state.prune()
@@ -817,9 +828,9 @@ def run_watch(psu, args, cfg, monitor_state, engine):
                 continue
             sensors.update(read_fan_fields(psu))
             if not args.no_alerts:
-                _, active, have_data = collect_alerts(psu, engine, sensors)
+                _, active, have_e1h = collect_alerts(psu, engine, sensors)
                 sensors['alerts'] = active
-                sensors['status'] = status_from(active, have_data)
+                sensors['status'] = status_from(active, have_e1h)
             apply_stats(sensors, monitor_state)
 
             now = time.time()

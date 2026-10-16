@@ -61,8 +61,10 @@ runtime imports.
   `state.json` and the prometheus textfile. Never write the target in place.
 - **Energy integral is frozen**: `wh += watts * dt / 3600`, and gaps longer than
   `MAX_SAMPLE_GAP_S` (300 s) advance the clock without integrating.
-- **`collect_alerts()` returns `have_data`**; a PSU that answers neither E1h nor the
-  pin mirror must render as `Unknown`, never as `Normal`.
+- **`collect_alerts()` returns `have_e1h`** ("did the E1h bitmap answer?"): the pin
+  mirror only sees the OCP pins and their imbalance, not `opp`/`otp`/`fan`, so a poll
+  without the bitmap renders as `Unknown`, never as `Normal` — and it never clears an
+  alert the engine already fired.
 - **The E1h bit order is per model** (`ALERT_INDEXES`, mirroring the three
   `Alert_Index_*` arrays at `CPSU.cs:1046`): byte 0 is 12V OVP on a MEG and 12V OCP on
   a MPG TS, and the Ai1600T sends 13 bytes, not 18. Never index that bitmap with a
@@ -110,7 +112,7 @@ runtime imports.
 ## Verification (no hardware required)
 
 ```bash
-uv run --group dev pytest -q              # 400 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
+uv run --group dev pytest -q              # 404 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
 uv run --group dev ruff check .           # must be clean
 uv run --group dev mypy msi_psu_monitor/  # must be clean
 ```

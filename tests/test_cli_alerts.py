@@ -142,6 +142,25 @@ def test_once_reports_an_alert_even_without_a_sensor_payload(monkeypatch, capsys
     assert '0xE0 read failed' in out.err
 
 
+def test_once_says_unknown_when_only_the_pin_mirror_answered(monkeypatch, capsys):
+    """`Normal` is a claim about every alert bit, and the mirror cannot see them all.
+
+    With the E1h read NAKed, only the software pin mirror has data; ``opp``,
+    ``otp`` and the critical ``fan`` bit are invisible, so the status must not
+    read as an all-clear. The exit code stays 0: nothing fired.
+    """
+    sensors = {
+        'product': 'MPG Ai1600TS',
+        'vout_12v': (12.1, 'V'),
+        'power_total': (600.0, 'W'),
+        'iout_pins': ([8.0] * 12, 'A'),
+    }
+    stub = StubPSU(sensors, alerts=None)
+    code, out = _run_main(monkeypatch, capsys, stub, ['prog', '--once'])
+    assert code == EXIT_OK
+    assert '12V-2x6 Status: Unknown' in out.out
+
+
 def test_once_reports_a_wrong_length_payload_with_the_actual_numbers(monkeypatch, capsys):
     """A mis-sized device should name the mismatch, not claim the read failed."""
     stub = StubPSU(
