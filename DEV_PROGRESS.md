@@ -124,7 +124,15 @@ bash scripts/smoke.sh                            → 39 项全过（三种格式
 
 - **Q6 EPS 数量**：等 MSI 回函；未回前按 2×EPS 处理。
 - **Q10 Pin6 / AVG 数值**：待真机复核。
-- **内核模块**：`kernel/msi-psu-ai1600ts.patch` 需 Proxmox 7.0 内核头文件，仓库内无法构建；用户态工具是受支持路径。
+- **内核模块**：`kernel/msi-psu-ai1600ts.patch` **是草稿，不可构建**（本轮核实）。
+  以前 README/`install.sh` 把它说成「加上 MPG Ai1600TS 支持，装好内核头文件即可 build」——
+  实际逐块读完：`PSU_VARIANT_MPG_AI1600TS,` 被插在两个 `#define` 之间（文件作用域），
+  `priv->last_read_all = t;` 插进了没有 `t` 的 `msipsu_fw_init()`，`case PSU_REG_IOUT_3V:`
+  落在 switch 之外，`msipsu_hwmon_ops_read()` 那块出现第二个 `default:` 且 `break;` 掉到
+  switch 外，`debugfs_create_file()` 引用了全文件没有定义的 `iout_pins_fops`，而且没有任何
+  代码把 62B 载荷填进 `msipsu_all_ai1600ts`（**即便编译过也只会报未初始化的针脚电流**——
+  正是本项目最忌讳的「没测到的健康」）。现三处如实标注为草稿 + 列出致命点，不再指示用户 build。
+  要做完需要：钉版的上游 `msi-psu.c`、目标内核头文件、真机 62B 回读验证——三者仓库内都没有。
 
 ### 真机验收（`docs/verify.md` §8，共 10 项，均待样机）
 

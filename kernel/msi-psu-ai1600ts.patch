@@ -7,16 +7,33 @@ Ai1000P/Ai1300P and 20 bytes for MEG Ai1600(T)). The 62-byte layout
 includes 12 per-pin current readings for GPU Safeguard+ monitoring,
 plus combined 12V/5V/3.3V voltage and current readings.
 
-This patch adds:
-- USB ID 0xdb0:0x808c to the device table
-- A new msipsu_all_ai1600ts struct for the 62-byte payload layout
-- Variant detection based on product string at probe time
-- Per-pin current debugfs entries for GPU Safeguard+ monitoring
+STATUS: DRAFT, NOT BUILDABLE. This file is a sketch of the user-space
+findings ported to kernel terms; it has never been compiled, and it does not
+apply to a reviewed upstream revision. Known problems, all fatal:
+
+  * `PSU_VARIANT_MPG_AI1600TS,` is inserted between two #define lines at file
+    scope instead of inside the variant enum.
+  * `priv->last_read_all = t;` is inserted into msipsu_fw_init(), where `t` is
+    not declared (it belongs to msipsu_get_all_values()).
+  * `case PSU_REG_IOUT_3V:` is inserted into msipsu_get_all_values() outside any
+    switch statement.
+  * the msipsu_hwmon_ops_read() hunk inserts a second `default:` label and
+    leaves `break;` outside the switch.
+  * debugfs_create_file() references `iout_pins_fops`, which no part of this
+    patch defines, and runs before the debugfs directory is created.
+  * nothing ever copies the 62-byte 0xE0 payload into
+    `msipsu_all_ai1600ts`, so even a successful build would report uninitialised
+    per-pin currents.
+
+Do not ship this as-is. Finishing it needs the pinned upstream msi-psu.c, the
+target kernel headers, and a real 62-byte device for read-back verification —
+none of which are available in this repository. The supported path is the
+user-space tool (`msi_psu_monitor/`).
 
 Signed-off-by: MSI PSU Monitor Contributors <contributors@msi-psu-monitor>
 ---
- msi-psu.c | 89 +++++++++++++++++++++++++++++++++++++++++++++++++++++++
- 1 file changed, 89 insertions(+)
+ msi-psu.c | 44 ++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 44 insertions(+)
 
 diff --git a/msi-psu.c b/msi-psu.c
 index 13ffb84..93ca5f1 100644

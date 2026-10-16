@@ -260,19 +260,19 @@ line of the requirements document to the code, the test that covers it and the
 verification method, so acceptance can be ticked off item by item.
 
 ## Kernel Module
+## Kernel Module
 
-For kernel-level integration (hwmon sysfs interface), see the `kernel/` directory.
-Jack Doan's [msi-psu](https://github.com/JackDoan/msi-psu) driver supports MEG Ai1300P
-and MEG Ai1000P. The included patch adds MPG Ai1600TS support.
+**Not usable yet — the patch in `kernel/` is an unbuilt draft.** Jack Doan's
+[msi-psu](https://github.com/JackDoan/msi-psu) driver supports MEG Ai1300P and MEG
+Ai1000P. `kernel/msi-psu-ai1600ts.patch` sketches MPG Ai1600TS support, but it has
+never been compiled, it does not apply to a reviewed upstream revision, and its
+header lists the fatal hunks (stray case labels, an undefined `iout_pins_fops`,
+and no code that fills the new 62-byte struct). Treat it as notes, not as a
+deliverable.
 
-**Note:** The 7.0.x Proxmox kernel headers are not yet available in the package
-repositories. Once they are released, the module can be built with:
-
-```bash
-cd kernel
-patch -p1 < msi-psu-ai1600ts.patch
-make -C /lib/modules/$(uname -r)/build M=$(pwd) modules
-```
+Finishing it needs the pinned upstream `msi-psu.c`, the target kernel headers and
+a real 62-byte device — none of which are available here. **The supported path is
+the user-space tool**; there is no kernel module to build today.
 
 ## Protocol
 

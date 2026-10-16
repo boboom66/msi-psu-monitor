@@ -108,3 +108,10 @@
 所有 🧪 项在无样机时的最大覆盖：`bash scripts/smoke.sh` 一条命令跑完全链路（CI 也跑），`MSI_PSU_DEMO=1` 合成电源（`MSI_PSU_DEMO_MODEL` 可切
 全部 5 机型、`MSI_PSU_DEMO_ALERT` 可卡任意告警位），配合 301 个单测覆盖解析、告警、
 落盘、导出的全部分支。**每一条待真机项的判定标准与命令见 [`verify.md`](verify.md) §8（共 10 项）。**
+
+## 非需求交付物（如实标注）
+
+| 交付物 | 状态 | 说明 |
+| --- | --- | --- |
+| `kernel/msi-psu-ai1600ts.patch` | ⏸ 草稿，不可构建 | 未编译过、不对应任何已复核的上游版本；文件头已列出致命 hunk（文件作用域的枚举常量、无 `t` 的函数里用 `t`、switch 外的 `case`、第二个 `default:`、未定义的 `iout_pins_fops`、无代码填充 62B 结构体）。README/`install.sh` 不再声称可用；用户态工具才是受支持路径 |
+
