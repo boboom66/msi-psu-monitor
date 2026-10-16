@@ -399,6 +399,41 @@ def test_serial_scan_reports_devices_it_cannot_open(monkeypatch, capsys):
     assert 'Available: none' not in err
 
 
+def test_watch_appends_frames_to_the_output_file(monkeypatch, capsys, tmp_path):
+    """-O means "file instead of screen" everywhere; --watch printed instead.
+
+    The flag was accepted and silently ignored: stdout got the frames and the
+    requested file was never created.
+    """
+    target = tmp_path / 'watch.log'
+    stub = StubPSU(sensors())
+    read = stub.get_sensors
+    frames = []
+
+    def counting():
+        frames.append(1)
+        if len(frames) > 2:
+            raise KeyboardInterrupt  # what Ctrl-C does to the loop
+        return read()
+
+    stub.get_sensors = counting
+    code, captured = run_main(
+        monkeypatch, capsys, stub, ['--watch', '1', '-i', '0.01', '-O', str(target)]
+    )
+    assert code == EXIT_OK
+    assert captured.out == ''
+    assert target.read_text().count('MSI PSU: MPG Ai1600TS') == 2
+    assert 'Appending frames to' in captured.err
+
+
+def test_watch_reports_an_unwritable_output(monkeypatch, capsys, tmp_path):
+    stub = StubPSU(sensors())
+    target = tmp_path / 'missing' / 'watch.log'
+    code, captured = run_main(monkeypatch, capsys, stub, ['--watch', '1', '-O', str(target)])
+    assert code == EXIT_ERROR
+    assert 'cannot write' in captured.err
+
+
 def test_an_empty_columns_spec_is_not_silently_every_column(monkeypatch, capsys):
     """`--columns "$COLS"` with COLS unset used to export all 11 columns."""
     code, captured = run_main(

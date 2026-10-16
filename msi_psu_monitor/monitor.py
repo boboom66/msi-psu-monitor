@@ -749,8 +749,22 @@ def run_once(psu, args, cfg, monitor_state, engine):
 
 
 def run_watch(psu, args, cfg, monitor_state, engine):
-    """Continuous text refresh; returns the process exit code."""
+    """Continuous text refresh; returns the process exit code.
+
+    With ``-O`` the frames are appended to that file and the screen stays empty
+    instead ("file instead of screen", like every other mode): printing to stdout
+    and never touching the file was the silent half of that promise.
+    """
     interval = args.interval if args.interval is not None else args.watch
+    stream = None
+    if args.output:
+        try:
+            stream = open(args.output, 'a', encoding='utf-8', buffering=1)
+        except OSError as exc:
+            logger.error(f'Error: cannot write {args.output}: {exc}')
+            return EXIT_ERROR
+        print(f'Appending frames to {args.output} (Ctrl-C to stop)', file=sys.stderr, flush=True)
+    last_save = 0.0
     last_save = 0.0
     try:
         while True:
@@ -776,15 +790,21 @@ def run_watch(psu, args, cfg, monitor_state, engine):
                 monitor_state.save(stats.state_path(_state_dir(cfg)))
                 last_save = now
 
-            # Clear only on a terminal: pipes keep a complete, parseable stream.
-            if sys.stdout.isatty():
-                os.system('clear' if sys.platform == 'linux' else 'cls')
-            # flush so `msi-psu-monitor --watch | tee` still sees each frame.
-            print(format_text(sensors), flush=True)
+            line = format_text(sensors)
+            if stream is not None:
+                stream.write(line + '\n')  # line-buffered: a tail -f sees each frame
+            else:
+                # Clear only on a terminal: pipes keep a complete, parseable stream.
+                if sys.stdout.isatty():
+                    os.system('clear' if sys.platform == 'linux' else 'cls')
+                # flush so `msi-psu-monitor --watch | tee` still sees each frame.
+                print(line, flush=True)
             time.sleep(interval)
     except KeyboardInterrupt:
         return EXIT_OK
     finally:
+        if stream is not None:
+            stream.close()
         if monitor_state is not None:
             monitor_state.save(stats.state_path(_state_dir(cfg)))
 

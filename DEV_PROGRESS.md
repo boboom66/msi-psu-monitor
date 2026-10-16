@@ -160,6 +160,10 @@
     全部 11 列；现报错。`--from ''` 的报错也不再谎称「没给 --from」。
   - `--fan-mode auto --fan-duty 50` 里 duty 被静默丢弃（auto 下 REV6 只发 Duty=0，
     MSI 同样忽略）；现直接拒绝，免得用户以为 50% 生效了。
+  - `--watch -O 文件` 此前 **`-O` 被完全忽略**：帧照样打到 stdout，那个文件连建都不建，
+    也没有一行提示——需求里 `-O` 的定义是「存成文件，不打屏」。现按需求实现：追加到文件
+    （行缓冲，`tail -f` 能实时看到）、stdout 保持干净、启动时在 stderr 说明一句，
+    路径写不了就 exit 1。smoke 增两条检查（文件有内容 / stdout 为空）。
 - **daemon 打不开设备时的重试节奏（本轮）**：`_ensure_psu()` 的 except 分支设了
   `_next_discovery` 却**没有清掉 `device_path`**，下一 tick 直接跳过发现节流、每秒重开
   一次设备刷一行告警（`DISCOVERY_RETRY_S = 5` 形同虚设）。现清空路径，节流真正生效。
@@ -170,12 +174,12 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 356 passed
+uv run --group dev pytest -q                     → 358 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 32 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
 bash scripts/build_deb.sh                        → dist/msi-psu-monitor_1.0.0_all.deb
-bash scripts/smoke.sh                            → 45 项全过（三种格式/告警按机型/黑盒/OCP/风扇/daemon/dashboard）
+bash scripts/smoke.sh                            → 47 项全过（三种格式/告警按机型/黑盒/OCP/风扇/daemon/dashboard）
 ```
 
 护栏（机器强制，不靠人记）：

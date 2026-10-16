@@ -34,7 +34,7 @@ PASS=0
 FAIL=0
 # Keep in sync with the count quoted in docs/verify.md: a check that quietly
 # disappears from this script is a gap nobody notices.
-EXPECTED_TOTAL=45
+EXPECTED_TOTAL=47
 
 ok()   { PASS=$((PASS + 1)); printf '\033[0;32m  ok\033[0m   %s\n' "$1"; }
 bad()  { FAIL=$((FAIL + 1)); printf '\033[0;31m  FAIL\033[0m %s\n' "$1"; [ $# -gt 1 ] && printf '       %s\n' "$2"; }
@@ -132,6 +132,12 @@ $MONITOR --watch 1 -i nan >/dev/null 2>&1
 assert_exit "间隔 nan 被拒" 2 "$?"
 $MONITOR --dashboard --export --from 2h >/dev/null 2>&1
 assert_exit "--dashboard 不与动作混用" 2 "$?"
+# -O must mean "file instead of screen" in watch mode too (it used to print
+# to stdout and never create the file).
+WATCH_LOG="$WORK/watch.log"
+timeout 3 $MONITOR --watch 1 -i 0.05 -O "$WATCH_LOG" >"$WORK/watch.out" 2>/dev/null
+assert_contains "--watch -O 写文件" "MSI PSU:" "$(cat "$WATCH_LOG" 2>/dev/null)"
+[ -s "$WORK/watch.out" ] && bad "--watch -O 不打屏" "stdout 仍有输出" || ok "--watch -O 不打屏"
 
 printf '\n\033[1m[6] daemon 链路（prometheus + 历史 + 状态）\033[0m\n'
 cat > "$WORK/daemon.conf" <<EOF
