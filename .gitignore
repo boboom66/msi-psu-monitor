@@ -37,3 +37,7 @@ modules.order
 __pycache__/
 .pytest_cache/
 *.pyc
+
+# Local agent/tooling state (never committed)
+.opencode/
+.omo/

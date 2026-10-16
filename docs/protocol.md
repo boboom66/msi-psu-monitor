@@ -54,8 +54,8 @@ If a command is not supported or an error occurs, the response starts with:
 |----------|---------|------|-------------|
 | VENDOR_STRING | 0x10 | 16 bytes | Vendor name (ASCII) |
 | PRODUCT_STRING | 0x11 | 16 bytes | Product name (ASCII) |
-| REVISION | 0x12 | 4 bytes | Firmware revision (uint32, BCD) |
-| SERIAL | 0x13 | 16 bytes | Serial number (ASCII or binary) |
+| REVISION | 0x12 | 4 bytes | Firmware revision（冻结：TS 按 2B ASCII 透传如 `1.0`，非可打印再回退；旧 `<I` 十进制拼法废弃） |
+| SERIAL | 0x13 | 16 bytes | Serial number（冻结：TS 按首字节长度切片，后面才是号码，别把长度当号码） |
 | IN_VOLTS | 0x20 | 2 bytes | AC input voltage (LINEAR11, mV) |
 | VOUT_12V | 0x24 | 2 bytes | 12V rail voltage (LINEAR11, mV) |
 | IOUT_12V | 0x25 | 2 bytes | 12V rail current (LINEAR11, mA) |
@@ -67,9 +67,11 @@ If a command is not supported or an error occurs, the response starts with:
 | EFFICIENCY | 0x2B | 2 bytes | Efficiency (LINEAR11, x100) |
 | TEMP0 | 0x30 | 2 bytes | Internal temperature (LINEAR11, mC) |
 | FAN_RPM | 0x40 | 2 bytes | Fan speed (LINEAR11, unsigned) |
-| FAN_MODE | 0x41 | 2 bytes | Fan control mode |
-| FAN_DUTY | 0x42 | 2 bytes | Fan duty cycle |
-| MULTIRAIL | 0xC0 | 2 bytes | Multi-rail mode (0=single, 1=multi) |
+| FAN_MODE | 0x41 | 2 bytes | Fan control mode（1=auto，3=manual；一期只读） |
+| FAN_DUTY | 0x42 | 2 bytes | Fan duty 四元组[实际, MCU算, 软件设, ZeroFan==1]（一期读写：显示进 text，写走 `--fan-mode/--fan-duty` 0-100 单值 + F1h 保存，钳制 + 读回） |
+| MULTIRAIL | 0xC0 | 8 bytes | OCP/告警阈值块（冻结：读 `==2` 为多轨，以 MSI Center 源码为准；旧 0/1 描述废弃；出厂单针 12A、针差 5A、触发 20s、警告 180s；写三期专批） |
+| ALERT_STATUS | 0xE1 | 18 bytes | GPU Safeguard+ 状态（索引 `{6,7,8,18..29,14,15,16}`，失败回退 C1 state；Status 行 + exit 2 来源；待真机复核） |
+| ALERT_LOG | 0xC1 | 26B×10 | GPU Safeguard+ 黑盒（`--show-log` 来源，最近 10 条新→旧；待真机复核） |
 | UPTIME | 0xD0 | 4 bytes | Session uptime (seconds) |
 | TOTAL_UPTIME | 0xD1 | 4 bytes | Total lifetime uptime (seconds) |
 | READ_EVERYTHING | 0xE0 | varies | Bulk read of all sensor values |

@@ -1,0 +1,6 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["AGENTS.md", "msi_psu_monitor/AGENTS.md"],
+  "formatter": true,
+  "lsp": true
+}

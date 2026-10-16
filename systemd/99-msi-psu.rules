@@ -1,0 +1,5 @@
+# MSI PSU USB HID interface (MPG Ai1600TS / Ai1300TS).
+# Grants read access to the hidraw node so msi-psu-monitor works without root
+# on desktop sessions (uaccess) and for plugdev members elsewhere.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0db0", ATTRS{idProduct}=="808c", MODE="0664", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0db0", ATTRS{idProduct}=="aa6f", MODE="0664", GROUP="plugdev", TAG+="uaccess"

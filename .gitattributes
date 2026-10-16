@@ -1,0 +1,10 @@
+# Normalize line endings: Windows checkouts must not turn scripts into CRLF
+# (CRLF breaks scripts/install.sh with "断行" failures).
+* text=auto
+*.py text eol=lf
+*.sh text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.service text eol=lf
+*.timer text eol=lf
+*.patch text eol=lf
