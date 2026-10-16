@@ -177,11 +177,15 @@ def test_the_daemon_exports_the_ocp_block_for_ts_models(tmp_path):
     """The textfile collector carries the C0h thresholds and the C1h state."""
     psu = StubPSU(clean_sensors(), alerts={'ocp_12v': False}, ocp=ocp_config())
     psu.supports_ocp_config = True
+    # A TS model answers the 8-byte 12V-2x6 read, never the 1-byte multirail one.
+    psu.supports_multirail_ocp = True
+    psu.multirail = True
     daemon = make_daemon(tmp_path, psu, prom_path=str(tmp_path / 'psu.prom'))
     assert daemon.tick()
 
     prom = (tmp_path / 'psu.prom').read_text()
     assert 'msi_psu_up 1' in prom
+    assert 'msi_psu_multirail_ocp' not in prom
     assert 'msi_psu_ocp_available 1' in prom
     assert 'msi_psu_ocp_enabled{} 1' in prom
     assert 'msi_psu_ocp_pin_point_a{} 12.0' in prom

@@ -223,8 +223,9 @@ class MonitorDaemon:
         the 26-byte black box, so reading it there would export a different
         register as if it were OCP. Nothing is cached: the C1h state is a rolling
         5 s average, and the 30 s prometheus cadence is the right refresh rate
-        (one extra HID round trip per write). A failed read clears the block and
-        warns rather than leaving the previous values behind.
+        (two extra reads per write, each bounded by the HID timeout). A failed
+        read clears the block and warns rather than leaving the previous values
+        behind.
         """
         psu = self.psu
         if psu is None:
@@ -235,6 +236,7 @@ class MonitorDaemon:
             self.ocp_state = None
             self.ocp_multirail = self._read_multirail(psu)
             return
+        self.ocp_multirail = None  # only the MEG P models answer that 0xC0 read
         try:
             config = psu.read_ocp_thresholds()
         except Exception as exc:  # pragma: no cover - defensive against odd devices
