@@ -272,7 +272,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 431 passed
+uv run --group dev pytest -q                     → 436 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 32 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
@@ -367,6 +367,32 @@ Ai1600T 的 20 字节布局里正好是 `data[0:2]`）和 uptime 计数器（每
   这一段仍然全绿。现加一条「子进程还活着且 stderr 为空」的检查——注意**只 `kill -0` 不够**：
   未被回收的子进程是僵尸，照样通过；而 curl 会在我们子进程还没跑到 `bind()` 时就被占用端口的
   监听者应答，所以检查前留 1 秒宽限。实测：外来 dashboard 占住端口时，该检查如实 FAIL、脚本 exit 1。
+
+### 只读复核（turn6）protocol-bits 车道的四条 P2（本轮）
+
+1. **`docs/protocol.md` 的 NAK 章节自相矛盾**：那一节写「命令不支持或出错时回包以
+   `[0xFE, ...]` 开头」——**没有任何一种回包长这样**。真实形状是读 `[0x51, 0xFE]`、
+   写被拒 `[0x50, <reg>, 0xFE]`（`msi-psu.c:186-198`），而且同一份文档 15 行前刚写对过。
+   照着这一节实现会去找 byte 0，永远找不到。现改成形状表 + 说明「数据回包即使首字节是
+   `0xFE` 也不是 NAK」（正是上一轮修的那个 P0 的文档侧）。
+2. **`fw_revision` 会把更长的数字开头载荷截断**：判据是 `len(revision) >= 2`，于是
+   `b'1234'` 被渲染成 **`1.2`**——一个设备从没发过的版本号；而 `docs/protocol.md:70`
+   承诺「非两位数字的载荷原样透传」。改成 `len(revision) == 2 and revision.isdigit()`，
+   三种长度都进测试（`b'1234'`→`1234`、`b'100'`→`100`、`b'10\x00\x00'`→`1.0`）。
+3. **黑盒记录的「新→旧」三方打架**：reader 的 docstring 说「oldest last」、格式化器表头说
+   「newest first」并按**读到的顺序**打印、demo 又把 `#2` 摆在 `#1` 前面（且 `#2` 的
+   `total_time`/`total_count` 更大）。三条里至少一条是错的，而冒烟/验收正是拿 demo 在练。
+   固件到底哪个槽更新**没有可核对的依据**，所以不去猜：每条记录自己带着写入时刻的
+   累计运行时长与触发次数（`TOTAL_UPTIME` 同源的单调计数器），`format_blackbox` 就按
+   `(total_time, total_count)` **降序**排——顺序与被打印出来的数字自洽，肉眼可核；
+   同分保留设备的槽序。demo 的数据同时改成「槽 1 = 最新」，与 `docs/protocol.md` 的
+   「InfoID 1..10 新→旧」一致。
+4. **`[monitor] no_alerts` 是死配置**：配置示例写着「同 `--no-alerts`，跳过 E1h 轮询」，
+   CLI 认（`monitor.py` 两处），**daemon 连字符串都没有**——而 unit 加载的正是
+   `/etc/msi-psu-monitor.conf`。也就是说用户在正常模式（常驻 daemon）下关告警，E1h 照轮询、
+   `msi_psu_alert{…}` 照导出。现 daemon 与 CLI 同样处理：不轮询、`status`/`alerts` 两个键
+   都不设（于是没有 Status 行、没有告警指标、没有 ALERT 行），并在启动时打一行
+   「Alert polling disabled by config」——**「什么都没报」和「一切正常」不是一件事**。
 
 ### 文档里的 `[fan]` 示例其实不生效（本轮，P1）
 

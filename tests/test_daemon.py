@@ -63,6 +63,8 @@ class StubPSU:
         self.multirail = None
         self.ocp_reads = 0
         self.reads = 0
+        #: Distinct from ocp_reads: proves whether 0xE1 was polled at all.
+        self.alert_reads = 0
         self.closed = False
 
     def read_ocp_thresholds(self):
@@ -93,6 +95,7 @@ class StubPSU:
         return dict(self._sensors)
 
     def read_alert_status(self):
+        self.alert_reads += 1
         return self._alerts
 
     def read_fan_state(self):
@@ -674,3 +677,27 @@ def test_a_bad_config_is_one_line_not_a_traceback(tmp_path, capsys):
     assert captured.err.startswith('Error: ')
     assert 'Traceback' not in captured.err
     assert str(missing) in captured.err
+
+
+def test_no_alerts_from_the_config_switches_the_poll_off(tmp_path):
+    """`[monitor] no_alerts` is documented as "skip the E1h poll entirely".
+
+    The daemon never read the key, so the switch a user set in
+    /etc/msi-psu-monitor.conf -- the file the packaged unit loads -- did nothing
+    in the tool's normal mode: the E1h register was still polled and the alert
+    metrics were still exported.
+    """
+    stub = StubPSU(clean_sensors(), alerts={'fan': True})
+    daemon = make_daemon(tmp_path, stub, no_alerts=True)
+    sample = daemon.sample()
+    assert 'status' not in sample
+    assert 'alerts' not in sample
+    assert stub.alert_reads == 0
+
+
+def test_alerts_are_still_polled_when_the_config_does_not_disable_them(tmp_path):
+    """The guard above must not disable the poll for everyone."""
+    stub = StubPSU(clean_sensors(), alerts={'fan': True})
+    daemon = make_daemon(tmp_path, stub, no_alerts=False)
+    assert daemon.sample()['status'] == 'fan'
+    assert stub.alert_reads == 1

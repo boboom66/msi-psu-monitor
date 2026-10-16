@@ -58,8 +58,19 @@ attempts) → report `EXIT_ERROR` on a mismatch.
 
 ### NAK (0xFE)
 
-If a command is not supported or an error occurs, the response starts with:
-`[0xFE, ...]`
+`0xFE` (NAK) never sits at byte 0 — it is the *payload* byte, and its position says
+what went wrong (`msi-psu.c:186-198`):
+
+| Shape | Meaning |
+|-------|---------|
+| `[0x51, 0xFE]` | read of an unsupported register (two bytes, no data) |
+| `[0x50, <register>, 0xFE]` | write refused by the device (the echo carries the NAK) |
+
+A read reply that carries data is never a NAK, even when the data itself starts
+with `0xFE`: in the 62-byte `0xE0` layout byte 2 is the first payload byte, and a
+12 V LINEAR11 word such as `0xCEFE` (11.984 V) or an uptime counter that happens
+to land on `0xFE` is ordinary data. Treating it as a refusal throws away a whole
+frame of real measurements.
 
 ## Register Map
 

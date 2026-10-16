@@ -8,7 +8,7 @@ Protocol rules live in `msi_psu_monitor/AGENTS.md` (auto-loaded via `opencode.js
 
 ```bash
 uv sync --group dev                                  # py>=3.10, dev toolchain (pytest/ruff/mypy), zero runtime deps
-uv run --group dev pytest -q                         # 431 tests, no hardware needed
+uv run --group dev pytest -q                         # 436 tests, no hardware needed
 uv run --group dev pytest -q tests/test_state.py     # single file
 uv run --group dev ruff check .                      # must be clean
 uv run --group dev mypy msi_psu_monitor/             # must be clean
@@ -44,6 +44,10 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12.
 - **Sensors dict shape**: ident keys (`vendor/product/fw_revision/serial`) are plain
   strings; readings are `(value, unit)` tuples. Formatters branch on
   `isinstance(v, tuple)` — keep that contract.
+- **`fw_revision` is *exactly* two ASCII digits** (`len == 2 and isdigit()`), the device's
+  "10" rendered as `1.0` with the dot MSI Center inserts itself. Anything else is passed
+  through verbatim — `>= 2` used to truncate `b'1234'` into "1.2", a revision the device
+  never sent.
 - **LINEAR11 call pattern, keep exactly**:
   `lin11_to_int(struct.unpack('<H', data[o:o+2])[0], scale, signed) / scale`, rounded at
   the call site (V/A 3dp, W 1dp, % 2dp, RPM int). `signed=False` — always: REV6 and MSI's `ValueCalc` both leave the
@@ -51,7 +55,10 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12.
   flipped back to `True`.
   Scales: V/A ×1000, W ×1e6, EFF ×100, TEMP ×1000.
 - **HID framing**: always 64B reports, 250ms timeout, drain-before-write, strip 2-byte
-  echo header, NAK (`0xFE`) → `None`.
+  echo header, NAK (`0xFE`) → `None`. `0xFE` is a *payload* byte, never byte 0: a read
+  NAK is `[0x51, 0xFE]`, a refused write is `[0x50, <reg>, 0xFE]`, and a data reply whose
+  first payload byte happens to be `0xFE` (11.984 V = `0xCEFE`, or an uptime that lands on
+  it) is ordinary data — it must not be discarded as a refusal (`docs/protocol.md` §NAK).
 - **Default run is one-shot**: `if args.once or args.watch is None` — do not require
   `--once`. `--watch` is text-format only (no JSON streaming) and flushes every frame.
 - **Exit codes are load-bearing**: `0` normal / `1` program or argument fault / `2`
@@ -75,7 +82,12 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12.
   complementary model gates and MEG Ai1600T answering neither (`CPSU.cs:823-832` vs
   `CPSU.cs:840-856`). Gate on `MSIPSU.supports_ocp_config`, never on payload length.
 - **0xC1 is overloaded too**: InfoID `0x00` is the 42-byte OCP state, InfoID `1..10` is the
-  black-box log (`read_ocp_state` vs `read_blackbox`). Do not swap them.
+  black-box log (`read_ocp_state` vs `read_blackbox`). Do not swap them. `read_blackbox`
+  returns device slot order (InfoID ascending) — nothing documents which slot is newest,
+  so `format_blackbox` sorts newest-first on each record's own cumulative counters
+  (`total_time`, then `total_count`), which the printed line then shows next to it.
+  Never present slot order as chronological order, and keep the demo's counters in the
+  same direction as its slot numbers.
 - **`--ocp` is read-only by scope**: 一期 only *inspects* the thresholds. The write
   (`0xC0` 8 bytes + `0xF1`, clamped to 10-14 A / 4-8 A / 5-30 s / 30-240 s) is a separate,
   separately approved batch — do not add it while "fixing" the display.

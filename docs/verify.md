@@ -83,7 +83,7 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。当前基线：**431 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
+三条全绿即通过。当前基线：**436 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
 
 > `ruff format --check` **不要全仓跑**：`protocol.py`/`__init__.py`/`__main__.py`/`tests/test_monitor.py`
 > 等历史文件混用引号风格，全仓 format 会产生大量无意义 diff。只对本次改动的文件跑。
@@ -135,7 +135,13 @@ grep -E 'msi_psu_ocp_available|msi_psu_ocp_pin_point_a' /var/lib/node_exporter/t
 
 ```bash
 .venv/bin/msi-psu-monitor --show-log
+# demo（MSI_PSU_DEMO=1）下应先出 #1 再出 #2：显示顺序按每条记录自己的累计计数器
+# 降序排（固件槽序没有任何可核对的依据），打印出来的 total 值就是顺序本身。
 ```
+
+`[monitor] no_alerts = yes` 在 CLI（`--no-alerts` 等价）与 daemon 两侧都生效：没有 Status
+行、没有 `msi_psu_alert`、没有 `ALERT` 行，且完全不轮询 E1h —— daemon 启动日志里会写一行
+说明，「什么都没报」不等于「一切正常」。
 
 ```bash
 .venv/bin/msi-psu-monitor --fan-duty 75 && .venv/bin/msi-psu-monitor --fan-mode auto

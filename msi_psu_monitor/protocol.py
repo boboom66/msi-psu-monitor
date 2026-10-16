@@ -436,7 +436,10 @@ class MSIPSU:
         resp = self.hid.read_register(REG_REVISION)
         if resp:
             revision = bytes(resp).rstrip(b"\x00")
-            if len(revision) >= 2 and revision[:2].isdigit():
+            # Exactly two digits: `>= 2` would truncate a longer digit-leading
+            # payload (`b'1234'` -> "1.2") and report a revision the device never
+            # sent, which is the opposite of what this branch promises.
+            if len(revision) == 2 and revision.isdigit():
                 self.fw_revision = f"{chr(revision[0])}.{chr(revision[1])}"
             else:
                 # Anything else is passed through instead of turned into a guess.
@@ -788,7 +791,10 @@ class MSIPSU:
         """Read C1h black-box logs (InfoID 1..max_records, 26 bytes each).
 
         Returns:
-            List of record dicts, oldest last. Stops at the first
+            List of record dicts in device slot order (InfoID ascending), which
+            is what the register returns; ``format_blackbox`` sorts them newest
+            first using each record's own cumulative counters, because the
+            firmware's slot direction is not documented. Stops at the first
             missing/short record.
         """
         records = []

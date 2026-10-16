@@ -75,6 +75,18 @@ def test_fw_revision_falls_back_for_a_payload_that_is_not_two_digits():
     assert _psu_1300ts(registers={0x12: b'\xff\xfe'}).fw_revision == '\ufffd\ufffd'
 
 
+def test_fw_revision_does_not_truncate_a_longer_digit_leading_payload():
+    """The rule is "exactly two digits", not "starts with two digits".
+
+    `>= 2` turned a device that answered `b'1234'` into the revision "1.2" -- a
+    number it never sent -- while docs/protocol.md promises pass-through for any
+    payload that is not two digits.
+    """
+    assert _psu_1300ts(registers={0x12: b'1234'}).fw_revision == '1234'
+    assert _psu_1300ts(registers={0x12: b'100'}).fw_revision == '100'
+    assert _psu_1300ts(registers={0x12: b'10\x00\x00'}).fw_revision == '1.0'
+
+
 def test_ai1300ts_detected_as_7zpu_variant():
     psu = _psu_1300ts()
     assert psu.product == 'MPG Ai1300TS'

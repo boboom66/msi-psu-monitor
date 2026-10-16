@@ -328,11 +328,25 @@ _BLACKBOX_STATUS = {
 
 
 def format_blackbox(records):
-    """Format C1h black-box records as human-readable text (newest first)."""
+    """Format C1h black-box records as human-readable text (newest first).
+
+    "Newest" is taken from the record's own cumulative counters, not from the
+    slot number: the firmware's slot order is not documented anywhere we can
+    verify, and the demo used the opposite convention from the reader (the review
+    that found this had three artifacts disagreeing). Every record carries the
+    lifetime uptime and the trip count at the moment it was written, so sorting
+    on them is self-describing -- the numbers printed next to each line are the
+    order they appear in. Ties keep the device's slot order (sorted() is stable).
+    """
     if not records:
         return 'No black-box alert records stored.'
+    ordered = sorted(
+        records,
+        key=lambda rec: (rec.get('total_time') or 0, rec.get('total_count') or 0),
+        reverse=True,
+    )
     lines = ['GPU Safeguard+ alert log (black box, last 10, newest first)', '']
-    for record in records:
+    for record in ordered:
         status = _BLACKBOX_STATUS.get(record.get('status'), f'status {record.get("status")}')
         lines.append(
             f'#{record["info_id"]}  Conn{record.get("pin_set")}   {status}   '

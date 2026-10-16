@@ -141,6 +141,24 @@ def test_blackbox_demo_records_are_limited():
     assert len(psu.read_blackbox(max_records=1)) == 1
 
 
+def test_blackbox_demo_records_are_in_the_documented_slot_order():
+    """Slot 1 is the newest trip, and the counters on the record have to say so.
+
+    They did not: slot 2 held the larger lifetime uptime and trip count, so the
+    demo printed (and the smoke test accepted) an order the real path would never
+    produce. ``format_blackbox`` now sorts on those counters, so the demo's data
+    and the display agree as well.
+    """
+    from msi_psu_monitor.monitor import format_blackbox
+
+    records = demo.DemoPSU(clock=Clock()).read_blackbox()
+    assert [rec['info_id'] for rec in records] == [1, 2]
+    assert records[0]['total_time'] > records[1]['total_time']
+    assert records[0]['total_count'] > records[1]['total_count']
+    shown = format_blackbox(records)
+    assert shown.index('#1') < shown.index('#2')
+
+
 # ---- wiring -------------------------------------------------------------
 
 

@@ -203,13 +203,19 @@ class MonitorDaemon:
         self.failures = 0
 
         sensors.update(monitor.read_fan_fields(psu))
-        active, have_e1h = [], False
-        try:
-            _, active, have_e1h = monitor.collect_alerts(psu, self.engine, sensors)
-        except Exception as exc:  # pragma: no cover - defensive against odd devices
-            logger.debug(f'Alert poll failed: {exc}')
-        sensors['alerts'] = active
-        sensors['status'] = monitor.status_from(active, have_e1h)
+        # [monitor] no_alerts: documented as "skip the E1h alert poll entirely
+        # (same as --no-alerts)", and honoured here the way the CLI honours it --
+        # no poll, and no status/alerts keys, so no Status line, no alert metrics
+        # and no alert log lines. It used to be ignored by the daemon, i.e. a
+        # documented switch that did nothing in the tool's normal mode.
+        if not self.cfg.get('no_alerts'):
+            active, have_e1h = [], False
+            try:
+                _, active, have_e1h = monitor.collect_alerts(psu, self.engine, sensors)
+            except Exception as exc:  # pragma: no cover - defensive against odd devices
+                logger.debug(f'Alert poll failed: {exc}')
+            sensors['alerts'] = active
+            sensors['status'] = monitor.status_from(active, have_e1h)
         monitor.apply_stats(sensors, self.state)
         self.samples += 1
         return sensors
@@ -383,6 +389,10 @@ class MonitorDaemon:
             f'msi-psu-monitor daemon {__version__} started '
             f'(state: {self.state_dir}, prom: {self.prom_path or "disabled"})'
         )
+        if self.cfg.get('no_alerts'):
+            # Say it once at start-up: with the poll off there is no Status line
+            # and no alert metric at all, which is not the same as "all normal".
+            logger.info('Alert polling disabled by config ([monitor] no_alerts).')
         try:
             while self.tick():
                 if iterations is not None:

@@ -116,6 +116,40 @@ def test_format_blackbox_empty():
     assert format_blackbox([]) == 'No black-box alert records stored.'
 
 
+def test_format_blackbox_orders_newest_first_from_the_records_own_counters():
+    """The header says "newest first"; the slot number cannot be trusted for it.
+
+    Nothing documents which InfoID holds the newest trip, so the order comes from
+    the cumulative uptime/trip count each record carries: the numbers printed on
+    the lines are the order they appear in, which makes it checkable by eye.
+    """
+    older = {
+        'info_id': 1,
+        'pin_set': 2,
+        'status': 1,
+        'run_time': 120,
+        'total_time': 442800,
+        'pins_1_6': [1.0] * 6,
+        'total_count': 1,
+    }
+    newer = {
+        'info_id': 2,
+        'pin_set': 1,
+        'status': 2,
+        'run_time': 3600,
+        'total_time': 446400,
+        'pins_1_6': [1.0] * 6,
+        'total_count': 3,
+    }
+    out = format_blackbox([older, newer])
+    assert out.index('#2') < out.index('#1')
+    assert out.index('total 5d 04:00') < out.index('total 5d 03:00')
+    # Same counters -> the device's slot order wins (sorted() is stable).
+    tie_a = dict(older, info_id=1)
+    tie_b = dict(older, info_id=2)
+    assert format_blackbox([tie_a, tie_b]).index('#1') < format_blackbox([tie_a, tie_b]).index('#2')
+
+
 def test_prometheus_carries_alert_metric():
     from msi_psu_monitor.monitor import format_prometheus
 

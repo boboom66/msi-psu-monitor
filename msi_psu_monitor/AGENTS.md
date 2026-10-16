@@ -76,8 +76,15 @@ runtime imports.
   flat table, and never name a bit for an unknown model — return `None` and let the
   status read `Unknown`.
 - **The demo must stay opt-in**: `demo.enabled()` reads `MSI_PSU_DEMO`; nothing may
-  import synthetic data on the production path.
+  import synthetic data on the production path. The black box is part of that: the demo's
+  records must keep slot 1 as the newest trip (larger `total_time`/`total_count`), the way
+  `format_blackbox` sorts them, or an acceptance run trains on an order the real path
+  never prints.
 - **`--watch` is text-only** and flushes each frame (pipes must see every sample).
+- **`[monitor] no_alerts` is honoured by the daemon too**, not only by the CLI: with it
+  on, `sample()` sets neither `status` nor `alerts`, so no Status line, no alert metric and
+  no `ALERT` line appears, and 0xE1 is not polled at all (the daemon logs one line at
+  start-up so "nothing reported" is not mistaken for "all normal").
 - **`--ocp` is read-only and model-gated**: `MSIPSU.supports_ocp_config` (TS variants only,
   mirroring `CPSU.cs:843`) guards the read; a MEG model gets the explanation and `EXIT_OK`,
   never an error. The C0/C1 write path stays frozen for a later approved batch.
@@ -117,7 +124,7 @@ runtime imports.
 ## Verification (no hardware required)
 
 ```bash
-uv run --group dev pytest -q              # 431 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
+uv run --group dev pytest -q              # 436 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
 uv run --group dev ruff check .           # must be clean
 uv run --group dev mypy msi_psu_monitor/  # must be clean
 ```

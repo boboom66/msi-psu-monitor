@@ -17,7 +17,9 @@ interval = 2
 # Diagnostics verbosity (same as --verbose / --quiet).
 verbose = no
 quiet = no
-# Skip the E1h alert poll entirely (same as --no-alerts).
+# Skip the E1h alert poll entirely (same as --no-alerts). Honoured by the CLI
+# and by the daemon: with it on there is no Status line, no alert metric and no
+# ALERT line at all -- which is not the same as "everything is normal".
 no_alerts = no
 
 [alerts]

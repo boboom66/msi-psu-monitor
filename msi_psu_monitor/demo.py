@@ -279,9 +279,13 @@ class DemoPSU:
         return True
 
     def read_blackbox(self, max_records=10):
+        # Slot order, newest first: slot 1 carries the larger lifetime counters,
+        # which is also what `format_blackbox` sorts on. The two used to disagree
+        # (slot 2 held the bigger counters here), so an acceptance run against the
+        # demo trained on an order the real path would never print.
         records = [
             {
-                'info_id': 2,
+                'info_id': 1,
                 'pin_set': 1,
                 'status': 2,
                 'run_time': 3600,
@@ -290,7 +294,7 @@ class DemoPSU:
                 'total_count': 3,
             },
             {
-                'info_id': 1,
+                'info_id': 2,
                 'pin_set': 2,
                 'status': 1,
                 'run_time': 120,
