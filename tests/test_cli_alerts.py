@@ -210,3 +210,43 @@ def test_once_reports_a_wrong_length_payload_with_the_actual_numbers(monkeypatch
     assert '0xE0 read failed' not in out.err
     # The text output carries the same reason, so a saved artifact explains itself.
     assert 'got 20 of 44 bytes' in out.out
+
+
+def test_the_cli_writes_only_into_the_isolated_state_dir(monkeypatch, capsys, isolated_state):
+    """Regression: these tests used to run ``monitor.main()`` against the real one.
+
+    The module drove full CLI runs with the *default* state directory, so a plain
+    ``pytest`` overwrote ``~/.local/state/msi-psu-monitor/state.json`` with stub
+    data and pruned the user's own daily buckets with the default retention. The
+    suite could not notice because nothing asserted on that directory. The
+    isolation now lives in ``tests/conftest.py`` (autouse); this test fails if it
+    is ever removed, and it spies on the write itself so it cannot pass vacuously.
+    """
+    from pathlib import Path
+
+    from msi_psu_monitor import state as stats
+
+    # Guard 1: the override is in place *and* it is not the real default (deleting
+    # the override must change the answer, otherwise the check is a tautology).
+    real_default = stats.default_state_dir()
+    monkeypatch.delenv('MSI_PSU_STATE_DIR')
+    monkeypatch.delenv('STATE_DIRECTORY', raising=False)
+    assert stats.default_state_dir() != real_default
+    monkeypatch.setenv('MSI_PSU_STATE_DIR', str(isolated_state))
+
+    # Guard 2: every path the run actually writes to is inside the throwaway dir.
+    written = []
+    real_save = stats.MonitorState.save
+
+    def spy_save(self, path):
+        written.append(Path(path))
+        return real_save(self, path)
+
+    monkeypatch.setattr(stats.MonitorState, 'save', spy_save)
+
+    stub = StubPSU({'product': 'MPG Ai1600TS', **READINGS}, alerts={'ocp_12v': False})
+    code, _ = _run_main(monkeypatch, capsys, stub, ['prog', '--once'])
+    assert code == EXIT_OK
+    assert written, 'the run did not save anything, so this test proves nothing'
+    assert all(path.is_relative_to(isolated_state) for path in written)
+    assert stats.state_path(isolated_state).exists()

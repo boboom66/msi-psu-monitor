@@ -92,11 +92,8 @@ def run_main(monkeypatch, capsys, stub, argv):
     return exc.value.code, capsys.readouterr()
 
 
-@pytest.fixture(autouse=True)
-def isolated_state(tmp_path, monkeypatch):
-    monkeypatch.setenv('MSI_PSU_STATE_DIR', str(tmp_path))
-    return tmp_path
-
+# The autouse ``isolated_state`` fixture that points ``MSI_PSU_STATE_DIR`` at a
+# tmp dir now lives in ``tests/conftest.py`` so no module can forget it.
 
 # ---- argument validation ------------------------------------------------
 
