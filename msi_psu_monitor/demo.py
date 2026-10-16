@@ -2,14 +2,16 @@
 
 The demo exists so the whole pipeline -- CLI output, alert debounce, daemon
 history, prometheus textfile and the dashboard -- can be exercised and shown
-without a PSU attached. It is deliberately isolated in this module: nothing
-else in the package imports it at module scope, and every value it produces is
-fabricated, so it must never be reachable unless ``MSI_PSU_DEMO`` is set.
+without a PSU attached. It is deliberately isolated in this module -- no other
+module reads its values -- and every value it produces is fabricated, so it must
+never be reachable unless ``MSI_PSU_DEMO`` is set: the only two call sites
+(``monitor._open_psu`` / ``monitor.resolve_device``) are gated by ``enabled()``.
 
 Environment:
     MSI_PSU_DEMO=1              enable the synthetic device
     MSI_PSU_DEMO_ALERT=fan      make one alert bit stick; must be a name the
-                                emulated model can report (see protocol.ALERT_NAMES)
+                                emulated model can report (see protocol.ALERT_NAMES),
+                                otherwise nothing is forced and a warning says so
     MSI_PSU_DEMO_MODEL=ai1300p  emulate another supported variant (default
                                 mpg_ai1600ts); each model reports its own payload
                                 shape, so the multi-rail and single-rail code
@@ -35,6 +37,7 @@ DEVICE_PATH = 'demo:0'
 DEMO_SERIAL = 'DEMO00000001'
 CYCLE_S = 300.0
 MODEL_ENV = 'MSI_PSU_DEMO_MODEL'
+ALERT_ENV = 'MSI_PSU_DEMO_ALERT'
 DEFAULT_MODEL = 'mpg_ai1600ts'
 _TRUTHY = ('1', 'true', 'yes', 'on')
 
@@ -104,6 +107,7 @@ class DemoPSU:
         self.serial = DEMO_SERIAL
         self.fan_mode = 1
         self.fan_duty = 30
+        self._alert_warned = False
 
     # ---- lifecycle -------------------------------------------------------
 
@@ -189,7 +193,23 @@ class DemoPSU:
 
     def read_alert_status(self):
         stuck = _stuck_alert()
+        if stuck and stuck not in self.alert_names:
+            # ALERT_DESCRIPTIONS is model-independent and includes the software
+            # mirror's names, so a typo or a name this model cannot report
+            # (pin_imbalance anywhere, ocp_pin1 on a MEG) used to be accepted and
+            # then never set: the acceptance run reported all-clear.
+            self._warn_unreportable_alert(stuck)
         return {name: name == stuck for name in self.alert_names}
+
+    def _warn_unreportable_alert(self, stuck):
+        """Say once that MSI_PSU_DEMO_ALERT cannot be honoured by this model."""
+        if self._alert_warned:
+            return
+        self._alert_warned = True
+        logger.warning(
+            f'{ALERT_ENV}={stuck!r} is not an alert the {self.variant} model reports; '
+            f'nothing will be forced. This model reports: {", ".join(self.alert_names)}.'
+        )
 
     # ---- 12V-2x6 OCP (C0h read-only + C1h state) ------------------------
 

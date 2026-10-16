@@ -498,3 +498,14 @@ def test_a_backwards_clock_says_the_integral_is_frozen(tmp_path, caplog):
     with caplog.at_level('WARNING'):
         monitor_state.update(600.0, 94.0, ts=1020.0)  # caught up: integrates again
     assert monitor_state.energy_wh > energy
+
+
+def test_load_ignores_a_state_file_that_is_not_a_regular_file(tmp_path, caplog):
+    """A symlink to /dev/zero (or a FIFO) must not be read until MemoryError."""
+    import os
+
+    path = stats.state_path(tmp_path)
+    os.symlink('/dev/zero', path)
+    with caplog.at_level('WARNING'):
+        assert stats.MonitorState.load(path).count == 0
+    assert 'not a regular file' in caplog.text

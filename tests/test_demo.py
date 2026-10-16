@@ -295,3 +295,33 @@ def test_demo_export_records_cpu_gpu_for_a_multi_rail_model(tmp_path, monkeypatc
     assert header == ['time', 'cpu', 'gpu']
     cpu, gpu = (float(value) for value in rows[0][1:3])
     assert 0 < cpu < gpu
+
+
+def test_an_alert_the_model_cannot_report_is_not_silently_dropped(monkeypatch, caplog):
+    """`MSI_PSU_DEMO_ALERT=pin_imbalance` used to be accepted and then never set.
+
+    ALERT_DESCRIPTIONS is model-independent, so a name no model can report (the
+    software mirror's ``pin_imbalance``) or one this model has no bit for
+    (``ocp_pin1`` on a MEG) produced an all-clear run that looked like a pass.
+    """
+    import logging
+
+    from msi_psu_monitor import demo
+
+    monkeypatch.setenv('MSI_PSU_DEMO_ALERT', 'pin_imbalance')
+    psu = demo.DemoPSU()
+    with caplog.at_level(logging.WARNING):
+        status = psu.read_alert_status()
+        psu.read_alert_status()  # warned once, not per poll
+    assert not any(status.values())
+    assert caplog.text.count('pin_imbalance') == 1
+    assert 'is not an alert the mpg_ai1600ts model reports' in caplog.text
+
+
+def test_an_alert_the_model_does_report_is_still_forced(monkeypatch):
+    from msi_psu_monitor import demo
+
+    monkeypatch.setenv('MSI_PSU_DEMO_ALERT', 'fan')
+    status = demo.DemoPSU().read_alert_status()
+    assert status['fan'] is True
+    assert sum(status.values()) == 1

@@ -294,10 +294,19 @@ class MonitorState:
         Every branch that loses data says so: something is wrong with the file,
         and quietly showing zeros as if they were measured totals would hide it.
         """
-        try:
-            raw = Path(path).read_text()
-        except FileNotFoundError:
+        target = Path(path)
+        if not target.exists():
             # The normal first-run case: no state yet, nothing to warn about.
+            return cls()
+        if not target.is_file():
+            # A FIFO, a device node or a directory named state.json: read_text()
+            # on /dev/zero returns bytes forever (until MemoryError), and the
+            # reader's contract is that a damaged file cannot wedge the process.
+            logger.warning(f'Ignoring {path}: not a regular file.')
+            return cls()
+        try:
+            raw = target.read_text()
+        except FileNotFoundError:
             return cls()
         except (OSError, UnicodeDecodeError) as exc:
             logger.warning(f'Cannot read the state file {path}: {exc}')

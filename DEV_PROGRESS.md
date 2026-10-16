@@ -164,6 +164,12 @@
     也没有一行提示——需求里 `-O` 的定义是「存成文件，不打屏」。现按需求实现：追加到文件
     （行缓冲，`tail -f` 能实时看到）、stdout 保持干净、启动时在 stderr 说明一句，
     路径写不了就 exit 1。smoke 增两条检查（文件有内容 / stdout 为空）。
+- **demo 与 state 的两处「默默收下」**：`MSI_PSU_DEMO_ALERT=pin_imbalance`（或任何本机型
+  报不出的名字）原来被接受然后从不置位——无硬件验收会跑出「全部正常」的假通过，与
+  `MSI_PSU_DEMO_MODEL` 打错会告警的处理不一致，现同样告警并列出本机型能报的名字；
+  `state.json` 若是指向 `/dev/zero`/FIFO 的软链（glob 之外的另一条读取路径），
+  `read_text()` 会一直读到 `MemoryError`，现按「不是普通文件」跳过并告警。
+
 - **读失败不再把「上次的健康 prom」留在盘上（本轮）**：`write_prometheus()` 只在采样成功
   后调用，所以电源被拔掉后 textfile 一直保留最后一次内容——node_exporter 每次抓取都照样
   上报 `msi_psu_up 1` 和那个瓦数，看板上「一小时前就拔掉的电源」一直显示成在线（与 README
@@ -266,7 +272,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 410 passed
+uv run --group dev pytest -q                     → 413 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 32 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
