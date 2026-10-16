@@ -63,6 +63,14 @@ install -m 644 "$ROOT/systemd/99-msi-psu.rules" /etc/udev/rules.d/
 udevadm control --reload-rules
 udevadm trigger --subsystem-match=hidraw
 
+# config: the example is entirely comments, so installing it changes no behaviour;
+# never overwrite one the user already edited.
+if [ -e /etc/msi-psu-monitor.conf ]; then
+    info "Keeping the existing /etc/msi-psu-monitor.conf"
+else
+    install -m 644 "$ROOT/docs/msi-psu-monitor.conf.example" /etc/msi-psu-monitor.conf
+fi
+
 # systemd: one resident daemon (there is no timer any more)
 info "Installing the systemd unit..."
 install -m 644 "$ROOT/systemd/msi-psu-monitor.service" /etc/systemd/system/
@@ -79,7 +87,7 @@ echo "  No PSU at hand: MSI_PSU_DEMO=1 msi-psu-monitor --once"
 echo "  Dashboard:      msi-psu-monitor --dashboard"
 echo "  Alerts log:     journalctl -u msi-psu-monitor -f"
 echo "  Service state:  systemctl status msi-psu-monitor"
-echo "  Configuration:  install -m 644 $ROOT/docs/msi-psu-monitor.conf.example /etc/msi-psu-monitor.conf"
+echo "  Configuration:  /etc/msi-psu-monitor.conf (every value is commented out = defaults)"
 echo ""
 echo "  No-hardware verification checklist: $ROOT/docs/verify.md"
 echo "  Preferred install on Debian/Ubuntu:  bash $ROOT/scripts/build_deb.sh"

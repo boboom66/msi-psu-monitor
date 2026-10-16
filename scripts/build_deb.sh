@@ -38,19 +38,25 @@ chmod 755 "$STAGE"
 
 LIBDIR="$STAGE/usr/lib/python3/dist-packages/msi_psu_monitor"
 install -d "$STAGE/DEBIAN" "$LIBDIR" "$STAGE/usr/bin" \
-    "$STAGE/lib/systemd/system" "$STAGE/lib/udev/rules.d" \
+    "$STAGE/lib/systemd/system" "$STAGE/lib/udev/rules.d" "$STAGE/etc" \
     "$STAGE/usr/share/doc/$PKG"
 
 info "Staging $PKG $VERSION ($ARCH)"
-cp "$ROOT"/msi_psu_monitor/*.py "$LIBDIR/"
-cp "$ROOT/systemd/msi-psu-monitor.service" "$STAGE/lib/systemd/system/"
-cp "$ROOT/systemd/99-msi-psu.rules" "$STAGE/lib/udev/rules.d/"
-cp "$ROOT/README.md" "$ROOT/LICENSE" "$ROOT/docs/protocol.md" \
+# install(1) rather than cp(1): a hardened umask (077) otherwise ships
+# root-only modules, and the udev rule's uaccess promise is for non-root users.
+install -m 644 "$ROOT"/msi_psu_monitor/*.py "$LIBDIR/"
+install -m 644 "$ROOT/systemd/msi-psu-monitor.service" "$STAGE/lib/systemd/system/"
+install -m 644 "$ROOT/systemd/99-msi-psu.rules" "$STAGE/lib/udev/rules.d/"
+install -m 644 "$ROOT/README.md" "$ROOT/LICENSE" "$ROOT/docs/protocol.md" \
    "$ROOT/docs/verify.md" "$ROOT/docs/requirements-traceability.md" \
    "$ROOT/docs/msi-psu-monitor.conf.example" \
    "$STAGE/usr/share/doc/$PKG/"
 # Debian policy 12.5: the machine-readable copyright goes next to LICENSE.
-cp "$ROOT/docs/copyright" "$STAGE/usr/share/doc/$PKG/copyright"
+install -m 644 "$ROOT/docs/copyright" "$STAGE/usr/share/doc/$PKG/copyright"
+# Anything under /etc is a conffile: dpkg keeps a user's edits and asks on change.
+# The example is all comments, so installing it enables nothing by itself.
+install -m 644 "$ROOT/docs/msi-psu-monitor.conf.example" \
+    "$STAGE/etc/msi-psu-monitor.conf"
 
 for entry in monitor daemon; do
     name="msi-psu-monitor"

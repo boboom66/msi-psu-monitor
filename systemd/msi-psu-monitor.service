@@ -9,7 +9,9 @@ StartLimitIntervalSec=0
 Type=simple
 # /usr/bin/env keeps the unit working for both /usr/bin (package) and
 # /usr/local/bin (pip) installs of the console script.
-ExecStart=/usr/bin/env msi-psu-monitor-daemon --config /etc/msi-psu-monitor.conf
+# No --config: the file is optional and read from CONFIG_FILES, so the unit
+# starts on a box where nobody installed one yet.
+ExecStart=/usr/bin/env msi-psu-monitor-daemon
 Restart=always
 RestartSec=5
 # systemd creates /var/lib/msi-psu-monitor (state.json + daily-*.log).

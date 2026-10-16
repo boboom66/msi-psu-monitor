@@ -20,13 +20,18 @@ DAEMON="$PY -m msi_psu_monitor.daemon"
 WORK=$(mktemp -d)
 PORT=${PORT:-8907}
 DASH_PID=""
+# `--keep` keeps $WORK so a failure can be looked at; the trap has to carry it,
+# because `cleanup` is called with no arguments on exit (`$1` was always empty,
+# so the flag was documented, accepted, and silently ignored).
+KEEP=${1:-}
 
 cleanup() {
     [ -n "$DASH_PID" ] && kill "$DASH_PID" 2>/dev/null
-    case "${1:-}" in
-        --keep) printf '\033[0;33m[KEEP]\033[0m %s\n' "$WORK" ;;
-        *) rm -rf "$WORK" ;;
-    esac
+    if [ "$KEEP" = "--keep" ]; then
+        printf '\033[0;33m[KEEP]\033[0m %s\n' "$WORK"
+    else
+        rm -rf "$WORK"
+    fi
 }
 trap 'cleanup' EXIT
 
@@ -34,7 +39,7 @@ PASS=0
 FAIL=0
 # Keep in sync with the count quoted in docs/verify.md: a check that quietly
 # disappears from this script is a gap nobody notices.
-EXPECTED_TOTAL=53
+EXPECTED_TOTAL=56
 
 ok()   { PASS=$((PASS + 1)); printf '\033[0;32m  ok\033[0m   %s\n' "$1"; }
 bad()  { FAIL=$((FAIL + 1)); printf '\033[0;31m  FAIL\033[0m %s\n' "$1"; [ $# -gt 1 ] && printf '       %s\n' "$2"; }
@@ -210,12 +215,25 @@ assert_contains "P 系导出含 cpu,gpu 列" "time,cpu,gpu" "$CSV"
 unset MSI_PSU_DEMO_MODEL
 
 printf '\n\033[1m[8] dashboard HTTP\033[0m\n'
-$MONITOR --dashboard --port "$PORT" >/dev/null 2>&1 &
+$MONITOR --dashboard --port "$PORT" >/dev/null 2>"$WORK/dashboard.err" &
 DASH_PID=$!
 for _ in $(seq 20); do
     curl -sf -o /dev/null "http://127.0.0.1:$PORT/" && break
     sleep 0.3
 done
+# The four checks below cannot tell whose server answered: a stale or foreign
+# dashboard on $PORT makes this run pass while the process under test died with
+# "cannot serve on 127.0.0.1:$PORT". It has to be our own child that serves.
+# `kill -0` alone is not enough -- an exited child stays a zombie until reaped
+# and still passes it -- so an empty stderr is checked too (a failed bind reports
+# there). The grace period covers Python's start-up: the curl above can be
+# answered by the foreign listener before our child has even reached bind().
+sleep 1
+if kill -0 "$DASH_PID" 2>/dev/null && [ ! -s "$WORK/dashboard.err" ]; then
+    ok "dashboard 子进程是本进程（无启动错误）"
+else
+    bad "dashboard 子进程是本进程（无启动错误）" "$(head -1 "$WORK/dashboard.err")"
+fi
 PAGE=$(curl -sf "http://127.0.0.1:$PORT/" 2>/dev/null)
 assert_contains "首页可访问" "<title>MSI PSU Monitor</title>" "$PAGE"
 assert_contains "首页无占位符残留" "setInterval(load, 30000)" "$PAGE"
@@ -257,6 +275,29 @@ if udevadm verify --help >/dev/null 2>&1; then
     fi
 else
     ok "udevadm verify 不存在，跳过规则校验"
+fi
+
+# The .deb is what users install, so build it the way a hardened machine would
+# (umask 077) and read the modes dpkg actually recorded: `cp` without -m shipped
+# root-only modules, which breaks the non-root uaccess use case the udev rule
+# exists for, and nothing inspected the archive's contents before. Two checks in
+# every branch, so the total stays deterministic.
+DEB="$ROOT/dist/msi-psu-monitor_1.0.0_all.deb"
+if command -v dpkg-deb >/dev/null 2>&1; then
+    listing='(build_deb.sh failed)'
+    if (umask 077; bash "$ROOT/scripts/build_deb.sh" >/dev/null 2>&1); then
+        listing=$(dpkg-deb -c "$DEB" 2>/dev/null)
+    fi
+    assert_contains "deb 里带 /etc/配置（conffile）" "./etc/msi-psu-monitor.conf" "$listing"
+    case "$listing" in
+        *"-rw-r--r-- root/root"*"msi_psu_monitor/protocol.py"*)
+            ok "deb 里的模块是 0644（不继承构建者 umask）" ;;
+        *)
+            bad "deb 里的模块是 0644（不继承构建者 umask）" "限制性 umask 下会变成 root-only" ;;
+    esac
+else
+    ok "dpkg-deb 不存在，跳过 .deb 内容校验（conffile）"
+    ok "dpkg-deb 不存在，跳过 .deb 内容校验（模块权限）"
 fi
 
 if [ "$PASS" -ne "$EXPECTED_TOTAL" ]; then

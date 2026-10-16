@@ -30,10 +30,14 @@ from msi_psu_monitor import __version__
 from msi_psu_monitor import monitor
 from msi_psu_monitor import state as stats
 from msi_psu_monitor.alerts import AlertEngine
-from msi_psu_monitor.config import load_config
+from msi_psu_monitor.config import ConfigError, load_config
 from msi_psu_monitor.protocol import DeviceBusyError
 
 logger = logging.getLogger('msi_psu.daemon')
+
+#: Same exit-code contract as the CLI (monitor.EXIT_*): 0 ok, 1 error.
+EXIT_OK = 0
+EXIT_ERROR = 1
 
 RESCAN_AFTER_FAILURES = 5
 DISCOVERY_RETRY_S = 5.0
@@ -393,7 +397,7 @@ class MonitorDaemon:
             except OSError as exc:  # pragma: no cover - read-only state dir
                 logger.error(f'Cannot persist state: {exc}')
             logger.info(f'Stopped after {self.samples} samples.')
-        return 0
+        return EXIT_OK
 
 
 def build_parser():
@@ -422,7 +426,14 @@ def build_parser():
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
-    cfg = load_config(args.config)
+    try:
+        cfg = load_config(args.config)
+    except ConfigError as exc:
+        # A traceback here reaches the journal as 400 lines of stack and systemd
+        # restarts the unit every RestartSec forever. The CLI reports the same
+        # thing as one line, so do that (logging is not configured yet).
+        print(f'Error: {exc}', file=sys.stderr)
+        return EXIT_ERROR
     if args.state_dir:
         cfg['state_dir'] = args.state_dir
     if args.prom_path:
@@ -436,7 +447,7 @@ def main(argv=None):
     try:
         return daemon.run(iterations=args.iterations)
     except KeyboardInterrupt:  # pragma: no cover - SIGINT before handlers are up
-        return 0
+        return EXIT_OK
 
 
 if __name__ == '__main__':

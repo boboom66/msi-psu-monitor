@@ -5,7 +5,8 @@ import time
 
 from msi_psu_monitor import state as stats
 from msi_psu_monitor.config import DEFAULTS
-from msi_psu_monitor.daemon import RESCAN_AFTER_FAILURES, MonitorDaemon
+from msi_psu_monitor.daemon import EXIT_ERROR, RESCAN_AFTER_FAILURES, MonitorDaemon
+from msi_psu_monitor.daemon import main as daemon_main
 from msi_psu_monitor.protocol import DeviceBusyError
 
 
@@ -657,3 +658,19 @@ def test_an_unanswered_e1h_read_never_prunes_the_latch(tmp_path):
     assert daemon.sample()['status'] == 'fan'
     stub._alerts = {'fan': False, 'otp': False}  # and a real answer still clears it
     assert daemon.sample()['status'] == 'Normal'
+
+
+def test_a_bad_config_is_one_line_not_a_traceback(tmp_path, capsys):
+    """`--config` pointing at nothing used to escape as an interpreter dump.
+
+    That is what the shipped unit did on every start (ExecStart named a file no
+    installer created): systemd logged a traceback per RestartSec forever while
+    apt had reported success.
+    """
+    missing = tmp_path / 'nope.conf'
+    assert daemon_main(['--config', str(missing)]) == EXIT_ERROR
+    captured = capsys.readouterr()
+    assert captured.err.count('\n') == 1
+    assert captured.err.startswith('Error: ')
+    assert 'Traceback' not in captured.err
+    assert str(missing) in captured.err
