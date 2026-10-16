@@ -72,3 +72,22 @@ def test_every_test_module_is_documented():
     text = '\n'.join(doc.read_text(encoding='utf-8') for doc in DOCS if doc.is_file())
     undocumented = sorted(name for name in _test_files() if name not in text)
     assert not undocumented, f'not mentioned in any doc: {undocumented}'
+
+
+def test_readme_usage_matches_the_real_cli():
+    """The usage block is copied by hand, so verify it against argparse itself."""
+    from msi_psu_monitor.monitor import build_parser
+
+    readme = (ROOT / 'README.md').read_text(encoding='utf-8')
+    assert '## Usage' in readme and '### Examples' in readme
+    section = readme.split('## Usage', 1)[1].split('### Examples', 1)[0]
+    documented = set(re.findall(r'--[a-z][a-z-]+', section))
+
+    real = {
+        option
+        for action in build_parser()._actions
+        for option in action.option_strings
+        if option.startswith('--') and option != '--help'
+    }
+    assert not real - documented, f'undocumented flags: {sorted(real - documented)}'
+    assert not documented - real, f'flags that no longer exist: {sorted(documented - real)}'

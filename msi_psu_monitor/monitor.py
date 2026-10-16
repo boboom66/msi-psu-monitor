@@ -767,7 +767,12 @@ def run_fan_write(psu, mode, duty):
 
 
 def run_ocp(psu, args):
-    """Show the 12V-2x6 OCP configuration (C0h) and state (C1h).
+    """Show the OCP view for this model.
+
+    0xC0 is one address with two complementary meanings: the MPG TS models answer
+    the 8-byte 12V-2x6 configuration (plus the 42-byte state on 0xC1), while the
+    MEG P models answer a single multirail flag. The Ai1600T answers neither and
+    gets an explanation instead of an error.
 
     Read-only: phase 1 only inspects these registers, the write path stays
     frozen (CPSU.cs ``SET_OCP12V2x6_CONFIG`` is a later, separately approved
@@ -863,6 +868,7 @@ def run_dashboard(args, cfg):
 
 def build_parser():
     parser = argparse.ArgumentParser(
+        prog='msi-psu-monitor',
         description='MSI PSU Monitor - read sensors from MSI PSUs via USB HID',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
@@ -955,7 +961,8 @@ def build_parser():
     parser.add_argument(
         '--ocp',
         action='store_true',
-        help='Show the 12V-2x6 OCP configuration (C0h) and state (C1h); TS models only',
+        help='Show the OCP view (C0h/C1h): the 12V-2x6 thresholds and state on the '
+        'MPG TS models, the multirail mode flag on the MEG P models',
     )
     parser.add_argument(
         '--no-alerts',

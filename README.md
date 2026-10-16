@@ -101,7 +101,8 @@ msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
       --dashboard  Serve local charts on 127.0.0.1
       --port       Dashboard port (default 8899)
       --show-log   Dump the PSU black-box alert records (C1h)
-      --ocp        Show the 12V-2x6 OCP configuration (C0h) and state (C1h)
+      --ocp        Show the OCP view (C0h/C1h): 12V-2x6 thresholds + state on
+                   the MPG TS models, the multirail flag on the MEG P models
       --no-alerts  Skip the E1h alert poll
       --config     Explicit config file
 ```

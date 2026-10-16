@@ -42,7 +42,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 256 passed
+uv run --group dev pytest -q                     → 257 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 30 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
