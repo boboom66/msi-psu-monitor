@@ -75,6 +75,9 @@ runtime imports.
 - Fan writes go through `monitor.apply_fan_setting(psu, mode, duty)` — one place for the
   41h write + F1h save + read-back verify, shared by `--fan-mode` and the daemon's
   `[fan]` restore. Never add a second write path.
+- `dashboard.py` resolves a request once in `_route()` and both `do_GET`/`do_HEAD`
+  consume that tuple: never write a second response path, or HEAD starts lying about
+  404s and Content-Length.
 - USB IDs live in five places that `tests/test_pid_consistency.py` cross-checks:
   `PSU_PRODUCT_IDS`, `MSIPSU.VARIANTS[*]["pid"]`, `systemd/99-msi-psu.rules`,
   `scripts/install.sh` and the README table. Adding a model means touching all five.

@@ -13,6 +13,10 @@ Endpoints:
 
 The page draws its own charts and exports each one to PNG with
 ``canvas.toDataURL()``; nothing is fetched from the network.
+
+The HTML/CSS/JS is embedded in ``PAGE`` on purpose: a single module keeps the
+``.deb`` free of package-data plumbing (no ``importlib.resources`` lookup, no
+missing-file failure mode) and the server is one file to audit.
 """
 
 from __future__ import annotations
@@ -263,14 +267,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # pragma: no cover - quiet by default
         pass
 
-    def _send(self, status, body, content_type):
+    def _send(self, status, body, content_type, extra_headers=(), with_body=True):
+        """Write one response; ``with_body=False`` keeps HEAD honest.
+
+        The Content-Length always describes the entity a GET would return, so a
+        HEAD carries the same status, type and length as its GET twin.
+        """
         payload = body.encode('utf-8')
         self.send_response(status)
         self.send_header('Content-Type', content_type)
         self.send_header('Content-Length', str(len(payload)))
         self.send_header('Cache-Control', 'no-store')
+        for name, value in extra_headers:
+            self.send_header(name, value)
         self.end_headers()
-        self.wfile.write(payload)
+        if with_body:
+            self.wfile.write(payload)
 
     def _query(self):
         return parse_qs(urlparse(self.path).query)
@@ -287,36 +299,46 @@ class DashboardHandler(BaseHTTPRequestHandler):
         raw = (self._query().get('columns') or [None])[0]
         return stats.parse_columns(raw)
 
-    def do_GET(self):
+    def _route(self):
+        """Resolve the request into ``(status, body, content type, headers)``.
+
+        Split out from ``do_GET`` so HEAD can reuse it verbatim and cannot drift
+        into answering 200 for a route that GET would 404.
+        """
         route = urlparse(self.path).path
         try:
             if route in ('/', '/index.html'):
                 page = PAGE.replace('__REFRESH_MS__', '30000')
-                self._send(200, page, 'text/html; charset=utf-8')
-            elif route == '/api/history':
+                return 200, page, 'text/html; charset=utf-8', ()
+            if route == '/api/history':
                 payload = _history_payload(self.state_dir, self._from_spec())
-                self._send(200, json.dumps(payload), 'application/json')
-            elif route == '/api/state':
-                self._send(200, json.dumps(_state_payload(self.state_dir)), 'application/json')
-            elif route == '/api/export':
+                return 200, json.dumps(payload), 'application/json', ()
+            if route == '/api/state':
+                payload = _state_payload(self.state_dir)
+                return 200, json.dumps(payload), 'application/json', ()
+            if route == '/api/export':
                 header, rows = stats.build_export(
                     self.state_dir,
                     self._since_ts(),
                     self._columns(),
                 )
-                body = '\n'.join(','.join(str(cell) for cell in row) for row in [header] + rows)
-                self.send_response(200)
-                self.send_header('Content-Type', 'text/csv; charset=utf-8')
-                self.send_header('Content-Disposition', 'attachment; filename="msi-psu.csv"')
-                self.end_headers()
-                self.wfile.write((body + '\n').encode('utf-8'))
-            else:
-                self._send(404, 'not found', 'text/plain; charset=utf-8')
+                lines = [','.join(str(cell) for cell in row) for row in [header] + rows]
+                return (
+                    200,
+                    '\n'.join(lines) + '\n',
+                    'text/csv; charset=utf-8',
+                    (('Content-Disposition', 'attachment; filename="msi-psu.csv"'),),
+                )
         except ValueError as exc:
-            self._send(400, str(exc), 'text/plain; charset=utf-8')
+            return 400, f'{exc}\n', 'text/plain; charset=utf-8', ()
+        return 404, 'not found\n', 'text/plain; charset=utf-8', ()
+
+    def do_GET(self):
+        self._send(*self._route())
 
     def do_HEAD(self):
-        self._send(200, '', 'text/plain; charset=utf-8')
+        status, body, content_type, extra_headers = self._route()
+        self._send(status, body, content_type, extra_headers, with_body=False)
 
 
 def make_server(host=DEFAULT_HOST, port=DEFAULT_PORT, state_dir=None):

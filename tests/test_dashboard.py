@@ -4,7 +4,7 @@ import json
 import threading
 import time
 from urllib.error import HTTPError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 import pytest
 
@@ -110,3 +110,37 @@ def test_server_binds_loopback_only(tmp_path):
         assert httpd.server_address[0] == '127.0.0.1'
     finally:
         httpd.server_close()
+
+
+def _head(url):
+    """HEAD the URL and return (status, headers) without reading a body."""
+    request = Request(url, method='HEAD')
+    try:
+        with urlopen(request, timeout=5) as response:
+            return response.status, dict(response.headers)
+    except HTTPError as exc:
+        return exc.code, dict(exc.headers)
+
+
+def test_head_matches_get_headers_for_the_page(live_server):
+    status, headers = _head(live_server + '/')
+    assert status == 200
+    assert headers['Content-Type'] == 'text/html; charset=utf-8'
+    # Content-Length must describe the GET entity, not an empty body.
+    assert int(headers['Content-Length']) > 1000
+
+
+def test_head_reports_a_missing_route_as_404(live_server):
+    """A blind 200 would let a link checker think /nope exists."""
+    assert _head(live_server + '/nope')[0] == 404
+
+
+def test_head_reports_a_bad_window_as_400(live_server):
+    assert _head(live_server + '/api/history?from=fortnight')[0] == 400
+
+
+def test_head_of_export_keeps_the_download_headers(live_server):
+    status, headers = _head(live_server + '/api/export?from=2h')
+    assert status == 200
+    assert headers['Content-Type'] == 'text/csv; charset=utf-8'
+    assert headers['Content-Disposition'] == 'attachment; filename="msi-psu.csv"'

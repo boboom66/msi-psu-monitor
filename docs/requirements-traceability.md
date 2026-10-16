@@ -9,7 +9,7 @@
 | 🧪 待真机 | 代码完成、单测覆盖，但结论必须样机复核（见 [`verify.md`](verify.md) §8） |
 | ⏸ 冻结 | 明确留待后续批准批次，本轮不做 |
 
-> 回归命令：`uv run --group dev pytest -q` → **252 passed**（18 个测试模块）。
+> 回归命令：`uv run --group dev pytest -q` → **256 passed**（18 个测试模块）。
 > 无硬件全链路自检见 [`verify.md`](verify.md)。
 
 ---
@@ -99,11 +99,11 @@
 | 平時 CLI，看圖時 `--dashboard`（stdlib-only，預設 `127.0.0.1:8899`，`--port` 可改，關閉即停） | `dashboard.make_server()`、`monitor.run_dashboard()` | `test_dashboard.py` | ✅ 已实现 |
 | 7 張即時曲線（實時走 daemon 記憶體 / 歷史走 `daily-*.log`） | `dashboard.PAGE` + `/api/state`、`/api/history` | `test_dashboard.py` | ✅ 已实现 |
 | Weekly 七天用電圖（讀 daemon 攢的 `daily-*.log`） | `/api/export` + 頁內柱狀圖 | `test_dashboard.py` | ✅ 已实现 |
-| 截圖存圖片 → 看圖頁提供匯出 PNG/CSV | `/api/export`（前端导出按钮） | `test_dashboard.py` | ✅ 已实现 |
+| 截圖存圖片 → 看圖頁提供匯出 PNG/CSV | `/api/export`（前端导出按钮，HEAD 与 GET 同状态同长度） | `test_dashboard.py` | ✅ 已实现 |
 | 桌面彈窗 | — | — | ⏸ 明确不做 |
 
 ## 7. 无硬件可覆盖的验证方式
 
 所有 🧪 项在无样机时的最大覆盖：`MSI_PSU_DEMO=1` 合成电源（`MSI_PSU_DEMO_MODEL` 可切
-全部 5 机型、`MSI_PSU_DEMO_ALERT` 可卡任意告警位），配合 252 个单测覆盖解析、告警、
+全部 5 机型、`MSI_PSU_DEMO_ALERT` 可卡任意告警位），配合 256 个单测覆盖解析、告警、
 落盘、导出的全部分支。**每一条待真机项的判定标准与命令见 [`verify.md`](verify.md) §8。**

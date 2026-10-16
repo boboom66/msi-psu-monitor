@@ -49,7 +49,7 @@ uv run --group dev ruff format --check .
 | `tests/test_cli_features.py` | `--watch`/`-O`/`--serial`/`--show-log`/`--fan-*`/`--export`/互斥校验 |
 | `tests/test_ocp.py` | 0xC0 阈值 / 0xC1 状态 / 单多轨标志的三格式输出与机型门 |
 | `tests/test_daemon.py` | 采样节拍、原子写、重扫、历史、风扇 Profile 恢复 |
-| `tests/test_dashboard.py` | HTTP 端点、历史/状态载荷、导出 |
+| `tests/test_dashboard.py` | HTTP 端点、历史/状态载荷、CSV 导出、HEAD 与错误码一致 |
 | `tests/test_demo.py` | 合成电源、5 机型切换、告警位注入 |
 | `tests/test_schema.py` | JSON / prometheus 输出结构契约 |
 | `tests/test_monitor.py` | 遗留冒烟（兼容旧接口，勿删） |
@@ -61,7 +61,7 @@ uv run --group dev ruff format --check .
 `N passed` 就必须等于 `pytest --collect-only` 的真实数字，引用的
 `` `tests/xxx.py` `` 必须存在，且每个测试文件都必须在某处文档里被提到。
 
-三条全绿即通过。当前基线：**252 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
+三条全绿即通过。当前基线：**256 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
 
 > `ruff format --check` **不要全仓跑**：`protocol.py`/`__init__.py`/`__main__.py`/`tests/test_monitor.py`
 > 等历史文件混用引号风格，全仓 format 会产生大量无意义 diff。只对本次改动的文件跑。

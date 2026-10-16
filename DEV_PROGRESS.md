@@ -42,7 +42,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 252 passed
+uv run --group dev pytest -q                     → 256 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 30 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
@@ -95,6 +95,7 @@ bash scripts/build_deb.sh                        → dist/msi-psu-monitor_1.0.0_
 
 ### 可选增强（非阻塞）
 
-- dashboard 页内 JS 抽到独立 `static/`，并补 `do_HEAD` 语义。
+- dashboard 页内 JS 保留内嵌（有意决策：`.deb` 无需 package-data，服务器单文件可审计）；
+  `do_HEAD` 语义已补全（与 GET 同状态、同 Content-Type、同 Content-Length，含 404/400）。
 - `0xC0` OCP 阈值写入 / 单多轨切换（三期专批，需样机确认写入安全）。
 - `0xE1` 告警位图之外的二级告警源（当前 E1h + 软件镜像足够）。
