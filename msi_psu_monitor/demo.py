@@ -7,8 +7,12 @@ else in the package imports it at module scope, and every value it produces is
 fabricated, so it must never be reachable unless ``MSI_PSU_DEMO`` is set.
 
 Environment:
-    MSI_PSU_DEMO=1          enable the synthetic device
-    MSI_PSU_DEMO_ALERT=fan  make one alert bit stick (any name from alerts.py)
+    MSI_PSU_DEMO=1              enable the synthetic device
+    MSI_PSU_DEMO_ALERT=fan      make one alert bit stick (any name from alerts.py)
+    MSI_PSU_DEMO_MODEL=ai1300p  emulate another supported variant (default
+                                mpg_ai1600ts); each model reports its own payload
+                                shape, so the multi-rail and single-rail code
+                                paths are reachable without hardware
 
 The synthetic load follows a 5-minute cycle (idle -> full load -> idle) so a
 short demo run produces visible curves instead of a flat line.
@@ -21,12 +25,27 @@ import os
 import time
 
 from msi_psu_monitor.alerts import ALERT_DESCRIPTIONS
+from msi_psu_monitor.protocol import MSIPSU
 
 DEVICE_PATH = 'demo:0'
-PRODUCT = 'MPG Ai1600TS (demo)'
 DEMO_SERIAL = 'DEMO00000001'
 CYCLE_S = 300.0
+MODEL_ENV = 'MSI_PSU_DEMO_MODEL'
+DEFAULT_MODEL = 'mpg_ai1600ts'
 _TRUTHY = ('1', 'true', 'yes', 'on')
+
+# Variant -> rated wattage, which sets the top of the synthetic load ramp.
+MODEL_WATTS = {
+    'mpg_ai1600ts': 1600.0,
+    'mpg_ai1300ts': 1300.0,
+    'meg_ai1600': 1600.0,
+    'ai1300p': 1300.0,
+    'ai1000p': 1000.0,
+}
+# The multi-rail MEG models split their 12V output across five rails. Shares are
+# the wiring MSI Center assumes: 12V1 = board, 12V2 = CPU, 12V3-5 = GPU.
+RAIL_SHARES = (0.12, 0.28, 0.22, 0.20, 0.18)
+PRODUCT = f'{MSIPSU.VARIANTS[DEFAULT_MODEL]["name"]} (demo)'
 
 # Sampling every step keeps the demo reproducible: no randomness, just the
 # cycle phase plus a small fixed wobble derived from the sample counter.
@@ -45,14 +64,31 @@ def _stuck_alert():
     return name if name in ALERT_DESCRIPTIONS else ''
 
 
+def model():
+    """Return the variant requested by ``MSI_PSU_DEMO_MODEL`` (default TS 1600).
+
+    An unknown name falls back to the default instead of failing, so a typo in
+    the environment cannot take the demo down.
+    """
+    name = os.environ.get(MODEL_ENV, '').strip().lower()
+    return name if name in MODEL_WATTS else DEFAULT_MODEL
+
+
+def product_name(variant):
+    """Return the product string ``variant`` reports (as the real PSU would)."""
+    return f'{MSIPSU.VARIANTS[variant]["name"]} (demo)'
+
+
 class DemoPSU:
     """Drop-in stand-in for :class:`msi_psu_monitor.protocol.MSIPSU`."""
 
-    def __init__(self, clock=time.time):
+    def __init__(self, clock=time.time, variant=None):
         self.clock = clock
         self.started = clock()
         self.samples = 0
-        self.product = PRODUCT
+        self.variant = variant or model()
+        self.watts_max = MODEL_WATTS[self.variant]
+        self.product = product_name(self.variant)
         self.serial = DEMO_SERIAL
         self.fan_mode = 1
         self.fan_duty = 30
@@ -86,10 +122,17 @@ class DemoPSU:
             round(total_a / 12.0 * (1.0 + self._wobble(2 + index, 0.06)), 3) for index in range(12)
         ]
 
+    def _rail_currents(self, total_a):
+        """Split the 12V total across the five discrete rails of the MEG P models."""
+        return [
+            round(total_a * share * (1.0 + self._wobble(2 + index, 0.05)), 3)
+            for index, share in enumerate(RAIL_SHARES)
+        ]
+
     def get_sensors(self):
         self.samples += 1
         load, _ = self._load()
-        watts = 60.0 + load * 660.0 + self._wobble(0, 8.0)
+        watts = 0.05 * self.watts_max + load * 0.45 * self.watts_max + self._wobble(0, 8.0)
         efficiency = 88.0 + 6.0 * (1.0 - abs(2.0 * load - 1.0))
         volts_12v = 12.10 - 0.06 * load + self._wobble(1, 0.01)
         total_a = (watts * 0.92) / volts_12v
@@ -99,7 +142,7 @@ class DemoPSU:
         fan_rpm = 0.0 if zero_fan else 700.0 + 1150.0 * load
         uptime = int(self.clock() - self.started)
 
-        return {
+        sensors = {
             'vendor': VENDOR,
             'product': self.product,
             'fw_revision': FW_REVISION,
@@ -110,7 +153,6 @@ class DemoPSU:
             'iout_12v_total': (round(total_a, 3), 'A'),
             'iout_5v': (round(1.8 + load * 1.5, 3), 'A'),
             'iout_3v3': (round(0.8 + load * 0.3, 3), 'A'),
-            'iout_pins': (pins, 'A'),
             'power_total': (round(watts, 1), 'W'),
             'efficiency': (round(efficiency, 2), '%'),
             'temp': (round(29.0 + 32.0 * load, 1), '\u00b0C'),
@@ -119,6 +161,12 @@ class DemoPSU:
             'uptime': uptime,
             'uptime_total': uptime + 446400,
         }
+        if self.variant in MSIPSU.SEVEN_ZPU_VARIANTS:
+            sensors['iout_pins'] = (pins, 'A')
+        if self.variant in MSIPSU.MULTIRAIL_VARIANTS:
+            sensors['vout_12v_rails'] = ([round(volts_12v, 3)] * 5, 'V')
+            sensors['iout_12v_rails'] = (self._rail_currents(total_a), 'A')
+        return sensors
 
     # ---- control surface -------------------------------------------------
 
@@ -128,7 +176,19 @@ class DemoPSU:
 
     # ---- 12V-2x6 OCP (C0h read-only + C1h state) ------------------------
 
-    supports_ocp_config = True
+    @property
+    def supports_ocp_config(self):
+        return self.variant in MSIPSU.SEVEN_ZPU_VARIANTS
+
+    @property
+    def supports_multirail_ocp(self):
+        return self.variant in MSIPSU.MULTIRAIL_VARIANTS
+
+    def read_multirail_ocp(self):
+        """Report the fixture's per-rail protection state for the MEG P models."""
+        if not self.supports_multirail_ocp:
+            return None
+        return True
 
     def read_ocp_thresholds(self):
         """Factory OCP configuration as shipped by MSI (CPSU.cs defaults)."""

@@ -195,15 +195,18 @@ minus current drawn through non-GPU 12V loads (e.g., CPU, motherboard).
 
 ## OCP Configuration and State (0xC0 / 0xC1)
 
-`msi-psu-monitor --ocp` renders the read-only 12V-2x6 protection view in phase 1.
-Two registers feed it, both gated on the MPG TS models:
+`msi-psu-monitor --ocp` renders the read-only protection view: the 12V-2x6 view on
+the MPG TS models and the multirail flag on the MEG P models (the Ai1600T answers
+neither and prints why, still exiting 0).
 
 - **0xC0 `OCP12V2x6_CONFIG`** (8 bytes) — the configured thresholds. The two amp
   fields use LINEAR11 with exponent -4, which the setter in `CPSU.cs:184-207` builds as
   `low = value << 4`, `high = 0xE0`. So 12 A is the word `0xE0C0` and 5 A is `0xE050`.
-  Note 0xC0 is overloaded: the MEG P models read the *multirail* flag (1 byte, `==2`)
-  from the same address, and the MEG Ai1600T answers neither — reject on the variant,
-  never on the payload length alone.
+  Note 0xC0 is overloaded: the MEG P models read the *multirail* flag (1 byte, `==2`
+  meaning per-rail protection, `1` meaning one combined rail) from the same address,
+  and the MEG Ai1600T answers neither — reject on the variant, never on the payload
+  length alone. Both getters gate in `CPSU.cs:823` and `:840` with complementary
+  model sets.
 - **0xC1 InfoID `0x00` `OCP12V2x6_STATE`** (42 bytes) — the live state: per-connector
   status code, seconds spent in an alert state, total powered seconds and the twelve
   pin currents as 5-second averages. InfoID `1..10` on the same register is the

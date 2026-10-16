@@ -27,7 +27,7 @@ uv run --group dev ruff check .
 uv run --group dev mypy msi_psu_monitor/
 ```
 
-三条全绿即通过。当前基线：**183 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
+三条全绿即通过。当前基线：**227 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
 
 > `ruff format --check` **不要全仓跑**：`protocol.py`/`__init__.py`/`__main__.py`/`tests/test_monitor.py`
 > 等历史文件混用引号风格，全仓 format 会产生大量无意义 diff。只对本次改动的文件跑。
@@ -41,6 +41,27 @@ idle→满载→idle 循环，零风扇随负载开关，per-pin 电流带轻微
 ```bash
 export MSI_PSU_DEMO=1
 .venv/bin/msi-psu-monitor --once
+```
+
+`MSI_PSU_DEMO_MODEL` 可切换成任意受支持机型（默认 `mpg_ai1600ts`），
+用于在无硬件时覆盖多轨（P 系）与单轨（Ai1600T）代码路径：
+
+```bash
+for model in mpg_ai1600ts mpg_ai1300ts meg_ai1600 ai1300p ai1000p bogus; do
+  echo "--- $model ---"
+  MSI_PSU_DEMO_MODEL=$model .venv/bin/msi-psu-monitor --once | head -1
+done
+```
+
+期望：前 5 行分别打出对应机型名（`bogus` 回落 `MPG Ai1600TS (demo)`）；
+`ai1300p`/`ai1000p` 额外看到 `Per-rail 12V:` 五条轨与 `CPU`/`GPU` 瓦特，
+其余机型没有这两段。
+
+```bash
+# MEG P 系：--ocp 输出单多轨模式（1 字节 0xC0），exit 0
+MSI_PSU_DEMO_MODEL=ai1300p .venv/bin/msi-psu-monitor --ocp
+# MEG Ai1600T：两个 0xC0 视图都不支持，打印原因且 exit 0
+MSI_PSU_DEMO_MODEL=meg_ai1600 .venv/bin/msi-psu-monitor --ocp; echo "exit=$?"
 ```
 
 应看到 `MSI PSU: MPG Ai1600TS (demo)`、`12V-2x6 Status: Normal`、`POWER … (AVG …)`、
@@ -114,6 +135,16 @@ EOF
 
 ```bash
 rm -rf /tmp/psu-demo && MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor-daemon --config /tmp/demo.conf --iterations 25
+```
+
+多轨机型另需确认单轨指标与 CPU/GPU 落盘（`MSI_PSU_DEMO_MODEL=ai1300p`）：
+
+```bash
+MSI_PSU_STATE_DIR=/tmp/psu-p MSI_PSU_DEMO_MODEL=ai1300p \
+  .venv/bin/msi-psu-monitor-daemon --iterations 3 --prom-path /tmp/psu-p/p.prom
+grep -E 'rail_current|cpu_watts|gpu_watts' /tmp/psu-p/p.prom
+head -1 /tmp/psu-p/daily-*.log       # 末两列应为 cpu_w,gpu_w
+MSI_PSU_STATE_DIR=/tmp/psu-p .venv/bin/msi-psu-monitor --export --from 30m --columns cpu,gpu
 ```
 
 退出码 0，接着应生成三个文件：

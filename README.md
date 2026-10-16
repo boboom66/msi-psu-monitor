@@ -27,7 +27,7 @@ Python standard library only — no third-party runtime dependencies.
 - **History export** — 9-column CSV over any `m/h/d` window, to a file or stdout.
 - **Local dashboard** — loopback-only charts (7 live curves + weekly energy) drawn
   from the daemon history, with per-chart PNG/CSV export.
-- **No-hardware demo mode** — exercise the whole pipeline with `MSI_PSU_DEMO=1`.
+- **No-hardware demo mode** — exercise the whole pipeline with `MSI_PSU_DEMO=1`, including every supported model via `MSI_PSU_DEMO_MODEL` (`ai1300p`, `meg_ai1600`, ...).
 
 ## Supported Hardware
 
@@ -66,6 +66,7 @@ sudo msi-psu-monitor --once
 
 # No PSU at hand? Drive the whole pipeline with the synthetic device
 MSI_PSU_DEMO=1 msi-psu-monitor --once
+MSI_PSU_DEMO=1 MSI_PSU_DEMO_MODEL=ai1300p msi-psu-monitor --once   # multi-rail model
 
 # Continuous text refresh
 sudo msi-psu-monitor --watch        # or --watch 1 for a 1s interval
@@ -180,7 +181,9 @@ MSI PSU: MPG Ai1600TS
     Pin currents (A): 0.4  0.4  0.4  0.4  0.4  0.4
 ```
 
-`0xC0`/`0xC1` are 12V-2x6-only registers: on the MEG models `--ocp` prints that the
+`0xC0` is overloaded, so `--ocp` adapts to the model: the MPG TS models get the 8-byte
+12V-2x6 thresholds and live state, the MEG P models get the 1-byte multirail flag
+(`msi_psu_multirail_ocp`), and the MEG Ai1600T — which answers neither — prints that the
 feature is unavailable and exits `0` (the same choice `--show-log` makes for an empty
 black box, so scripts can call it unconditionally).
 

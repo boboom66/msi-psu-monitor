@@ -201,6 +201,7 @@ class StubPSU:
         self.supports_ocp_config = supported
         self.product = product
         self.state_reads = 0
+        self.supports_multirail_ocp = False
 
     def read_ocp_thresholds(self):
         return self._config
@@ -266,6 +267,93 @@ def test_run_ocp_unsupported_model_prometheus(capsys):
 def test_run_ocp_read_failure_is_an_error(capsys):
     assert monitor.run_ocp(StubPSU(None), _args()) == EXIT_ERROR
     assert '0xC0' in capsys.readouterr().err
+
+
+# ---- multirail flag (MEG P models) --------------------------------------
+
+
+class MultiRailStub(StubPSU):
+    """A MEG P model: no 12V-2x6 config, but it answers the multirail flag."""
+
+    def __init__(self, multirail=True, product='MEG Ai1300P'):
+        super().__init__(None, supported=False, product=product)
+        self.supports_multirail_ocp = True
+        self._multirail = multirail
+
+    def read_multirail_ocp(self):
+        if self._multirail is None:
+            return None
+        return self._multirail
+
+
+def test_read_multirail_ocp_decodes_the_enable_value():
+    # CPSU.cs:829 -- RxData[3] == 2 means per-rail protection is on.
+    assert _psu(product='MEG Ai1300P', registers={0xC0: b'\x02'}).read_multirail_ocp() is True
+    assert _psu(product='MEG Ai1300P', registers={0xC0: b'\x01'}).read_multirail_ocp() is False
+
+
+def test_read_multirail_ocp_missing_or_empty():
+    assert _psu(product='MEG Ai1300P').read_multirail_ocp() is None
+    assert _psu(product='MEG Ai1300P', registers={0xC0: b''}).read_multirail_ocp() is None
+
+
+@pytest.mark.parametrize(
+    'product,expected',
+    [
+        ('MEG Ai1300P', True),
+        ('MEG Ai1000P', True),
+        ('MPG Ai1600TS', False),
+        ('MPG Ai1300TS', False),
+        ('MEG Ai1600T', False),
+    ],
+)
+def test_supports_multirail_ocp_only_on_the_meg_p_models(product, expected):
+    assert _psu(product=product).supports_multirail_ocp is expected
+
+
+def test_multirail_text_reports_the_protection_mode():
+    text = monitor.format_multirail_text(True, 'MEG Ai1300P')
+    assert 'MSI PSU: MEG Ai1300P' in text
+    assert 'Multirail OCP (0xC0):' in text
+    assert 'enabled   (per-rail protection)' in text
+    assert 'disabled' in monitor.format_multirail_text(False, '')
+
+
+def test_multirail_json_payload_shape():
+    payload = json.loads(monitor.format_multirail_json(False, 'MEG Ai1000P'))
+    assert payload == {'product': 'MEG Ai1000P', 'multirail_ocp': {'enabled': False}}
+
+
+def test_multirail_prometheus_gauge():
+    out = monitor.format_multirail_prometheus(True, 'MEG Ai1300P')
+    assert 'msi_psu_multirail_ocp{} 1' in out
+    assert monitor.format_multirail_prometheus(False, '').endswith('{} 0')
+
+
+def test_run_ocp_on_a_meg_p_model_shows_the_multirail_flag(capsys):
+    """--ocp is meaningful on every model but the Ai1600T."""
+    assert monitor.run_ocp(MultiRailStub(), _args()) == EXIT_OK
+    out = capsys.readouterr().out
+    assert 'Multirail OCP' in out
+    assert monitor.OCP_UNSUPPORTED not in out
+
+
+def test_run_ocp_on_a_meg_p_model_json(capsys):
+    assert monitor.run_ocp(MultiRailStub(multirail=False), _args(['-f', 'json'])) == EXIT_OK
+    payload = json.loads(capsys.readouterr().out)
+    assert payload['multirail_ocp'] == {'enabled': False}
+
+
+def test_run_ocp_multirail_read_failure_is_an_error(capsys):
+    assert monitor.run_ocp(MultiRailStub(multirail=None), _args()) == EXIT_ERROR
+    assert '0xC0' in capsys.readouterr().err
+
+
+def test_run_ocp_on_the_ai1600t_still_explains_the_absence(capsys):
+    """The Ai1600T answers neither 0xC0 view, so it keeps the old message."""
+    psu = StubPSU(None, supported=False, product='MEG Ai1600T')
+    assert monitor.run_ocp(psu, _args()) == EXIT_OK
+    assert monitor.OCP_UNSUPPORTED in capsys.readouterr().out
 
 
 def test_run_ocp_survives_a_failing_state_read(capsys):

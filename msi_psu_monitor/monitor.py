@@ -356,11 +356,17 @@ _OCP_RANGES = {
     'warning_s': (30, 240),
 }
 
-# C0h/C1h are 12V-2x6-only registers: CPSU.cs returns false for every MEG PID
-# before sending the read, so an unsupported model is a fact, not a failure.
+# C0h is an overloaded address with complementary model gates: CPSU.cs sends the
+# 8-byte 12V-2x6 read only for the MPG TS models and the 1-byte multirail read
+# only for the MEG P models. An unsupported model is therefore a fact, not a
+# failure, and the message says which of the two views is missing.
 OCP_UNSUPPORTED = (
-    '12V-2x6 OCP configuration is not available on this model '
-    '(0xC0/0xC1 exist only on the MPG Ai1600TS / MPG Ai1300TS).'
+    'OCP configuration is not available on this model '
+    '(0xC0/0xC1 exist only on the MPG Ai1600TS / MPG Ai1300TS / MEG Ai1300P / MEG Ai1000P).'
+)
+MULTIRAIL_UNSUPPORTED = (
+    'Multirail OCP status is not available on this model '
+    '(the 1-byte 0xC0 flag exists only on the MEG Ai1300P / MEG Ai1000P).'
 )
 
 
@@ -480,6 +486,41 @@ def format_ocp_prometheus(config, state, product):
             lines.append(f'msi_psu_ocp_total_time{{connector="{index}"}} {total_time}')
     return '\n'.join(lines)
 
+
+def format_multirail_text(multirail, product):
+    """Format the 1-byte multirail OCP flag (0xC0) as text."""
+    state = 'enabled' if multirail else 'disabled'
+    detail = 'per-rail protection' if multirail else 'single combined-rail protection'
+    lines = [f'MSI PSU: {product}' if product else 'MSI PSU']
+    lines.append('Multirail OCP (0xC0):')
+    lines.append(f'  {"Enabled":<16}: {state}   ({detail})')
+    return '\n'.join(lines)
+
+
+def format_multirail_json(multirail, product):
+    """Format the 1-byte multirail OCP flag (0xC0) as JSON."""
+    return json.dumps(
+        {'product': product, 'multirail_ocp': {'enabled': bool(multirail)}},
+        indent=2,
+    )
+
+
+def format_multirail_prometheus(multirail, product):
+    """Format the 1-byte multirail OCP flag (0xC0) as prometheus text."""
+    return '\n'.join(
+        [
+            '# HELP msi_psu_multirail_ocp Per-rail OCP enabled (1) or combined-rail (0)',
+            '# TYPE msi_psu_multirail_ocp gauge',
+            f'msi_psu_multirail_ocp{{}} {1 if multirail else 0}',
+        ]
+    )
+
+
+MULTIRAIL_FORMATTERS = {
+    'text': format_multirail_text,
+    'json': format_multirail_json,
+    'prometheus': format_multirail_prometheus,
+}
 
 OCP_FORMATTERS = {
     'text': format_ocp_text,
@@ -712,15 +753,37 @@ def run_ocp(psu, args):
     """
     product = getattr(psu, 'product', '') or ''
     if not getattr(psu, 'supports_ocp_config', False):
-        if args.format == 'json':
-            emit(json.dumps({'product': product, 'supported': False}, indent=2), args.output)
-        elif args.format == 'prometheus':
-            emit(f'# {OCP_UNSUPPORTED}', args.output)
-        else:
-            emit(f'MSI PSU: {product}' if product else 'MSI PSU', args.output)
-            emit(OCP_UNSUPPORTED, args.output)
+        return _emit_ocp_unsupported(psu, product, args)
+
+    return _run_ocp_12v2x6(psu, product, args)
+
+
+def _emit_ocp_unsupported(psu, product, args):
+    """Explain which OCP view is missing without treating it as an error.
+
+    The MEG P models still have the multirail flag, so they get that instead of
+    the 12V-2x6 report; the MEG Ai1600T answers neither register.
+    """
+    if getattr(psu, 'supports_multirail_ocp', False):
+        multirail = psu.read_multirail_ocp()
+        if multirail is None:
+            logger.error('Error: the PSU did not answer the 0xC0 multirail OCP read.')
+            return EXIT_ERROR
+        emit(MULTIRAIL_FORMATTERS[args.format](multirail, product), args.output)
         return EXIT_OK
 
+    if args.format == 'json':
+        emit(json.dumps({'product': product, 'supported': False}, indent=2), args.output)
+    elif args.format == 'prometheus':
+        emit(f'# {OCP_UNSUPPORTED}', args.output)
+    else:
+        emit(f'MSI PSU: {product}' if product else 'MSI PSU', args.output)
+        emit(OCP_UNSUPPORTED, args.output)
+    return EXIT_OK
+
+
+def _run_ocp_12v2x6(psu, product, args):
+    """Report the 8-byte 12V-2x6 OCP configuration and its realtime state."""
     config = psu.read_ocp_thresholds()
     if config is None:
         logger.error('Error: the PSU did not answer the 0xC0 OCP configuration read.')

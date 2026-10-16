@@ -9,6 +9,7 @@ from msi_psu_monitor import monitor
 from msi_psu_monitor import state as stats
 from msi_psu_monitor.daemon import MonitorDaemon
 from msi_psu_monitor.config import DEFAULTS
+from msi_psu_monitor.protocol import MSIPSU
 
 
 class Clock:
@@ -178,3 +179,95 @@ def test_daemon_history_and_prometheus_work_in_demo_mode(tmp_path, monkeypatch):
     assert 'msi_psu_info{product="MPG Ai1600TS (demo)"' in prom
     assert 'msi_psu_status_12v_2x6{status="Normal"} 1' in prom
     assert stats.MonitorState.load(stats.state_path(tmp_path)).serial == demo.DEMO_SERIAL
+
+
+# ---- multi-model demo (MSI_PSU_DEMO_MODEL) ------------------------------
+
+
+def test_model_defaults_to_the_ts_1600(monkeypatch):
+    monkeypatch.delenv(demo.MODEL_ENV, raising=False)
+    assert demo.model() == 'mpg_ai1600ts'
+    assert demo.DemoPSU(clock=Clock()).product == demo.PRODUCT
+
+
+@pytest.mark.parametrize('variant', sorted(demo.MODEL_WATTS))
+def test_every_supported_variant_can_be_emulated(monkeypatch, variant):
+    monkeypatch.setenv(demo.MODEL_ENV, variant)
+    psu = demo.DemoPSU(clock=Clock())
+    assert psu.variant == variant
+    assert psu.product == f'{MSIPSU.VARIANTS[variant]["name"]} (demo)'
+
+
+def test_unknown_model_falls_back_instead_of_failing(monkeypatch):
+    monkeypatch.setenv(demo.MODEL_ENV, 'Ai9999X')
+    assert demo.model() == demo.DEFAULT_MODEL
+
+
+def test_model_env_is_case_insensitive(monkeypatch):
+    monkeypatch.setenv(demo.MODEL_ENV, ' AI1300P ')
+    assert demo.model() == 'ai1300p'
+
+
+def test_per_pin_payload_only_on_the_12v_2x6_models():
+    ts = demo.DemoPSU(clock=Clock(), variant='mpg_ai1600ts').get_sensors()
+    assert len(ts['iout_pins'][0]) == 12
+    assert 'iout_12v_rails' not in ts
+
+    p_model = demo.DemoPSU(clock=Clock(), variant='ai1300p').get_sensors()
+    assert 'iout_pins' not in p_model
+    assert len(p_model['iout_12v_rails'][0]) == 5
+
+    t_model = demo.DemoPSU(clock=Clock(), variant='meg_ai1600').get_sensors()
+    assert 'iout_pins' not in t_model
+    assert 'iout_12v_rails' not in t_model
+
+
+def test_rails_sum_to_the_reported_12v_total():
+    sensors = demo.DemoPSU(clock=Clock(), variant='ai1000p').get_sensors()
+    rails = sensors['iout_12v_rails'][0]
+    assert sum(rails) == pytest.approx(sensors['iout_12v_total'][0], rel=0.12)
+
+
+def test_rail_watts_are_derived_from_the_demo_rails():
+    sensors = demo.DemoPSU(clock=Clock(), variant='ai1300p').get_sensors()
+    watts = stats.rail_watts(sensors)
+    assert watts is not None
+    cpu, gpu = watts
+    # 12V2 is the CPU rail, 12V3-5 feed the GPU, so the GPU always draws more.
+    assert 0 < cpu < gpu
+
+
+def test_wattage_ramp_follows_the_model_rating():
+    clock = Clock()
+    clock.now += demo.CYCLE_S / 4  # peak of the sine
+    big = demo.DemoPSU(clock=clock, variant='mpg_ai1600ts').get_sensors()
+    small = demo.DemoPSU(clock=clock, variant='ai1000p').get_sensors()
+    assert big['power_total'][0] > small['power_total'][0]
+
+
+@pytest.mark.parametrize(
+    'variant,ocp,multirail',
+    [
+        ('mpg_ai1600ts', True, False),
+        ('mpg_ai1300ts', True, False),
+        ('ai1300p', False, True),
+        ('ai1000p', False, True),
+        ('meg_ai1600', False, False),
+    ],
+)
+def test_demo_variant_gates_match_the_protocol(variant, ocp, multirail):
+    psu = demo.DemoPSU(clock=Clock(), variant=variant)
+    assert psu.supports_ocp_config is ocp
+    assert psu.supports_multirail_ocp is multirail
+    assert psu.read_multirail_ocp() is (True if multirail else None)
+
+
+def test_demo_export_records_cpu_gpu_for_a_multi_rail_model(tmp_path, monkeypatch):
+    """The no-hardware path that was previously unreachable: rails -> cpu/gpu CSV."""
+    monkeypatch.setenv('MSI_PSU_DEMO', '1')
+    monkeypatch.setenv(demo.MODEL_ENV, 'ai1300p')
+    stats.append_history(tmp_path, demo.DemoPSU(clock=Clock()).get_sensors(), ts=1700000000.0)
+    header, rows = stats.build_export(tmp_path, since_ts=None, columns=['cpu', 'gpu'])
+    assert header == ['time', 'cpu', 'gpu']
+    cpu, gpu = (float(value) for value in rows[0][1:3])
+    assert 0 < cpu < gpu

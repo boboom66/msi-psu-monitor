@@ -66,6 +66,13 @@ runtime imports.
 
 - Do NOT add pip runtime dependencies.
 - Do NOT touch `BULK_*` for non-TS variants.
+- Do NOT pass `protocol.py` to `ruff format` (it rewrites ~200 unrelated lines of
+  quote style); format only the files you touched, and re-apply semantic edits on top
+  of `git checkout` when a formatter run slips in.
+- Do NOT gate `0xC0` on payload length: `supports_ocp_config` (8 bytes, MPG TS) and
+  `supports_multirail_ocp` (1 byte, MEG P) are complementary variant checks.
+- The demo's model table lives in `demo.MODEL_WATTS`; a new variant must be added
+  there too, or `MSI_PSU_DEMO_MODEL` cannot reach it.
 - Do NOT harden `systemd/*.service` with `PrivateDevices` (needs `/dev/hidraw*`).
 - Do NOT let the dashboard touch hidraw — it is read-only over `daily-*.log`.
 - `--once or not watch` means the default run is one-shot; keep it.

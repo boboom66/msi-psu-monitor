@@ -290,6 +290,9 @@ class MSIPSU:
         "mpg_ai1600ts": {"name": "MPG Ai1600TS", "bulk_size": 62, "payload_size": 44},
     }
     SEVEN_ZPU_VARIANTS = ("mpg_ai1600ts", "mpg_ai1300ts")
+    # Only the MEG P models answer the 1-byte multirail OCP flag (`CPSU.cs:823`);
+    # the MPG TS models use the 8-byte 12V-2x6 config at the same address instead.
+    MULTIRAIL_VARIANTS = ("ai1000p", "ai1300p")
     # Ai1000P/Ai1300P expose five discrete 12V rails plus a combined rail.
     RAIL_COUNT = 5
 
@@ -739,6 +742,15 @@ class MSIPSU:
         """
         return self.variant in MSIPSU.SEVEN_ZPU_VARIANTS
 
+    @property
+    def supports_multirail_ocp(self):
+        """True when the model answers the 1-byte multirail flag (C0h).
+
+        ``CPSU.cs:823`` rejects the MEG Ai1600T and both MPG TS PIDs, so only the
+        multi-rail MEG models reach the read.
+        """
+        return self.variant in MSIPSU.MULTIRAIL_VARIANTS
+
     def read_ocp_thresholds(self):
         """Read OCP12+4_CONFIG (C0h, 8 bytes).
 
@@ -765,3 +777,20 @@ class MSIPSU:
             "diff_trigger_s": body[6],
             "warning_s": body[7],
         }
+
+    def read_multirail_ocp(self):
+        """Read the multirail OCP flag (C0h, 1 byte, MEG P models only).
+
+        The same register that carries the 8-byte 12V-2x6 configuration on the
+        MPG TS models answers this single byte on the Ai1000P/Ai1300P. ``2``
+        means the PSU protects each 12V rail separately, ``1`` means it falls
+        back to one combined rail (`CPSU.cs:823-832`).
+
+        Returns:
+            True/False for per-rail protection, or None when the model does not
+            answer (MEG Ai1600T and the MPG TS models) or the read failed.
+        """
+        data = self.hid.read_register(REG_MULTIRAIL)
+        if data is None or len(data) < 1:
+            return None
+        return data[0] == 2
