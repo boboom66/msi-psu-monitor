@@ -34,7 +34,7 @@ PASS=0
 FAIL=0
 # Keep in sync with the count quoted in docs/verify.md: a check that quietly
 # disappears from this script is a gap nobody notices.
-EXPECTED_TOTAL=47
+EXPECTED_TOTAL=49
 
 ok()   { PASS=$((PASS + 1)); printf '\033[0;32m  ok\033[0m   %s\n' "$1"; }
 bad()  { FAIL=$((FAIL + 1)); printf '\033[0;31m  FAIL\033[0m %s\n' "$1"; [ $# -gt 1 ] && printf '       %s\n' "$2"; }
@@ -207,6 +207,29 @@ for path in sorted(root.glob('msi_psu_monitor/*.py')) + sorted((root / 'tests').
 print('  3.10 syntax ok')
 EOF
 [ $? -eq 0 ] && ok "全部 .py 通过 3.10 语法校验" || bad "全部 .py 通过 3.10 语法校验"
+
+printf '\n\033[1m[10] systemd unit 与 udev 规则\033[0m\n'
+# Packaging artifacts that CI never installs: verify them with the tools that
+# would reject them at install time. A missing tool still counts as a check so
+# the total stays deterministic.
+if command -v systemd-analyze >/dev/null 2>&1; then
+    if systemd-analyze verify "$ROOT/systemd/msi-psu-monitor.service" 2>"$WORK/systemd.err"; then
+        ok "unit 通过 systemd-analyze verify"
+    else
+        bad "unit 通过 systemd-analyze verify" "$(tail -1 "$WORK/systemd.err")"
+    fi
+else
+    ok "systemd-analyze 不存在，跳过 unit 校验"
+fi
+if udevadm verify --help >/dev/null 2>&1; then
+    if udevadm verify "$ROOT/systemd/99-msi-psu.rules" >/dev/null 2>&1; then
+        ok "udev 规则通过 udevadm verify"
+    else
+        bad "udev 规则通过 udevadm verify"
+    fi
+else
+    ok "udevadm verify 不存在，跳过规则校验"
+fi
 
 if [ "$PASS" -ne "$EXPECTED_TOTAL" ]; then
     bad "检查项数量应为 $EXPECTED_TOTAL" "实际 $PASS（有检查被删掉或没加进计数？）"

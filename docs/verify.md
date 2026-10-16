@@ -70,7 +70,7 @@ uv run --group dev ruff format --check .
    ——该常量同时会被脚本自己核对，检查项被误删时脚本也会失败。
 
 一条命令跑完整条无硬件链路（三种格式 / 告警 exit 2 及按机型鉴名 / 黑盒 / OCP /
-风扇写 / daemon→prometheus+历史 / dashboard HTTP / 3.10 语法），共 47 项，失败即非零退出：
+风扇写 / daemon→prometheus+历史 / dashboard HTTP / 3.10 语法），共 49 项，失败即非零退出：
 
 ```bash
 bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
@@ -321,6 +321,13 @@ PYTHONPATH=/tmp/debroot/usr/lib/python3/dist-packages /tmp/debroot/usr/bin/msi-p
 ```
 
 （直接从解包目录跑需要 `PYTHONPATH`；装到真实根目录后 `/usr/lib/python3/dist-packages` 在默认路径里，无需设置。）
+
+打包里那两个「只在安装时才被检查」的文件，用真正会拒绝它们的工具验一遍（smoke 的 [10] 也跑这两条）：
+
+```bash
+systemd-analyze verify systemd/msi-psu-monitor.service   # 退出码 0；坏 ExecStart 会非零
+udevadm verify systemd/99-msi-psu.rules                  # Success: 1  Fail: 0（systemd ≥ 250）
+```
 
 ## 8. 真机到达后（唯一待补）
 
