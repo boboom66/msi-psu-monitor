@@ -29,6 +29,14 @@ jobs:
         run: uv run --group dev ruff format --check .
       - name: Mypy
         run: uv run --group dev mypy msi_psu_monitor/
+      # The install/packaging/smoke scripts are shipped to users and CI never
+      # runs them for real, so lint them here. -S warning: the `[ x ] && ok ||
+      # bad` reporter idiom in smoke.sh is intentional, not if-then-else.
+      - name: Shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          shellcheck -S warning scripts/*.sh
       - name: Pytest
         run: uv run --group dev pytest -q
       # End-to-end on the synthetic PSU: CLI formats, alert exit 2, black box,

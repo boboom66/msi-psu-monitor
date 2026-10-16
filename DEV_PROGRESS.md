@@ -44,6 +44,12 @@
   MEG 上的 `Zero Fan` 状态是**编造**出来的（拿未定义字节当开关）；现 MEG 报
   `None`（text 显示 `unknown`），TS 仍出四元组。另按 MSI 的 `Mode == 3 ? RxData[5] : 0`
   只在 customized 模式导出 `fan_duty`（auto 模式下残存的设定值不是风扇实际转速）。
+- **`StateDirectory=` 与代码里的状态目录不再各说各话（本轮）**：`state.default_state_dir()`
+  改为认 systemd 导出的 `STATE_DIRECTORY`（多个用 `:` 分隔时取第一个），优先级
+  `MSI_PSU_STATE_DIR` > `STATE_DIRECTORY` > `/var/lib/msi-psu-monitor` > XDG。以前两者
+  只因为**名字恰好相同**才对得上；一旦 unit 里改了目录名（或改成用户级 `systemd --user`
+  + `StateDirectory=`），代码会退到 `~/.local/state`，而 unit 的 `ProtectHome=yes` 让家目录
+  根本不可写——累计电量与历史会**静默不落盘**。
 - **配置文件不再「静默失效」或「把 CLI 打断」（本轮）**：
   - `--config /typo.conf` 以前被 `configparser.read()` 悄悄忽略 → 用户按自己写的配置
     期待行为，实际跑的是内置默认值（`state_dir` 尤其危险：daemon 会写到别处）。现
@@ -84,7 +90,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 295 passed
+uv run --group dev pytest -q                     → 297 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 30 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues

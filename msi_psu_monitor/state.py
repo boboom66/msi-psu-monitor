@@ -70,10 +70,17 @@ _FROM_RE = re.compile(r'^(\d+(?:\.\d+)?)\s*([mhd])$', re.IGNORECASE)
 
 
 def default_state_dir():
-    """Return the directory used for state.json and daily-*.log."""
+    """Return the directory used for state.json and daily-*.log.
+
+    ``STATE_DIRECTORY`` is what systemd exports for ``StateDirectory=`` in the
+    unit; honouring it keeps the unit the single source of truth for the path.
+    """
     override = os.environ.get('MSI_PSU_STATE_DIR')
     if override:
         return Path(override)
+    systemd_dir = os.environ.get('STATE_DIRECTORY')
+    if systemd_dir:
+        return Path(systemd_dir.split(':')[0])
     if os.access(DEFAULT_STATE_DIR, os.W_OK) or (
         not DEFAULT_STATE_DIR.exists() and os.access(DEFAULT_STATE_DIR.parent, os.W_OK)
     ):

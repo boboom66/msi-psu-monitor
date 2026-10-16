@@ -10,7 +10,7 @@
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-cd "$ROOT"
+cd "$ROOT" || exit 1
 
 PY=python3
 [ -x .venv/bin/python ] && PY=.venv/bin/python

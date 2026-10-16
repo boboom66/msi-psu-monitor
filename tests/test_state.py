@@ -249,3 +249,16 @@ def test_append_history_repairs_a_headerless_file(tmp_path):
     assert header == ['time', '12v', 'cpu']
     assert rows[0][1] == '12.100'
     assert rows[0][2] == stats.NOT_AVAILABLE
+
+
+def test_state_dir_prefers_the_explicit_override(monkeypatch, tmp_path):
+    monkeypatch.setenv('MSI_PSU_STATE_DIR', str(tmp_path / 'explicit'))
+    monkeypatch.setenv('STATE_DIRECTORY', str(tmp_path / 'systemd'))
+    assert stats.default_state_dir() == tmp_path / 'explicit'
+
+
+def test_state_dir_honours_the_systemd_state_directory(monkeypatch, tmp_path):
+    """StateDirectory= in the unit must win: ProtectHome makes $HOME unusable."""
+    monkeypatch.delenv('MSI_PSU_STATE_DIR', raising=False)
+    monkeypatch.setenv('STATE_DIRECTORY', f'{tmp_path / "srv"}:/run/other')
+    assert stats.default_state_dir() == tmp_path / 'srv'
