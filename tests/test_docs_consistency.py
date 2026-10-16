@@ -1,14 +1,17 @@
-"""Keep the numbers and file lists quoted in the docs true.
+"""Keep the facts quoted in the docs and metadata true.
 
 Docs rot silently: a test count copied into three files drifts the moment a test
-is added, and a checklist that names the wrong module reads as authority. Both
-are cheap to verify, so they are verified here instead of trusted.
+is added, a checklist that names the wrong module reads as authority, and a
+version bump that misses one of its two homes ships a package that disagrees with
+itself. All three are cheap to verify, so they are verified here instead of
+trusted.
 """
 
 import pathlib
 import re
 import subprocess
 import sys
+import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DOCS = [
@@ -91,3 +94,18 @@ def test_readme_usage_matches_the_real_cli():
     }
     assert not real - documented, f'undocumented flags: {sorted(real - documented)}'
     assert not documented - real, f'flags that no longer exist: {sorted(documented - real)}'
+
+
+def test_version_matches_between_module_and_pyproject():
+    """`--version`, the .deb control file and PyPI all read different copies."""
+    import msi_psu_monitor
+
+    project = tomllib.loads((ROOT / 'pyproject.toml').read_text())['project']
+    assert msi_psu_monitor.__version__ == project['version']
+
+
+def test_build_script_takes_the_version_from_pyproject():
+    """A hardcoded version in the packager would ship a stale .deb."""
+    script = (ROOT / 'scripts' / 'build_deb.sh').read_text()
+    assert 'pyproject.toml' in script
+    assert not re.search(r'VERSION=\d', script), 'version is hardcoded again'
