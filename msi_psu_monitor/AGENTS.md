@@ -67,7 +67,9 @@ runtime imports.
 - **`collect_alerts()` returns `have_e1h`** ("did the E1h bitmap answer?"): the pin
   mirror only sees the OCP pins and their imbalance, not `opp`/`otp`/`fan`, so a poll
   without the bitmap renders as `Unknown`, never as `Normal` — and it never clears an
-  alert the engine already fired.
+  alert the engine already fired. A poll that answers does the opposite: `retain()` drops
+  the names this device cannot report, so a model swap cannot leave a foreign alert
+  latched (a name with no bit never gets the `False` that would clear it).
 - **The E1h bit order is per model** (`ALERT_INDEXES`, mirroring the three
   `Alert_Index_*` arrays at `CPSU.cs:1046`): byte 0 is 12V OVP on a MEG and 12V OCP on
   a MPG TS, and the Ai1600T sends 13 bytes, not 18. Never index that bitmap with a
@@ -115,7 +117,7 @@ runtime imports.
 ## Verification (no hardware required)
 
 ```bash
-uv run --group dev pytest -q              # 418 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
+uv run --group dev pytest -q              # 421 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
 uv run --group dev ruff check .           # must be clean
 uv run --group dev mypy msi_psu_monitor/  # must be clean
 ```

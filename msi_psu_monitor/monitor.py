@@ -623,6 +623,15 @@ def collect_alerts(psu, engine, sensors):
     if not active and not have_e1h:
         return [], [], False
 
+    if have_e1h:
+        # The E1h answer is what defines the names this device has (its index
+        # array, plus the mirror's own names when the payload carried pins). Drop
+        # anything else the engine latched while a different model was attached:
+        # a name this device never reports can never be cleared by a False.
+        # Only on a successful read -- an unanswered E1h poll must not clear an
+        # alert that is already firing.
+        engine.retain(active)
+
     fired = engine.update(active)
     for alert in fired:
         logger.warning(format_alert_line(alert))

@@ -103,6 +103,27 @@ class AlertEngine:
                 self._fired.discard(name)
         return fired
 
+    def retain(self, names):
+        """Forget alerts (and streaks) this device cannot report any more.
+
+        A name only leaves the fired set when a poll reports it ``False``, so an
+        alert inherited from a previously attached model outlives the device that
+        could produce it: ``ocp_pin1`` latched on an Ai1600TS is not in the MEG
+        Ai1300P's index array, so it is never reported again and the daemon exports
+        ``msi_psu_alert{alert="ocp_pin1"} 1`` (and a status line naming it) forever.
+
+        Callers pass the names the current device can report -- and only when they
+        actually read the E1h bitmap, because an unanswered read says nothing
+        about which names the device has (see ``monitor.collect_alerts``).
+
+        Args:
+            names: Alert names that stay in the engine.
+        """
+        known = set(names)
+        self._fired &= known
+        for name in [name for name in self._streaks if name not in known]:
+            del self._streaks[name]
+
     @property
     def active_alerts(self):
         """Names of alerts currently in fired state."""

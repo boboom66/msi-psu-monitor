@@ -8,7 +8,7 @@ Protocol rules live in `msi_psu_monitor/AGENTS.md` (auto-loaded via `opencode.js
 
 ```bash
 uv sync --group dev                                  # py>=3.10, dev toolchain (pytest/ruff/mypy), zero runtime deps
-uv run --group dev pytest -q                         # 418 tests, no hardware needed
+uv run --group dev pytest -q                         # 421 tests, no hardware needed
 uv run --group dev pytest -q tests/test_state.py     # single file
 uv run --group dev ruff check .                      # must be clean
 uv run --group dev mypy msi_psu_monitor/             # must be clean
@@ -62,7 +62,11 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12.
   default 2). `collect_alerts()` also returns `have_e1h` (did the E1h bitmap answer?):
   only that read covers every alert bit, so a mirror-only poll (or no answer at all)
   must make the status read `Unknown`, never `Normal`. Names left out of a poll keep the
-  engine's state, so a failed read never clears an alert that is already firing.
+  engine's state, so a failed read never clears an alert that is already firing. The other
+  half of that rule: a poll that *does* answer calls `AlertEngine.retain()` with the names
+  the device reported, because a name a model has no bit for (``ocp_pin1`` on a MEG) would
+  otherwise stay latched forever after a model swap -- exporting and printing an alert the
+  attached PSU cannot produce.
 - **`docs/protocol.md` now matches the code** for 0xE1 (alert status), 0xC1 (alert log
   + OCP state), 0x41/0x42 (fan), 0xC0 (OCP) and 0xF1 (save). Treat the code as truth where
   they differ again, but do not describe implemented registers as "unimplemented".

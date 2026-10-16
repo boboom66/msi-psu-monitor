@@ -79,3 +79,25 @@ def test_blip_below_threshold_never_fires():
 def test_invalid_consecutive_required():
     with pytest.raises(ValueError):
         AlertEngine(consecutive_required=0)
+
+
+def test_retain_drops_what_the_device_cannot_report():
+    """A swap to another model must not leave a foreign alert latched.
+
+    Only a poll that reports a name ``False`` clears it, so a name the new model
+    has no bit for (``ocp_pin1`` on a MEG) would fire forever.
+    """
+    engine = AlertEngine(consecutive_required=1)
+    engine.update({'ocp_pin1': True, 'pin_imbalance': True, 'fan': True})
+    assert engine.active_alerts == ['fan', 'ocp_pin1', 'pin_imbalance']
+
+    engine.retain({'fan', 'otp'})
+    assert engine.active_alerts == ['fan']
+    # The streak is gone too: a name that comes back has to re-earn its debounce.
+    assert engine._streaks == {'fan': 1}
+
+    engine.retain({'fan'})
+    engine.update({'fan': True})
+    assert engine.active_alerts == ['fan'], 'a retained name stays fired'
+    engine.update({'fan': False})
+    assert engine.active_alerts == []

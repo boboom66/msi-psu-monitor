@@ -603,3 +603,57 @@ def test_an_unopenable_device_is_retried_on_the_discovery_throttle(tmp_path, cap
     assert len(daemon.created) == 1  # the other ticks waited for the throttle
     warnings = [r.message for r in caplog.records if 'Cannot open' in r.message]
     assert len(warnings) == 1
+
+
+def test_a_swapped_model_does_not_inherit_the_old_latched_alert(tmp_path, caplog):
+    """A TS alert is not in the MEG's index array, so nothing would ever clear it.
+
+    Only a poll reporting the name ``False`` clears the latch, so after a model
+    swap ``ocp_pin1`` stayed fired forever: the daemon exported
+    ``msi_psu_alert{alert="ocp_pin1"} 1`` and a status line naming it on a PSU that
+    has no per-pin sensing, while its own E1h register said Normal.
+    """
+    clock = Clock()
+    # A TS model reports ocp_pin1 (and the software mirror adds pin_imbalance);
+    # the MEG index array has neither, but both report otp.
+    ts_pins = [8.0] * 12
+    ts = StubPSU(
+        {**clean_sensors(), 'iout_pins': (ts_pins, 'A')},
+        alerts={'ocp_pin1': True, 'pin_imbalance': True, 'otp': True, 'fan': False},
+    )
+    meg = StubPSU(
+        {'product': 'MEG Ai1300P', 'vout_12v': (12.0, 'V'), 'power_total': (500.0, 'W')},
+        alerts={'otp': True, 'fan': False},
+    )
+    daemon = make_daemon(tmp_path, ts, clock=clock, prom_path=str(tmp_path / 'psu.prom'))
+    assert daemon.sample()['status'] == 'ocp_pin1, otp, pin_imbalance'
+    daemon.tick()
+
+    daemon._rediscover()  # the PSU dropped off the bus
+    daemon.psu_factory = lambda path: meg
+
+    # otp is reported active by both models and stays; the TS-only names are gone.
+    assert daemon.sample()['status'] == 'otp'
+    clock.advance(30)  # the textfile is rewritten on the 30 s cadence
+    daemon.tick()
+    prom = (tmp_path / 'psu.prom').read_text()
+    assert 'msi_psu_alert{alert="otp"} 1' in prom
+    assert 'ocp_pin1' not in prom
+    assert 'pin_imbalance' not in prom
+
+
+def test_an_unanswered_e1h_read_never_prunes_the_latch(tmp_path):
+    """retain() must only run on a real E1h answer.
+
+    Otherwise a single failed poll would drop the fan bit -- the one critical
+    alert -- and the next successful poll would re-announce it as a new edge.
+    """
+    sensors = clean_sensors()
+    stub = StubPSU(sensors, alerts={'fan': True, 'otp': False})
+    daemon = make_daemon(tmp_path, stub)
+    assert daemon.sample()['status'] == 'fan'
+
+    stub._alerts = None  # E1h now fails: the mirror-only poll must not prune
+    assert daemon.sample()['status'] == 'fan'
+    stub._alerts = {'fan': False, 'otp': False}  # and a real answer still clears it
+    assert daemon.sample()['status'] == 'Normal'

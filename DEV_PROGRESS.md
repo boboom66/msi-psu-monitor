@@ -272,7 +272,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 418 passed
+uv run --group dev pytest -q                     → 421 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 32 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
@@ -310,6 +310,19 @@ bash scripts/smoke.sh                            → 53 项全过（三种格式
   代码把 62B 载荷填进 `msipsu_all_ai1600ts`（**即便编译过也只会报未初始化的针脚电流**——
   正是本项目最忌讳的「没测到的健康」）。现三处如实标注为草稿 + 列出致命点，不再指示用户 build。
   要做完需要：钉版的上游 `msi-psu.c`、目标内核头文件、真机 62B 回读验证——三者仓库内都没有。
+
+### 换机型后不再永久挂着上一台的告警（本轮，P1）
+
+`AlertEngine` 只在「某名字这一轮被报为 False」时才清 latch，而 TS 专有的名字
+（`ocp_pin1`..`ocp_pin12`、`pin_imbalance`）在 MEG 的 `ALERT_INDEXES` 里根本不存在：
+daemon 拔掉 TS 换上 MEG 之后（`_drop_psu()` 会清 OCP 缓存，但从不碰 `self.engine`），
+那些名字再也不会被报一次，于是**永远**挂在导出与状态行里——`msi_psu_alert{alert="ocp_pin1"} 1`
+和 `Status: ocp_pin1, pin_imbalance` 会出现在一台没有逐针采样的电源上，而它自己的 E1h
+寄存器是 Normal。反向（MEG Ai1600T 的 `ac` 挂到 TS 上）同理。
+
+现加 `AlertEngine.retain(names)`：**只在这一轮真的读到了 E1h** 时，用这台设备能报的名字
+集合收窄引擎状态（失败的读什么都不动，保住「读失败不清告警」那条不变量）。
+两条新测试：机型互换后 TS 专有名字消失而两台都报的 `otp` 保留；E1h 失败时绝不收窄。
 
 ### 读回包首字节是 0xFE 时不再被当成 NAK（本轮，P0 级数据丢失）
 
