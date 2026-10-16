@@ -1,6 +1,7 @@
 """Tests for the local dashboard HTTP endpoints (no hardware, no network egress)."""
 
 import json
+import re
 import threading
 import time
 from urllib.error import HTTPError
@@ -55,7 +56,41 @@ def test_page_renders_without_placeholder_leftovers(live_server):
     assert status == 200
     assert '<title>MSI PSU Monitor</title>' in body
     assert '__REFRESH_MS__' not in body
+    assert '__ROW_LIMIT__' not in body
     assert 'setInterval(load, 30000)' in body
+    assert 'const ROW_LIMIT = 20000;' in body
+
+
+def test_every_placeholder_the_page_uses_is_substituted():
+    """A placeholder nobody substitutes reaches the browser verbatim.
+
+    The page used to reference the Python constant ``ROW_LIMIT`` directly, so
+    ``load()`` threw a ReferenceError before drawing anything: every endpoint was
+    healthy and the page stayed empty.
+    """
+    used = set(re.findall(r'__[A-Z0-9_]+__', dashboard.PAGE))
+    assert used
+    assert used <= set(dashboard.PAGE_SUBSTITUTIONS)
+    for name in used:
+        assert name not in dashboard.render_page()
+
+
+def test_the_page_script_declares_every_constant_it_uses():
+    """The embedded JS may only use constants it declares or that it is given.
+
+    ``const``/``let``/``var`` declarations and the injected placeholders are the
+    only sources a browser has; every other UPPER_SNAKE name would be a
+    server-side constant that the page cannot see.
+    """
+    script = dashboard.PAGE.split('<script>', 1)[1].split('</script>', 1)[0]
+    # Identifiers inside a string literal or a comment are data, not references.
+    code = re.sub(r"'[^']*'|\"[^\"]*\"|`[^`]*`", ' ', script, flags=re.S)
+    code = re.sub(r'//[^\n]*', ' ', code)
+    declared = set(re.findall(r'\b(?:const|let|var)\s+([A-Z][A-Z0-9_]*)', code))
+    injected = {name.strip('_') for name in re.findall(r'__[A-Z0-9_]+__', code)}
+    browser_globals = {'JSON', 'URL'}
+    used = set(re.findall(r'\b([A-Z][A-Z0-9_]{2,})\b', code))
+    assert used <= declared | injected | browser_globals
 
 
 def test_history_endpoint_returns_rows(live_server):

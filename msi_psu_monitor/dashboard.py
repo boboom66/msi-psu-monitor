@@ -89,6 +89,9 @@ const CHARTS = [
   {id:'power', title:'Power / efficiency',unit:'W / %', keys:[['power','#e05cc9'],['eff','#6ea8fe']]},
 ];
 let range = '7d', rows = [];
+// Injected by the server (see PAGE_SUBSTITUTIONS): a Python constant is not
+// visible to the browser, and a bare reference here only throws at runtime.
+const ROW_LIMIT = __ROW_LIMIT__;
 
 function buildCards() {
   const grid = document.getElementById('grid');
@@ -204,16 +207,28 @@ function drawWeekly() {
 
 let daily = {};
 
+function okJson(response) {
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
 async function load() {
-  const [hist, st] = await Promise.all([
-    fetch(`/api/history?from=${range}`).then(r => r.json()),
-    fetch('/api/state').then(r => r.json()),
-  ]);
-  rows = hist.rows.slice(-ROW_LIMIT);
-  daily = st.daily || {};
-  document.getElementById('info').textContent =
-    `${st.product || 'MSI PSU'} \\u00b7 samples ${st.count} \\u00b7 avg ${st.power_avg.toFixed(2)} W ` +
-    `\\u00b7 avg eff ${st.efficiency_avg.toFixed(2)} % \\u00b7 total ${st.total_energy_kwh.toFixed(3)} kWh`;
+  const info = document.getElementById('info');
+  try {
+    const [hist, st] = await Promise.all([
+      fetch(`/api/history?from=${range}`).then(okJson),
+      fetch('/api/state').then(okJson),
+    ]);
+    rows = hist.rows.slice(-ROW_LIMIT);
+    daily = st.daily || {};
+    info.textContent =
+      `${st.product || 'MSI PSU'} \\u00b7 samples ${st.count} \\u00b7 avg ${st.power_avg.toFixed(2)} W ` +
+      `\\u00b7 avg eff ${st.efficiency_avg.toFixed(2)} % \\u00b7 total ${st.total_energy_kwh.toFixed(3)} kWh`;
+  } catch (err) {
+    // A failed poll has to be visible: leaving the previous numbers on screen
+    // without a word is how a dead daemon keeps looking healthy.
+    info.textContent = `Data may be stale (${err})`;
+  }
   render();
 }
 
@@ -237,6 +252,23 @@ setInterval(load, __REFRESH_MS__);
 </body>
 </html>
 """
+
+
+# Values the embedded page needs but cannot see. A Python constant is invisible
+# to the browser, so each one is named here and injected by ``render_page()``;
+# a page that references a server constant directly only fails at runtime.
+PAGE_SUBSTITUTIONS = {
+    '__REFRESH_MS__': '30000',
+    '__ROW_LIMIT__': str(ROW_LIMIT),
+}
+
+
+def render_page():
+    """Return the dashboard HTML with every ``__PLACEHOLDER__`` substituted."""
+    page = PAGE
+    for name, value in PAGE_SUBSTITUTIONS.items():
+        page = page.replace(name, value)
+    return page
 
 
 def _history_payload(state_dir, from_spec):
@@ -311,7 +343,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         route = urlparse(self.path).path
         try:
             if route in ('/', '/index.html'):
-                page = PAGE.replace('__REFRESH_MS__', '30000')
+                page = render_page()
                 return 200, page, 'text/html; charset=utf-8', ()
             if route == '/api/history':
                 payload = _history_payload(self.state_dir, self._from_spec())
