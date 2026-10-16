@@ -80,11 +80,12 @@ If a command is not supported or an error occurs, the response starts with:
 | EFFICIENCY | 0x2B | 2 bytes | Efficiency (LINEAR11, x100) |
 | TEMP0 | 0x30 | 2 bytes | Internal temperature (LINEAR11, mC) |
 | FAN_RPM | 0x40 | 2 bytes | Fan speed (LINEAR11, unsigned) |
-| FAN_MODE | 0x41 | 2 bytes | Fan control mode（1=auto，3=manual；一期只读） |
-| FAN_DUTY | 0x42 | 2 bytes | Fan duty 四元组[实际, MCU算, 软件设, ZeroFan==1]（一期读写：显示进 text，写走 `--fan-mode/--fan-duty` 0-100 单值 + F1h 保存，钳制 + 读回） |
-| MULTIRAIL | 0xC0 | 8 bytes | OCP/告警阈值块（冻结：读 `==2` 为多轨，以 MSI Center 源码为准；旧 0/1 描述废弃；出厂单针 12A、针差 5A、触发 20s、警告 180s；写三期专批） |
+| FAN_MODE | 0x41 | 3 bytes | Fan control mode + 自订占空比 `[mode, x, duty]`（1=auto，3=customized；一期读写，写走 `--fan-mode/--fan-duty` + F1h 保存） |
+| FAN_DUTY | 0x42 | 4 bytes | Fan duty 四元组[实际, MCU算, 软件设, ZeroFan==1]（一期读；ZeroFan 进 text 显示） |
+| MULTIRAIL / OCP12V2x6_CONFIG | 0xC0 | 1 or 8 bytes | **重载寄存器**，同一地址两条命令、机型门互补：MEG Ai1000P/Ai1300P 读 1 字节多轨开关（`==2` 为多轨，`CPSU.cs:823-832`）；MPG Ai1300TS/Ai1600TS 读 8 字节 12V-2x6 OCP 阈值（`CPSU.cs:840-856`）；MEG Ai1600T 两条都不支持。12V-2x6 载荷 `[enable, 单针A, 针差A, 触发s, 针差触发s, 警告s]`，前两个 A 值为 LINEAR11（exp -4，即 `value<<4` 低字节 + `0xE0` 高字节，12A→`0xE0C0`、5A→`0xE050`）；出厂 12A/5A/20s/20s/180s。一期只读展示走 `--ocp`，写（8B + F1h）三期专批 |
 | ALERT_STATUS | 0xE1 | 18 bytes | GPU Safeguard+ 状态（索引 `{6,7,8,18..29,14,15,16}`，失败回退 C1 state；Status 行 + exit 2 来源；待真机复核） |
 | ALERT_LOG | 0xC1 | 26B×10 | GPU Safeguard+ 黑盒（`--show-log` 来源，最近 10 条新→旧；待真机复核） |
+| OCP12V2x6_STATE | 0xC1 | 42 bytes | InfoID `0x00`：12V-2x6 实时状态（`--ocp` 第二段来源）。`[0]=Conn1 状态, 1-4=运行计时, 5-8=总计时, 9-20=6 针电流, 21=Conn2 状态, 22-25=运行计时, 26-29=总计时, 30-41=6 针电流]`；状态码 `0` 正常 / `1` 单针 OCP / `2` 针差 / `3` 瞬时 OC(>18A)。注意 MSI Center 此处有个 bug：`I_Out_2_6 = ValueCalc(RxData[43], RxData[43])`（应为 44/45），本实现按正确偏移取 12 针 |
 | UPTIME | 0xD0 | 4 bytes | Session uptime (seconds) |
 | TOTAL_UPTIME | 0xD1 | 4 bytes | Total lifetime uptime (seconds) |
 | SAVE_SETTING | 0xF1 | 1 byte | Persist the preceding `0x50` write to NVRAM (`[0x50, 0xF1, 0x00]`) |
@@ -171,6 +172,27 @@ sequentially: pins 1-6 on connector 1, then pins 1-6 on connector 2.
 
 The sum of all 12 pin currents should approximately equal the total +12V current
 minus current drawn through non-GPU 12V loads (e.g., CPU, motherboard).
+
+
+## OCP Configuration and State (0xC0 / 0xC1)
+
+`msi-psu-monitor --ocp` renders the read-only 12V-2x6 protection view in phase 1.
+Two registers feed it, both gated on the MPG TS models:
+
+- **0xC0 `OCP12V2x6_CONFIG`** (8 bytes) — the configured thresholds. The two amp
+  fields use LINEAR11 with exponent -4, which the setter in `CPSU.cs:184-207` builds as
+  `low = value << 4`, `high = 0xE0`. So 12 A is the word `0xE0C0` and 5 A is `0xE050`.
+  Note 0xC0 is overloaded: the MEG P models read the *multirail* flag (1 byte, `==2`)
+  from the same address, and the MEG Ai1600T answers neither — reject on the variant,
+  never on the payload length alone.
+- **0xC1 InfoID `0x00` `OCP12V2x6_STATE`** (42 bytes) — the live state: per-connector
+  status code, seconds spent in an alert state, total powered seconds and the twelve
+  pin currents as 5-second averages. InfoID `1..10` on the same register is the
+  black-box log used by `--show-log`, so the two readers must never be swapped.
+
+The threshold write path (`0xC0` 8 bytes + `0xF1` save, with clamping to
+10-14 A / 4-8 A / 5-30 s / 5-30 s / 30-240 s) stays frozen for a later, separately
+approved batch.
 
 ## Debugfs Interface (kernel module)
 

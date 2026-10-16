@@ -8,8 +8,8 @@ runtime imports.
 
 | Module | Role |
 |--------|------|
-| `protocol.py` | HID framing, register map, variant dispatch, `MSIPSU.get_sensors()`, fan/alert/black-box reads, `HIDDevice` + `flock` |
-| `monitor.py` | CLI: argument validation, three formatters, exit codes, fan write, `--export`, `--show-log`, device selection, `open_psu()` |
+| `protocol.py` | HID framing, register map, variant dispatch, `MSIPSU.get_sensors()`, fan/alert/black-box/OCP reads, `HIDDevice` + `flock` |
+| `monitor.py` | CLI: argument validation, three sensor formatters + three `--ocp` formatters, exit codes, fan write, `--export`, `--show-log`, `--ocp`, device selection, `open_psu()` |
 | `state.py` | `MonitorState` (avg + energy integral), `state.json` atomic persistence, `daily-*.log` history, `--from`/`--columns`/`build_export` |
 | `daemon.py` | Resident sample loop: 1 s alerts, 30 s atomic prometheus, 60 s history, rescan after 5 failures |
 | `dashboard.py` | Loopback-only `http.server` reading the history files; charts are hand-drawn `<canvas>` JS |
@@ -20,9 +20,12 @@ runtime imports.
 ## Protocol (normative: docs/protocol.md)
 
 - HID framing: 64-byte reports (`CMD_BUFFER_SIZE`), 250ms timeout
-  (`CMD_TIMEOUT_MS`), 2-byte echo header stripped, NAK (`0xFE`) → `None`.
+  (`CMD_TIMEOUT_MS`), 2-byte echo header stripped, NAK (`0xFE`) → `None`. On top of that,
+  `0xC0` and `0xC1` are **overloaded addresses** (see Invariants) — the model gate, not the
+  payload length, decides which command you are talking to.
 - Registers: `0x10-0x13` ident, `0x20-0x42` sensors, `0x41` fan setting,
-  `0x42` fan duty, `0xC0` OCP config, `0xC1` alert log, `0xD0/0xD1` control,
+  `0x42` fan duty, `0xC0` multirail **or** 12V-2x6 OCP config (TS only),
+  `0xC1` OCP state (InfoID 0) / alert log (InfoID 1-10), `0xD0/0xD1` control,
   `0xE0` bulk read, `0xE1` alert status, `0xF1` save settings.
 - LINEAR11 call pattern (keep exactly):
   `lin11_to_int(struct.unpack('<H', data[o:o+2])[0], scale, signed) / scale`,
@@ -48,6 +51,9 @@ runtime imports.
 - **The demo must stay opt-in**: `demo.enabled()` reads `MSI_PSU_DEMO`; nothing may
   import synthetic data on the production path.
 - **`--watch` is text-only** and flushes each frame (pipes must see every sample).
+- **`--ocp` is read-only and model-gated**: `MSIPSU.supports_ocp_config` (TS variants only,
+  mirroring `CPSU.cs:843`) guards the read; a MEG model gets the explanation and `EXIT_OK`,
+  never an error. The C0/C1 write path stays frozen for a later approved batch.
 - History CSV columns are frozen (`HISTORY_COLUMNS`); `--export` renames some and
   maps `cpu`/`gpu` to `N/A` because the 7ZPU single-rail layout cannot split them.
 
@@ -62,14 +68,16 @@ runtime imports.
 ## Verification (no hardware required)
 
 ```bash
-uv run --group dev pytest -q              # 145 tests: lin11 vectors, formatters, state, daemon, dashboard, demo
+uv run --group dev pytest -q              # 183 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
 uv run --group dev ruff check .           # must be clean
 uv run --group dev mypy msi_psu_monitor/  # must be clean
 ```
 
 `ruff format` must NOT be enforced repo-wide: `protocol.py`, `__init__.py`,
 `__main__.py` and `tests/test_monitor.py` mix quote styles and a full format pass
-would create a churn diff. Format only the files you touched.
+would create a churn diff (formatting `protocol.py` alone rewrites ~200 lines of
+unrelated quote styles). Format only the files you touched, and revert format-only
+churn in `protocol.py` — it is deliberately left in its original style.
 
 Full no-hardware walkthrough (demo mode, daemon + dashboard chain, `.deb`):
 `docs/verify.md`.

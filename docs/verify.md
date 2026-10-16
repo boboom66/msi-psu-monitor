@@ -27,7 +27,7 @@ uv run --group dev ruff check .
 uv run --group dev mypy msi_psu_monitor/
 ```
 
-三条全绿即通过。当前基线：**145 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
+三条全绿即通过。当前基线：**183 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
 
 > `ruff format --check` **不要全仓跑**：`protocol.py`/`__init__.py`/`__main__.py`/`tests/test_monitor.py`
 > 等历史文件混用引号风格，全仓 format 会产生大量无意义 diff。只对本次改动的文件跑。
@@ -61,6 +61,31 @@ export MSI_PSU_DEMO=1
 ```bash
 .venv/bin/msi-psu-monitor --fan-duty 75 && .venv/bin/msi-psu-monitor --fan-mode auto
 ```
+
+### 2.1 OCP 阈值检视（`--ocp`，只读）
+
+一期需求「OCP 閾值檢視」的落地点。读 0xC0 配置 + 0xC1 状态，只读不改电源设置。
+
+```bash
+.venv/bin/msi-psu-monitor --ocp
+```
+
+应看到出厂值 `12.0 A / 5.0 A / 20 s / 20 s / 180 s`，各带 `(range …)`，
+以及 `Conn1/Conn2` 两行状态 + 每连接器 6 针电流（5 秒均值）。
+
+```bash
+.venv/bin/msi-psu-monitor --ocp -f json | python3 -m json.tool | head -20
+.venv/bin/msi-psu-monitor --ocp -f prometheus | grep ocp_
+```
+
+非 12V-2x6 机型（MEG 系列）应打印「not available on this model」并 **exit 0**——
+这是机型事实而非错误，脚本可无条件调用；该分支由 `tests/test_ocp.py` 覆盖：
+
+```bash
+uv run --group dev pytest -q tests/test_ocp.py
+```
+
+`--ocp` 与 `--watch`/`--export`/`--show-log`/`--dashboard`/风扇写互斥（argparse 报错 exit 2）。
 
 ## 3. 告警路径（exit 2 + stderr 单行）
 
@@ -141,6 +166,8 @@ daemon 在无设备时应正常空转退出 0（这是 systemd 常驻服务等�
 .venv/bin/msi-psu-monitor --export --from soon;         echo "exit=$?"   # 1：窗口非法
 .venv/bin/msi-psu-monitor --watch 1 -f json;            echo "exit=$?"   # 2：watch 只支持 text
 .venv/bin/msi-psu-monitor --port 9000;                  echo "exit=$?"   # 2：--port 需配 --dashboard
+.venv/bin/msi-psu-monitor --ocp --watch 1;              echo "exit=$?"   # 2：--ocp 与 watch 互斥
+.venv/bin/msi-psu-monitor --ocp --show-log;             echo "exit=$?"   # 2：两个查询互斥
 ```
 
 约定：`0` 正常 / `1` 程序或参数错误 / `2` 告警或参数冲突（argparse 用法错误）。
@@ -182,4 +209,8 @@ journalctl -u msi-psu-monitor -f
 4. `--fan-duty 0/50/100` 写后读回一致，`F1h` 保存后断电重启仍生效；
 5. 满载下单针 >12A 触发 `ocp_pinN`，针差 >5A 触发 `pin_imbalance`；
 6. 运行中拔插 USB：daemon 连续 5 次读失败后重扫并自动重连（`journalctl` 可见 `rescanning`）；
-7. 72h 烤机：`state.json` 的 `energy_wh` 与插座功率计积分值偏差可接受。
+7. 72h 烤机：`state.json` 的 `energy_wh` 与插座功率计积分值偏差可接受；
+8. `--ocp` 读出的 4 个阈值与 MSI Center 界面 / 出厂规格一致（12A/5A/20s/180s），
+   且 `ConnN` 状态与 `--once` 的 `12V-2x6 Status` 行不矛盾；
+9. `--ocp` 在 MEG 机型（`0xC9EB`/`0x56D4`/`0xE749`）上打印「not available」并 exit 0，
+   不产生 NAK 重试或超时。

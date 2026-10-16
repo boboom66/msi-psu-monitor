@@ -18,6 +18,8 @@ Python standard library only — no third-party runtime dependencies.
 - **Fan display and control** — read mode/duty/Zero Fan (41h/42h), write and save a
   custom duty (41h + F1h) with read-back verification.
 - **Black-box dump** — the last 10 GPU Safeguard+ trip records (`--show-log`).
+- **OCP threshold inspection** — display the 12V-2x6 OCP configuration (pin trip point,
+  pin spread, trigger and warning times) and the per-connector state, read-only (`--ocp`).
 - **Resident daemon** — 1 s alert evaluation, 30 s atomic Prometheus textfile,
   60 s history line, rescan after 5 read failures (unplug/replug recovery).
 - **Cumulative statistics** — average power/efficiency and integrated energy (kWh)
@@ -79,7 +81,8 @@ msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
                 [-O OUTPUT] [--serial SERIAL] [--fan-mode {auto,customized}]
                 [--fan-duty 0-100] [--export] [--from FROM_SPEC]
                 [--columns COLUMNS] [--dashboard] [--port PORT] [--show-log]
-                [--no-alerts] [--config CONFIG] [--verbose] [--quiet] [--version]
+                [--ocp] [--no-alerts] [--config CONFIG] [--verbose] [--quiet]
+                [--version]
 
   -f, --format     Output format: text (default), json, prometheus
   -w, --watch      Watch mode; optional refresh seconds (default 2.0)
@@ -95,11 +98,13 @@ msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
       --dashboard  Serve local charts on 127.0.0.1
       --port       Dashboard port (default 8899)
       --show-log   Dump the PSU black-box alert records (C1h)
+      --ocp        Show the 12V-2x6 OCP configuration (C0h) and state (C1h)
       --no-alerts  Skip the E1h alert poll
       --config     Explicit config file
 ```
 
-Exit codes: `0` normal, `1` program/argument fault, `2` alert active.
+Exit codes: `0` normal, `1` program/argument fault (a read failed), `2` alert active
+or an argparse usage error (`2` is argparse's own convention and is not remapped).
 
 ### Examples
 
@@ -109,6 +114,9 @@ sudo msi-psu-monitor -f json
 
 # Per-pin trip history (GPU Safeguard+ black box)
 sudo msi-psu-monitor --show-log
+
+# Read-only 12V-2x6 OCP limits and per-connector state
+sudo msi-psu-monitor --ocp
 
 # Fan control: set 75% and verify, then hand back to the PSU curve
 sudo msi-psu-monitor --fan-duty 75
@@ -149,6 +157,29 @@ MSI PSU: MPG Ai1600TS
   Total energy: 0.0 kWh
 ```
 
+`sudo msi-psu-monitor --ocp` adds the read-only 12V-2x6 OCP view:
+
+```
+MSI PSU: MPG Ai1600TS
+12V-2x6 OCP configuration (0xC0):
+  Enabled         : yes
+  Pin OCP point   : 12.0 A   (range 10-14)
+  Pin difference  : 5.0 A   (range 4-8)
+  OCP trigger     : 20 s   (range 5-30)
+  Diff trigger    : 20 s   (range 5-30)
+  Warning time    : 180 s   (range 30-240)
+
+12V-2x6 state (0xC1, 5 s averages):
+  Conn1: Normal               uptime 0d 00:00:00 / total 5d 04:00:00
+    Pin currents (A): 0.4  0.4  0.4  0.4  0.4  0.4
+  Conn2: Normal               uptime 0d 00:00:00 / total 5d 04:00:00
+    Pin currents (A): 0.4  0.4  0.4  0.4  0.4  0.4
+```
+
+`0xC0`/`0xC1` are 12V-2x6-only registers: on the MEG models `--ocp` prints that the
+feature is unavailable and exits `0` (the same choice `--show-log` makes for an empty
+black box, so scripts can call it unconditionally).
+
 ## Prometheus integration
 
 The `prometheus` format targets the
@@ -158,7 +189,11 @@ and exports `msi_psu_info{product,vendor,fw,serial}`, per-rail voltages/currents
 `msi_psu_efficiency`, `msi_psu_efficiency_avg`, `msi_psu_temperature`,
 `msi_psu_fan_speed`, `msi_psu_zero_fan{state}`,
 `msi_psu_status_12v_2x6{status}`, `msi_psu_total_energy_kwh`,
-`msi_psu_alert{alert}` and the uptime counters.
+`msi_psu_alert{alert}` and the uptime counters. `--ocp -f prometheus` exports the OCP
+limits as `msi_psu_ocp_enabled`, `msi_psu_ocp_pin_point_a`, `msi_psu_ocp_pin_diff_a`,
+`msi_psu_ocp_trigger_s`, `msi_psu_ocp_diff_trigger_s`, `msi_psu_ocp_warning_s`,
+`msi_psu_ocp_status{connector}`, `msi_psu_ocp_run_time{connector}` and
+`msi_psu_ocp_total_time{connector}`.
 
 The daemon replaces the file atomically (`.tmp` + rename), so scrapers never read a
 partial file:

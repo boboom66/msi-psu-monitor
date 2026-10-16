@@ -8,11 +8,12 @@ Protocol rules live in `msi_psu_monitor/AGENTS.md` (auto-loaded via `opencode.js
 
 ```bash
 uv sync --group dev                                  # py>=3.10, dev toolchain (pytest/ruff/mypy), zero runtime deps
-uv run --group dev pytest -q                         # 145 tests, no hardware needed
+uv run --group dev pytest -q                         # 183 tests, no hardware needed
 uv run --group dev pytest -q tests/test_state.py     # single file
 uv run --group dev ruff check .                      # must be clean
 uv run --group dev mypy msi_psu_monitor/             # must be clean
 MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --once      # full pipeline, no PSU attached
+MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --ocp       # 12V-2x6 OCP thresholds + state (read-only)
 sudo msi-psu-monitor --once                          # one-shot; hidraw needs root (or the udev uaccess rule)
 sudo msi-psu-monitor --watch 1                       # continuous, 1s poll
 sudo msi-psu-monitor -f prometheus -O /var/lib/node_exporter/msi-psu.prom
@@ -53,9 +54,22 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12.
 - **Alerts are edge-triggered with a consecutive-poll debounce** (`consecutive_required`,
   default 2). `collect_alerts()` also returns `have_data`: with no E1h answer and no pin
   mirror the status must read `Unknown`, never `Normal`.
-- **`docs/protocol.md` now matches the code** for 0xE1 (alert status), 0xC1 (alert log),
-  0x41/0x42 (fan), 0xC0 (OCP) and 0xF1 (save). Treat the code as truth where they differ
-  again, but do not describe implemented registers as "unimplemented".
+- **`docs/protocol.md` now matches the code** for 0xE1 (alert status), 0xC1 (alert log
+  + OCP state), 0x41/0x42 (fan), 0xC0 (OCP) and 0xF1 (save). Treat the code as truth where
+  they differ again, but do not describe implemented registers as "unimplemented".
+- **0xC0 is an overloaded register**: the same address is `MULTIRAIL_OCP` (1 byte, `==2`,
+  MEG P models only) and `OCP12V2x6_CONFIG` (8 bytes, MPG TS models only), with
+  complementary model gates and MEG Ai1600T answering neither (`CPSU.cs:823-832` vs
+  `CPSU.cs:840-856`). Gate on `MSIPSU.supports_ocp_config`, never on payload length.
+- **0xC1 is overloaded too**: InfoID `0x00` is the 42-byte OCP state, InfoID `1..10` is the
+  black-box log (`read_ocp_state` vs `read_blackbox`). Do not swap them.
+- **`--ocp` is read-only by scope**: 一期 only *inspects* the thresholds. The write
+  (`0xC0` 8 bytes + `0xF1`, clamped to 10-14 A / 4-8 A / 5-30 s / 30-240 s) is a separate,
+  separately approved batch — do not add it while "fixing" the display.
+- **An unsupported model is not an error**: `--ocp` on a MEG prints the reason and exits
+  `0`, matching how `--show-log` treats an empty black box. Keep scripts callable blindly.
+- **`argparse` exits `2`** for usage errors and it is deliberately not remapped, so `2`
+  means "alert **or** usage error" (`docs/verify.md` §6). `1` is reserved for real faults.
 - **Persistent state**: `state.json` + `daily-YYYYMMDD.log` in
   `/var/lib/msi-psu-monitor` (systemd `StateDirectory`), XDG fallback, `MSI_PSU_STATE_DIR`
   override. Both writes are atomic (`.tmp` + `os.replace`); keep it that way.

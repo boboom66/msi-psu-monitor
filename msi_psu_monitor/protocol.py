@@ -742,13 +742,29 @@ class MSIPSU:
             return False
         return self.hid.write_command([REG_SAVE_SETTING, 0x00])
 
+    @property
+    def supports_ocp_config(self):
+        """True when the model answers OCP12+4_CONFIG (C0h).
+
+        Only the 12V-2x6 models do: ``CPSU.cs:843`` returns false for every
+        MEG PID (Ai1000P / Ai1300P / Ai1600T) before it even sends the read,
+        so probe the variant instead of provoking a NAK.
+        """
+        return self.variant in MSIPSU.SEVEN_ZPU_VARIANTS
+
     def read_ocp_thresholds(self):
         """Read OCP12+4_CONFIG (C0h, 8 bytes).
+
+        Layout per ``CPSU.cs:840-856``: byte 0 = enable, bytes 1-2 and 3-4
+        are LINEAR11 (exponent -4) pin-OCP point and pin-difference in
+        amps, then OCP trigger, difference trigger and warning times in
+        whole seconds. Factory values: 12 A / 5 A / 20 s / 20 s / 180 s.
 
         Returns:
             Dict with on/off, OCP point (A), current difference (A),
             OCP trigger (s), difference trigger (s) and warning time (s),
-            or None on failure.
+            or None on failure. The amps stay unrounded so callers can
+            decide how much precision to show.
         """
         data = self.hid.read_register(REG_OCP_CONFIG)
         if data is None or len(data) < 8:

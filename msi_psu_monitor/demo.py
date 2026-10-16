@@ -80,6 +80,12 @@ class DemoPSU:
         """Deterministic per-sample jitter (+/- amplitude)."""
         return amplitude * math.sin(self.samples * 1.7 + index * 2.3)
 
+    def _pin_currents(self, total_a):
+        """Split the 12V total across the 12 pins with a small fixed skew."""
+        return [
+            round(total_a / 12.0 * (1.0 + self._wobble(2 + index, 0.06)), 3) for index in range(12)
+        ]
+
     def get_sensors(self):
         self.samples += 1
         load, _ = self._load()
@@ -87,7 +93,7 @@ class DemoPSU:
         efficiency = 88.0 + 6.0 * (1.0 - abs(2.0 * load - 1.0))
         volts_12v = 12.10 - 0.06 * load + self._wobble(1, 0.01)
         total_a = (watts * 0.92) / volts_12v
-        pins = [total_a / 12.0 * (1.0 + self._wobble(2 + index, 0.06)) for index in range(12)]
+        pins = self._pin_currents(total_a)
 
         zero_fan = load < 0.25
         fan_rpm = 0.0 if zero_fan else 700.0 + 1150.0 * load
@@ -104,7 +110,7 @@ class DemoPSU:
             'iout_12v_total': (round(total_a, 3), 'A'),
             'iout_5v': (round(1.8 + load * 1.5, 3), 'A'),
             'iout_3v3': (round(0.8 + load * 0.3, 3), 'A'),
-            'iout_pins': ([round(pin, 3) for pin in pins], 'A'),
+            'iout_pins': (pins, 'A'),
             'power_total': (round(watts, 1), 'W'),
             'efficiency': (round(efficiency, 2), '%'),
             'temp': (round(29.0 + 32.0 * load, 1), '\u00b0C'),
@@ -119,6 +125,44 @@ class DemoPSU:
     def read_alert_status(self):
         stuck = _stuck_alert()
         return {name: name == stuck for name in ALERT_DESCRIPTIONS}
+
+    # ---- 12V-2x6 OCP (C0h read-only + C1h state) ------------------------
+
+    supports_ocp_config = True
+
+    def read_ocp_thresholds(self):
+        """Factory OCP configuration as shipped by MSI (CPSU.cs defaults)."""
+        return {
+            'enabled': True,
+            'point_a': 12.0,
+            'diff_a': 5.0,
+            'trigger_s': 20,
+            'diff_trigger_s': 20,
+            'warning_s': 180,
+        }
+
+    def read_ocp_state(self):
+        """C1h state: pin currents derived from the same load model as the report."""
+        load, _ = self._load()
+        watts = 60.0 + load * 660.0 + self._wobble(0, 8.0)
+        pins = self._pin_currents((watts * 0.92) / (12.10 - 0.06 * load))
+        uptime = int(self.clock() - self.started)
+        # Keep the status consistent with the stuck-alert knob, so a demo that
+        # shows an alert bit never also claims the connector is Normal.
+        stuck = _stuck_alert()
+        status = 0
+        if stuck.startswith('ocp_pin'):
+            status = 1 if int(stuck[len('ocp_pin') :]) <= 6 else 2
+        return {
+            'status_12v5': 1 if status == 1 else 0,
+            'run_time': 0,
+            'total_time': uptime + 446400,
+            'pins_1_6': pins[:6],
+            'status_12v3': 2 if status == 2 else 0,
+            'run_time_2': 0,
+            'total_time_2': uptime + 446400,
+            'pins_7_12': pins[6:],
+        }
 
     def read_fan_state(self):
         return {'mode': self.fan_mode, 'duty': self.fan_duty, 'zero_fan': self._load()[0] < 0.25}

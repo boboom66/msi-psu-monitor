@@ -10,6 +10,7 @@ Usage:
     msi-psu-monitor --format json             # machine-readable output
     msi-psu-monitor -f prometheus -O /var/lib/node_exporter/msi-psu.prom
     msi-psu-monitor --show-log                # GPU Safeguard+ black box
+    msi-psu-monitor --ocp                      # 12V-2x6 OCP thresholds + state
     msi-psu-monitor --fan-mode customized --fan-duty 80
     msi-psu-monitor --export --from 2h --columns temp,fan,eff -O psu.csv
     msi-psu-monitor --dashboard               # local charts in a browser
@@ -296,6 +297,157 @@ def format_blackbox(records):
     return '\n'.join(lines)
 
 
+# ---- 12V-2x6 OCP inspection (read-only, phase 1 scope) ------------------
+
+# C1h status codes, per CPSU.cs OCP_12V2x6_Status.
+_OCP_STATUS = {
+    0: 'Normal',
+    1: 'OCP point',
+    2: 'Current difference',
+    3: 'Instant OC (>18A)',
+}
+
+# Settable windows from CPSU.cs; out-of-range writes are clamped by the PSU.
+_OCP_RANGES = {
+    'point_a': (10, 14),
+    'diff_a': (4, 8),
+    'trigger_s': (5, 30),
+    'diff_trigger_s': (5, 30),
+    'warning_s': (30, 240),
+}
+
+# C0h/C1h are 12V-2x6-only registers: CPSU.cs returns false for every MEG PID
+# before sending the read, so an unsupported model is a fact, not a failure.
+OCP_UNSUPPORTED = (
+    '12V-2x6 OCP configuration is not available on this model '
+    '(0xC0/0xC1 exist only on the MPG Ai1600TS / MPG Ai1300TS).'
+)
+
+
+def _ocp_state_rows(state):
+    """Yield (status, run_time, total_time, pins) for both 12V-2x6 connectors."""
+    yield (state['status_12v5'], state['run_time'], state['total_time'], state['pins_1_6'])
+    yield (
+        state['status_12v3'],
+        state['run_time_2'],
+        state['total_time_2'],
+        state['pins_7_12'],
+    )
+
+
+def _ocp_status_name(code):
+    return _OCP_STATUS.get(code, f'status {code}')
+
+
+def format_ocp_text(config, state, product):
+    """Format the C0h threshold configuration (+ C1h state) as text."""
+    lines = [f'MSI PSU: {product}' if product else 'MSI PSU']
+    lines.append('12V-2x6 OCP configuration (0xC0):')
+    lines.append(f'  {"Enabled":<16}: {"yes" if config["enabled"] else "no"}')
+    for label, key, digits, unit in (
+        ('Pin OCP point', 'point_a', 1, 'A'),
+        ('Pin difference', 'diff_a', 1, 'A'),
+        ('OCP trigger', 'trigger_s', 0, 's'),
+        ('Diff trigger', 'diff_trigger_s', 0, 's'),
+        ('Warning time', 'warning_s', 0, 's'),
+    ):
+        low, high = _OCP_RANGES[key]
+        value = f'{config[key]:.{digits}f}'
+        lines.append(f'  {label:<16}: {value} {unit}   (range {low}-{high})')
+
+    if state:
+        lines.append('')
+        lines.append('12V-2x6 state (0xC1, 5 s averages):')
+        for index, (status, run_time, total_time, pins) in enumerate(
+            _ocp_state_rows(state), start=1
+        ):
+            lines.append(
+                f'  Conn{index}: {_ocp_status_name(status):<20} '
+                f'uptime {_format_duration(run_time)} / total {_format_duration(total_time)}'
+            )
+            lines.append(f'    Pin currents (A): {"  ".join(f"{pin:.1f}" for pin in pins)}')
+    return '\n'.join(lines)
+
+
+def format_ocp_json(config, state, product):
+    """Format the C0h threshold configuration (+ C1h state) as JSON."""
+    payload = {
+        'product': product,
+        'ocp_config': {
+            'enabled': config['enabled'],
+            'point_a': config['point_a'],
+            'diff_a': config['diff_a'],
+            'trigger_s': config['trigger_s'],
+            'diff_trigger_s': config['diff_trigger_s'],
+            'warning_s': config['warning_s'],
+        },
+    }
+    if state:
+        payload['ocp_state'] = {
+            'connectors': [
+                {
+                    'status': status,
+                    'status_name': _ocp_status_name(status),
+                    'run_time': run_time,
+                    'total_time': total_time,
+                    'pins': pins,
+                }
+                for status, run_time, total_time, pins in _ocp_state_rows(state)
+            ]
+        }
+    return json.dumps(payload, indent=2)
+
+
+def format_ocp_prometheus(config, state, product):
+    """Format the C0h threshold configuration (+ C1h state) as prometheus text."""
+    lines = [
+        '# HELP msi_psu_ocp_enabled 12V-2x6 OCP enabled (1) or disabled (0)',
+        '# TYPE msi_psu_ocp_enabled gauge',
+        f'msi_psu_ocp_enabled{{}} {1 if config["enabled"] else 0}',
+        '# HELP msi_psu_ocp_pin_point_a Configured single-pin OCP trip point in amps',
+        '# TYPE msi_psu_ocp_pin_point_a gauge',
+        f'msi_psu_ocp_pin_point_a{{}} {config["point_a"]}',
+        '# HELP msi_psu_ocp_pin_diff_a Configured pin-to-pin tolerance in amps',
+        '# TYPE msi_psu_ocp_pin_diff_a gauge',
+        f'msi_psu_ocp_pin_diff_a{{}} {config["diff_a"]}',
+        '# HELP msi_psu_ocp_trigger_s OCP trip trigger time in seconds',
+        '# TYPE msi_psu_ocp_trigger_s gauge',
+        f'msi_psu_ocp_trigger_s{{}} {config["trigger_s"]}',
+        '# HELP msi_psu_ocp_diff_trigger_s Pin-difference trigger time in seconds',
+        '# TYPE msi_psu_ocp_diff_trigger_s gauge',
+        f'msi_psu_ocp_diff_trigger_s{{}} {config["diff_trigger_s"]}',
+        '# HELP msi_psu_ocp_warning_s Abnormal warning time in seconds',
+        '# TYPE msi_psu_ocp_warning_s gauge',
+        f'msi_psu_ocp_warning_s{{}} {config["warning_s"]}',
+    ]
+    if state:
+        lines.append(
+            '# HELP msi_psu_ocp_status 12V-2x6 OCP state per connector '
+            '(0 normal, 1 OCP point, 2 difference, 3 instant OC)'
+        )
+        lines.append('# TYPE msi_psu_ocp_status gauge')
+        for index, (status, run_time, total_time, _pins) in enumerate(
+            _ocp_state_rows(state), start=1
+        ):
+            lines.append(f'msi_psu_ocp_status{{connector="{index}"}} {status}')
+        lines.append('# HELP msi_psu_ocp_run_time Seconds the connector spent in an alert state')
+        lines.append('# TYPE msi_psu_ocp_run_time gauge')
+        for index, (_status, run_time, _total, _pins) in enumerate(_ocp_state_rows(state), start=1):
+            lines.append(f'msi_psu_ocp_run_time{{connector="{index}"}} {run_time}')
+        lines.append('# HELP msi_psu_ocp_total_time Seconds the connector has been powered')
+        lines.append('# TYPE msi_psu_ocp_total_time counter')
+        for index, (_status, _run, total_time, _pins) in enumerate(_ocp_state_rows(state), start=1):
+            lines.append(f'msi_psu_ocp_total_time{{connector="{index}"}} {total_time}')
+    return '\n'.join(lines)
+
+
+OCP_FORMATTERS = {
+    'text': format_ocp_text,
+    'json': format_ocp_json,
+    'prometheus': format_ocp_prometheus,
+}
+
+
 # ---- sensor enrichment --------------------------------------------------
 
 
@@ -511,6 +663,42 @@ def run_fan_write(psu, mode, duty):
     return EXIT_ERROR
 
 
+def run_ocp(psu, args):
+    """Show the 12V-2x6 OCP configuration (C0h) and state (C1h).
+
+    Read-only: phase 1 only inspects these registers, the write path stays
+    frozen (CPSU.cs ``SET_OCP12V2x6_CONFIG`` is a later, separately approved
+    batch). Returns the process exit code.
+    """
+    product = getattr(psu, 'product', '') or ''
+    if not getattr(psu, 'supports_ocp_config', False):
+        if args.format == 'json':
+            emit(json.dumps({'product': product, 'supported': False}, indent=2), args.output)
+        elif args.format == 'prometheus':
+            emit(f'# {OCP_UNSUPPORTED}', args.output)
+        else:
+            emit(f'MSI PSU: {product}' if product else 'MSI PSU', args.output)
+            emit(OCP_UNSUPPORTED, args.output)
+        return EXIT_OK
+
+    config = psu.read_ocp_thresholds()
+    if config is None:
+        logger.error('Error: the PSU did not answer the 0xC0 OCP configuration read.')
+        return EXIT_ERROR
+
+    # The C1h state block is a bonus: an NAK there must not fail the report.
+    state = None
+    reader = getattr(psu, 'read_ocp_state', None)
+    if reader is not None:
+        try:
+            state = reader()
+        except Exception:  # pragma: no cover - defensive against odd devices
+            state = None
+
+    emit(OCP_FORMATTERS[args.format](config, state, product), args.output)
+    return EXIT_OK
+
+
 def run_export(args, cfg):
     """Export a slice of the daemon history; returns the process exit code."""
     if not args.from_spec:
@@ -640,6 +828,11 @@ def build_parser():
         help='Dump PSU black-box alert records (C1h)',
     )
     parser.add_argument(
+        '--ocp',
+        action='store_true',
+        help='Show the 12V-2x6 OCP configuration (C0h) and state (C1h); TS models only',
+    )
+    parser.add_argument(
         '--no-alerts',
         action='store_true',
         help='Skip the E1h alert poll (default: alerts are checked)',
@@ -664,6 +857,18 @@ def _validate_args(parser, args):
         args.watch is not None or args.export or args.format not in (None, 'text')
     ):
         parser.error('--show-log cannot be combined with --watch, --export or --format')
+    if args.ocp and (
+        args.watch is not None
+        or args.export
+        or args.show_log
+        or args.dashboard
+        or args.fan_mode
+        or args.fan_duty is not None
+    ):
+        parser.error(
+            '--ocp cannot be combined with --watch, --export, --show-log, '
+            '--dashboard or a fan write'
+        )
     if args.export and args.watch is not None:
         parser.error('--export cannot be combined with --watch')
     if (args.from_spec or args.columns) and not args.export:
@@ -739,6 +944,8 @@ def main():
         if args.show_log:
             print(format_blackbox(psu.read_blackbox()))
             sys.exit(EXIT_OK)
+        if args.ocp:
+            sys.exit(run_ocp(psu, args))
         if args.watch is not None:
             sys.exit(run_watch(psu, args, cfg, monitor_state, engine))
         sys.exit(run_once(psu, args, cfg, monitor_state, engine))
