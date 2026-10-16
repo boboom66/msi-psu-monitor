@@ -102,6 +102,50 @@ def test_load_tolerates_missing_and_corrupt_files(tmp_path):
     assert stats.MonitorState.load(corrupt).count == 0
 
 
+def test_load_ignores_wrong_types_in_a_valid_json_file(tmp_path):
+    """Hand-edited state.json must not raise: bad values fall back to zero.
+
+    ``{"count": "bad"}`` used to escape as ``ValueError`` from ``int()`` -- a
+    traceback on a file that is valid JSON, which is exactly the kind of file a
+    user produces by editing it.
+    """
+    path = stats.state_path(tmp_path)
+    path.write_text(json.dumps({'version': 1, 'count': 'bad', 'last_ts': []}))
+    monitor_state = stats.MonitorState.load(path)
+    assert monitor_state.count == 0
+    assert monitor_state.last_ts is None
+
+    path.write_text(json.dumps({'version': 1, 'watt_sum': 'NaN', 'energy_wh': None}))
+    monitor_state = stats.MonitorState.load(path)
+    assert monitor_state.watt_sum == 0.0
+    assert monitor_state.energy_wh == 0.0
+
+
+def test_load_drops_daily_buckets_that_are_not_numbers(tmp_path):
+    """A string bucket would turn the next sample into a TypeError mid-run."""
+    path = stats.state_path(tmp_path)
+    path.write_text(json.dumps({'version': 1, 'daily': {'2026-02-09': 'bad', '2026-02-10': 1.5}}))
+    monitor_state = stats.MonitorState.load(path)
+    assert monitor_state.daily == {'2026-02-10': 1.5}
+    monitor_state.update(600.0, 94.0, ts=1700000000.0)
+    assert monitor_state.energy_wh == 0.0  # still a clean, usable state
+
+
+def test_a_backwards_clock_step_does_not_double_count_energy():
+    """A step back must not move the clock back with it.
+
+    Re-baselining on the older stamp made the next sample integrate the step plus
+    the real interval: 600 W over 100 s became 33.3 Wh instead of 16.7 Wh.
+    """
+    monitor_state = stats.MonitorState()
+    monitor_state.update(600.0, 90.0, ts=1000.0)
+    monitor_state.update(600.0, 90.0, ts=900.0)
+    assert monitor_state.last_ts == 1000.0
+    monitor_state.update(600.0, 90.0, ts=1100.0)
+    assert monitor_state.energy_wh == pytest.approx(600.0 * 100 / 3600)
+    assert monitor_state.count == 3
+
+
 # ---- history ------------------------------------------------------------
 
 
@@ -249,6 +293,57 @@ def test_append_history_repairs_a_headerless_file(tmp_path):
     assert header == ['time', '12v', 'cpu']
     assert rows[0][1] == '12.100'
     assert rows[0][2] == stats.NOT_AVAILABLE
+
+
+def test_append_history_repairs_a_header_truncated_mid_write(tmp_path):
+    """A crash mid-header leaves a fragment that must not become the columns.
+
+    With ``time,12v`` as the header, DictReader filed every later value under the
+    wrong name and the export reported the day as empty.
+    """
+    path = stats.history_path(tmp_path, date.fromtimestamp(1700000000.0))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        'time,12v\n2026-02-09T10:00:00,12.100,5.040,3.320,50.000,56.0,2050,600.0,94.00\n'
+    )
+
+    stats.append_history(tmp_path, sensors(), ts=1700000000.0)
+    lines = path.read_text().splitlines()
+    assert lines[0] == ','.join(stats.HISTORY_COLUMNS)
+    assert len(lines) == 3  # the salvageable data row survived
+
+    _, rows = stats.build_export(tmp_path, None, ['12v', 'temp'])
+    assert rows[0][1:3] == ['12.100', '56.0']
+    assert rows[1][1:3] == ['12.100', '56.0']
+
+
+def test_append_history_keeps_a_legacy_headerless_file_intact(tmp_path):
+    """A file that starts with data gets the header prepended, nothing dropped."""
+    path = stats.history_path(tmp_path, date.fromtimestamp(1700000000.0))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('2026-02-09T10:00:00,12.100,5.040,3.320,50.000,56.0,2050,600.0,94.00\n')
+
+    stats.append_history(tmp_path, sensors(), ts=1700000000.0)
+    lines = path.read_text().splitlines()
+    assert lines[0] == ','.join(stats.HISTORY_COLUMNS)
+    assert lines[1].startswith('2026-02-09T10:00:00,12.100')
+
+
+def test_iter_history_skips_junk_rows_and_undecodable_files(tmp_path):
+    """A damaged day must be skipped, not exported as empty or raised as a crash."""
+    good = stats.history_path(tmp_path, date(2026, 2, 9))
+    good.write_text(
+        ','.join(stats.HISTORY_COLUMNS) + '\n'
+        '2026-02-09T10:00:00,12.100,5.040,3.320,50.000,56.0,2050,600.0,94.00,24.0,96.0\n'
+        '\x00\n'
+    )
+    binary = stats.history_path(tmp_path, date(2026, 2, 10))
+    binary.write_bytes(b'time,12v\n\xff\xfe\n')
+
+    rows = list(stats.iter_history(tmp_path))
+    assert len(rows) == 1
+    assert rows[0]['time'] == '2026-02-09T10:00:00'
+    assert stats.build_export(tmp_path, None, ['12v'])[1] == [['2026-02-09T10:00:00', '12.100']]
 
 
 def test_state_dir_prefers_the_explicit_override(monkeypatch, tmp_path):

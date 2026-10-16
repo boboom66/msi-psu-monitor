@@ -18,11 +18,15 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
+import math
 import os
 import re
 import time
 from datetime import date, datetime
 from pathlib import Path
+
+logger = logging.getLogger('msi_psu.state')
 
 STATE_VERSION = 1
 DEFAULT_STATE_DIR = Path('/var/lib/msi-psu-monitor')
@@ -100,6 +104,46 @@ def history_path(state_dir, day=None):
     return Path(state_dir) / f'{HISTORY_PREFIX}{day.strftime("%Y%m%d")}{HISTORY_SUFFIX}'
 
 
+def _finite_float(raw, fallback=0.0):
+    """Return ``raw`` as a finite float, or ``fallback`` when it is unusable.
+
+    ``state.json`` sits in a directory the user can edit, and a half-written file
+    must not be able to poison the running totals: ``{"count": "bad"}`` used to
+    raise from ``int()`` and a ``NaN`` used to be persisted forever.
+    """
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return fallback
+    return value if math.isfinite(value) else fallback
+
+
+def _daily_buckets(raw):
+    """Return the ``date -> kWh`` entries that are safe to accumulate into."""
+    if not isinstance(raw, dict):
+        return {}
+    buckets = {}
+    for key, value in raw.items():
+        amount = _finite_float(value, None) if isinstance(key, str) else None
+        if amount is not None:
+            buckets[key] = amount
+    return buckets
+
+
+def atomic_write_text(path, text):
+    """Write ``text`` to ``path`` atomically (``.tmp`` + ``os.replace``).
+
+    The single definition of the "never write the target in place" rule: a torn
+    ``state.json`` or a half-written textfile collector output is worse than no
+    file at all, because the reader cannot tell it apart from a complete one.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + '.tmp')
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
 class MonitorState:
     """Cumulative averages and energy totals, with atomic persistence."""
 
@@ -145,8 +189,9 @@ class MonitorState:
         """Fold one valid sample into the totals; return the energy delta in Wh.
 
         Energy uses the frozen integral ``wh += watts * dt / 3600``. The first
-        sample after load only starts the clock; gaps longer than
-        ``max_gap_s`` are not integrated (see MAX_SAMPLE_GAP_S).
+        sample after load only starts the clock, gaps longer than ``max_gap_s``
+        are not integrated (see MAX_SAMPLE_GAP_S), and a backwards clock step
+        (NTP, a manual ``date`` change) never re-baselines the integral.
         """
         ts = time.time() if ts is None else float(ts)
         watts = float(watts)
@@ -158,7 +203,11 @@ class MonitorState:
                 self.energy_wh += delta_wh
                 key = date.fromtimestamp(ts).isoformat()
                 self.daily[key] = self.daily.get(key, 0.0) + delta_wh / 1000.0
-        self.last_ts = ts
+        # Only forward time may move the clock. Re-baselining on an older stamp
+        # would make the next sample count the same wall time twice (the step plus
+        # the real interval) and invent energy that was never drawn.
+        if self.last_ts is None or ts > self.last_ts:
+            self.last_ts = ts
         self.count += 1
         self.watt_sum += watts
         self.efficiency_sum += float(efficiency)
@@ -209,21 +258,20 @@ class MonitorState:
     def from_dict(cls, data):
         if not isinstance(data, dict) or data.get('version') != STATE_VERSION:
             return cls()
-        daily = data.get('daily')
         return cls(
-            count=data.get('count', 0) or 0,
-            watt_sum=data.get('watt_sum', 0.0) or 0.0,
-            efficiency_sum=data.get('efficiency_sum', 0.0) or 0.0,
-            energy_wh=data.get('energy_wh', 0.0) or 0.0,
-            last_ts=data.get('last_ts'),
-            daily=daily if isinstance(daily, dict) else {},
+            count=int(_finite_float(data.get('count'))),
+            watt_sum=_finite_float(data.get('watt_sum')),
+            efficiency_sum=_finite_float(data.get('efficiency_sum')),
+            energy_wh=_finite_float(data.get('energy_wh')),
+            last_ts=_finite_float(data.get('last_ts')) or None,
+            daily=_daily_buckets(data.get('daily')),
             product=data.get('product', '') or '',
             serial=data.get('serial', '') or '',
         )
 
     @classmethod
     def load(cls, path):
-        """Load state from ``path``; a missing/corrupt file yields empty state."""
+        """Load state from ``path``; a missing, unreadable or corrupt file yields empty state."""
         try:
             raw = Path(path).read_text()
         except OSError:
@@ -236,14 +284,54 @@ class MonitorState:
 
     def save(self, path):
         """Atomically replace ``path`` (``.tmp`` + ``os.replace``)."""
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(path.name + '.tmp')
-        tmp.write_text(json.dumps(self.to_dict(), indent=2, sort_keys=True) + '\n')
-        os.replace(tmp, path)
+        atomic_write_text(path, json.dumps(self.to_dict(), indent=2, sort_keys=True) + '\n')
 
 
 # ---- history (daily-*.log) ---------------------------------------------
+
+
+def _has_canonical_header(path):
+    """Return whether ``path`` already starts with the exact column header."""
+    try:
+        with path.open(newline='') as handle:
+            first = handle.readline()
+    except (OSError, UnicodeDecodeError):
+        return False
+    return first.rstrip('\r\n') == ','.join(HISTORY_COLUMNS)
+
+
+def _repair_history_header(path):
+    """Rewrite a history file whose first line is not the canonical header.
+
+    A crash between ``open()`` and the header write leaves a file whose first
+    line DictReader would adopt as the column names, silently misaligning every
+    export for that day. A first line that parses as a timestamp is a data row
+    (the header was never written), a first line that does not is a fragment:
+    either way the canonical header goes on top and the remaining lines stay.
+    """
+    try:
+        with path.open(newline='') as handle:
+            lines = handle.readlines()
+    except (OSError, UnicodeDecodeError):
+        return False
+    if lines and _parse_timestamp(lines[0].split(',', 1)[0]) is None:
+        lines = lines[1:]
+    body = ''.join(line if line.endswith('\n') else line + '\n' for line in lines)
+    try:
+        atomic_write_text(path, ','.join(HISTORY_COLUMNS) + '\n' + body)
+    except OSError:
+        return False
+    logger.warning(f'Repaired the header of {path.name}.')
+    return True
+
+
+def _ensure_history_header(path):
+    """Return whether ``path`` starts with the canonical header, repairing it."""
+    if not path.exists():
+        return False
+    if _has_canonical_header(path):
+        return True
+    return _repair_history_header(path)
 
 
 def append_history(state_dir, sensors, ts=None):
@@ -252,14 +340,10 @@ def append_history(state_dir, sensors, ts=None):
     path = history_path(state_dir, date.fromtimestamp(ts))
     path.parent.mkdir(parents=True, exist_ok=True)
     row = _history_row(sensors, ts)
-    # Not "does the file exist" but "does it already have a header": a file left
-    # empty by a crash between open() and the header write would otherwise be
-    # read back by DictReader with its first data row as the column names, which
-    # silently misaligns every export for that day.
-    try:
-        has_header = path.stat().st_size > 0
-    except OSError:
-        has_header = False
+    # Not "does the file exist" but "does it already carry the column header":
+    # a day file left empty, or truncated mid-header, by a crash would otherwise
+    # be read back by DictReader with that fragment as its column names.
+    has_header = _ensure_history_header(path)
     with path.open('a', newline='') as handle:
         writer = csv.writer(handle)
         if not has_header:
@@ -319,17 +403,24 @@ def _history_row(sensors, ts):
 
 
 def iter_history(state_dir, since_ts=None):
-    """Yield history rows as dicts, newest files last, honouring ``since_ts``."""
+    """Yield history rows as dicts, newest files last, honouring ``since_ts``.
+
+    A row this module never wrote (binary junk, a half-written line) and a file
+    that cannot be decoded are skipped: one damaged day must not be able to hide
+    the other days, and it must not surface as a traceback either.
+    """
     for path in sorted(Path(state_dir).glob(f'{HISTORY_PREFIX}*{HISTORY_SUFFIX}')):
         try:
             with path.open(newline='') as handle:
                 for row in csv.DictReader(handle):
-                    if since_ts is not None:
-                        stamp = _parse_timestamp(row.get('time'))
-                        if stamp is None or stamp < since_ts:
-                            continue
+                    stamp = _parse_timestamp(row.get('time'))
+                    if stamp is None:
+                        continue
+                    if since_ts is not None and stamp < since_ts:
+                        continue
                     yield row
-        except OSError:
+        except (OSError, UnicodeDecodeError, csv.Error) as exc:
+            logger.warning(f'Skipping unreadable history file {path.name}: {exc}')
             continue
 
 

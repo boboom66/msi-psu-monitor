@@ -9,7 +9,7 @@
 | 🧪 待真机 | 代码完成、单测覆盖，但结论必须样机复核（见 [`verify.md`](verify.md) §8） |
 | ⏸ 冻结 | 明确留待后续批准批次，本轮不做 |
 
-> 回归命令：`uv run --group dev pytest -q` → **301 passed**（18 个测试模块）。
+> 回归命令：`uv run --group dev pytest -q` → **307 passed**（18 个测试模块）。
 > 无硬件全链路自检见 [`verify.md`](verify.md)。
 
 ---
