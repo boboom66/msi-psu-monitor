@@ -39,6 +39,11 @@
   调用点四舍五入（V/A 3dp、W 1dp、% 2dp、RPM int）。
 - **标度真义**：MSI 的 `ValueCalc` 就是 `mantissa * 2**exponent`（`CPSU.cs:1248`），单位由指数决定；11 位尾数意味着 3.3 V 只能靠负指数表示（−7 → 3.296 V），不可写成 3300 mV。
 - **变体最小载荷**：原先 44B 硬门槛会把 **Ai1600T（20B 载荷）整段拒掉**；现按 `VARIANTS[...]['payload_size']`（TS 44 / P 40 / 1600T 20）裁定。MSI 的 `i = 10` 只是输出数组下标，不是载荷前缀跳过。
+- **42h 风扇占空比的后两字节只有 TS 系有定义**：MSI Center 在 MEG 机型上读完
+  前两字节就返回（`CPSU.cs:810`），此前本实现对全部机型读第 3/4 字节，于是
+  MEG 上的 `Zero Fan` 状态是**编造**出来的（拿未定义字节当开关）；现 MEG 报
+  `None`（text 显示 `unknown`），TS 仍出四元组。另按 MSI 的 `Mode == 3 ? RxData[5] : 0`
+  只在 customized 模式导出 `fan_duty`（auto 模式下残存的设定值不是风扇实际转速）。
 - **E1h 告警位序按机型查表**：MSI Center 在解名之前先按 PID 选三张索引数组之一
   （`CPSU.cs:1046-1057`），所以**同一个字节在 MEG 是 `OVP_12V`、在 TS 是 `OCP_12V`**。
   此前全机型共用 TS 那一张表，MEG P 系每条告警名都是错的（第 0/3/13 字节尤其），
@@ -50,7 +55,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 276 passed
+uv run --group dev pytest -q                     → 282 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 30 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues

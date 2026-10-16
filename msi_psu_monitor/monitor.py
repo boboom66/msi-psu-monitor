@@ -546,7 +546,10 @@ def read_fan_fields(psu):
         fields['fan_mode'] = _FAN_BYTE_TO_MODE.get(fan['mode'], f'mode{fan["mode"]}')
     if fan.get('zero_fan') is not None:
         fields['zero_fan'] = bool(fan['zero_fan'])
-    if fan.get('duty') is not None:
+    # MSI only reports the customize duty while the customize mode is active
+    # (``Mode == 3 ? RxData[5] : 0``, ``CPSU.cs:772``); a duty left over from an
+    # earlier session is not what the fan is running at, so it stays out.
+    if fan.get('duty') is not None and fan.get('mode') == _FAN_MODE_TO_BYTE[FAN_MODE_CUSTOMIZED]:
         fields['fan_duty'] = fan['duty']
     return fields
 

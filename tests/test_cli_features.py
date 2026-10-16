@@ -298,3 +298,26 @@ def test_show_log_dumps_blackbox_without_touching_stats(monkeypatch, capsys, tmp
     assert 'single-pin OCP (>12A)' in out.out
     assert '0d 00:01:40' in out.out
     assert not stats.state_path(tmp_path).exists()
+
+
+def test_fan_duty_is_only_reported_in_customized_mode(monkeypatch, capsys):
+    """MSI reports the customize duty only while that mode is active."""
+    from msi_psu_monitor.monitor import read_fan_fields
+
+    class Psu:
+        def __init__(self, mode):
+            self.mode = mode
+
+        def read_fan_state(self):
+            return {'mode': self.mode, 'duty': 30, 'zero_fan': True}
+
+    assert read_fan_fields(Psu(3))['fan_duty'] == 30
+    assert 'fan_duty' not in read_fan_fields(Psu(1))
+
+
+def test_meg_fan_line_reports_an_unknown_zero_fan(monkeypatch, capsys):
+    """A model that cannot be asked must not render as "off" (which reads as OK)."""
+    stub = StubPSU(sensors())
+    stub.read_fan_state = lambda: {'mode': 1, 'duty': None, 'zero_fan': None}
+    _, captured = run_main(monkeypatch, capsys, stub, ['--once'])
+    assert 'Zero Fan: unknown   Mode: auto' in captured.out

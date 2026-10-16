@@ -760,14 +760,29 @@ class MSIPSU:
         return (data[0], data[2])
 
     def read_fan_duty(self):
-        """Read READ_FANDUTY (42h, 4 bytes).
+        """Read READ_FANDUTY (42h).
+
+        Only the first two bytes are defined for every model (current duty, the
+        duty the MCU calculated). MSI Center returns before it looks at bytes 5
+        and 6 on the MEG units (``CPSU.cs:810``), so the software-set duty and
+        the Zero Fan flag are reported as ``None`` there rather than read out of
+        bytes the reference implementation refuses to interpret.
 
         Returns:
-            (current duty, MCU duty, software duty, zero_fan_on) or None.
+            (current duty, MCU duty, software duty, zero_fan_on), or None when
+            the model is unknown or the PSU does not answer.
         """
-        data = self.hid.read_register(REG_FAN_DUTY)
-        if data is None or len(data) < 4:
+        if self.variant in MSIPSU.SEVEN_ZPU_VARIANTS:
+            length, tail = 4, True
+        elif self.variant is not None:
+            length, tail = 2, False
+        else:
             return None
+        data = self.hid.read_register(REG_FAN_DUTY)
+        if data is None or len(data) < length:
+            return None
+        if not tail:
+            return (data[0], data[1], None, None)
         return (data[0], data[1], data[2], bool(data[3]))
 
     def read_fan_state(self):

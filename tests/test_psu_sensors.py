@@ -427,3 +427,32 @@ def test_every_alert_name_has_a_description():
     for names in ALERT_NAMES.values():
         for name in names:
             assert describe(name) != name, name
+
+
+# MSI Center's GET_FAN_DUTY returns before it reads bytes 5/6 on the MEG units
+# (CPSU.cs:810), so those bytes are undefined there: reporting a Zero Fan state
+# out of them would be inventing a reading.
+def test_ts_fan_duty_reports_the_full_quadruple():
+    psu = _psu_1300ts(registers={0x42: bytes([40, 42, 38, 1])})
+    assert psu.read_fan_duty() == (40, 42, 38, True)
+    assert psu.read_fan_state()['zero_fan'] is True
+    assert _psu_1300ts(registers={0x42: bytes([40, 42])}).read_fan_duty() is None
+
+
+@pytest.mark.parametrize('factory', [_psu_1300p, _psu_1600t])
+def test_meg_fan_duty_ignores_the_undefined_tail(factory):
+    """Two bytes are all a MEG defines; a stray ``1`` in byte 4 is not Zero Fan."""
+    psu = factory(registers={0x42: bytes([40, 42, 38, 1])})
+    assert psu.read_fan_duty() == (40, 42, None, None)
+    assert psu.read_fan_state()['zero_fan'] is None
+    # The two defined bytes still decode, so the duty display survives.
+    assert psu.read_fan_duty()[:2] == (40, 42)
+    assert factory(registers={0x42: bytes([40])}).read_fan_duty() is None
+
+
+def test_unknown_variant_does_not_read_fan_duty():
+    psu = _psu_1300ts(
+        commands={(0xFA, 0x51): b'MEG Ai9999X\x00'}, registers={0x11: b'MEG Ai9999X\x00'}
+    )
+    assert psu.variant is None
+    assert psu.read_fan_duty() is None
