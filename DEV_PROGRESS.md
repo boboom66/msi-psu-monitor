@@ -164,6 +164,17 @@
     也没有一行提示——需求里 `-O` 的定义是「存成文件，不打屏」。现按需求实现：追加到文件
     （行缓冲，`tail -f` 能实时看到）、stdout 保持干净、启动时在 stderr 说明一句，
     路径写不了就 exit 1。smoke 增两条检查（文件有内容 / stdout 为空）。
+- **读失败不再把「上次的健康 prom」留在盘上（本轮）**：`write_prometheus()` 只在采样成功
+  后调用，所以电源被拔掉后 textfile 一直保留最后一次内容——node_exporter 每次抓取都照样
+  上报 `msi_psu_up 1` 和那个瓦数，看板上「一小时前就拔掉的电源」一直显示成在线（与 README
+  里 `msi_psu_up` 的承诺直接冲突）。现在读失败即把同一文件改写成 `msi_psu_up 0` +
+  `msi_psu_error_info{reason="…"}`，**每个不同原因只写一次**（不是每秒重写），恢复后照常写回。
+- **另外三处「静默」**：`--export` 一行都没匹配到（state 目录不对 / daemon 从没跑过 /
+  窗口比保留期还长）时只在 stdout 打一个表头就 exit 0，现补一句 stderr 说明；
+  `--once`/`--watch` 原来用内置 30 天调 `prune()`，用户设的 `retention_days = 60` 被
+  静默砍半（daemon 侧认这个值），现两边一致；时钟被 NTP 往回拨时积分会**无声冻结**
+  （AVG 还在动、kWh 不动），现每次「往外拨」告警一次并说明原因。
+
 - **告警状态不再由半个数据源下结论（本轮，P1）**：`collect_alerts()` 原来把「E1h 位图
   没应答」也算成「有数据」——只要 12+4 pin 的软件镜像有读数（**哪怕全是 False，dict 也
   是真值**），`12V-2x6 Status` 就打 `Normal`。可镜像只看得见 OCP 针脚与针差，看不见
@@ -255,7 +266,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 404 passed
+uv run --group dev pytest -q                     → 410 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 32 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues

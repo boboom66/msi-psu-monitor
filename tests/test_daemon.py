@@ -332,6 +332,64 @@ def test_prometheus_is_written_atomically_and_replaced(tmp_path):
     assert target.read_text().count('msi_psu_power_total {}') == 1
 
 
+def test_a_failed_read_stops_the_textfile_from_claiming_health(tmp_path):
+    """node_exporter re-exports the last file on every scrape.
+
+    Without this, an unplugged PSU keeps showing ``msi_psu_up 1`` and its last
+    wattage for as long as nobody looks -- indistinguishable from a live PSU.
+    """
+    clock = Clock()
+    stub = StubPSU(clean_sensors(), alerts={'ocp_12v': False})
+    daemon = make_daemon(tmp_path, stub, clock=clock, prom_path=str(tmp_path / 'psu.prom'))
+    target = tmp_path / 'psu.prom'
+    daemon.tick()
+    assert 'msi_psu_up 1' in target.read_text()
+
+    stub.error = 'ENODEV: the PSU went away'
+    clock.advance(1)
+    daemon.tick()
+    text = target.read_text()
+    assert 'msi_psu_up 0' in text
+    assert 'msi_psu_error_info{reason="ENODEV: the PSU went away"} 1' in text
+    assert 'msi_psu_power_total' not in text  # no stale readings are kept
+    assert 'msi_psu_ocp' not in text  # nor a stale OCP block
+
+
+def test_the_failure_is_written_once_per_reason(tmp_path, monkeypatch):
+    """A PSU that stays away must not rewrite the file every second."""
+    from msi_psu_monitor import state as stats
+
+    clock = Clock()
+    stub = StubPSU(clean_sensors(), alerts={'ocp_12v': False})
+    daemon = make_daemon(tmp_path, stub, clock=clock, prom_path=str(tmp_path / 'psu.prom'))
+    daemon.tick()
+    stub.error = 'ENODEV'
+    writes = []
+    real = stats.atomic_write_text
+    monkeypatch.setattr(
+        stats, 'atomic_write_text', lambda path, text: (writes.append(path), real(path, text))[1]
+    )
+    clock.advance(1)
+    daemon.tick()
+    clock.advance(1)
+    daemon.tick()
+    assert len(writes) == 1
+
+    # ... and a recovery puts the readings back.
+    stub.error = None
+    clock.advance(31)
+    daemon.tick()
+    assert 'msi_psu_up 1' in (tmp_path / 'psu.prom').read_text()
+
+
+def test_a_failed_read_without_prometheus_configured_writes_nothing(tmp_path):
+    stub = StubPSU(clean_sensors(), alerts=None)
+    daemon = make_daemon(tmp_path, stub)
+    stub.error = 'ENODEV'
+    daemon.tick()  # must not raise: there is no textfile to keep honest
+    assert list(tmp_path.glob('*.prom')) == []
+
+
 def test_alert_is_logged_only_after_the_debounce(tmp_path, caplog):
     daemon = make_daemon(
         tmp_path,

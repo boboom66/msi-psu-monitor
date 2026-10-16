@@ -72,6 +72,10 @@ class MonitorDaemon:
         self.failures = 0
         self.samples = 0
         self.stopping = False
+        #: Reason of the read failure the current textfile was written for, so a
+        #: broken read rewrites ``msi_psu_up 0`` once instead of every second.
+        self.prom_failure = None
+        self.last_failure = None
         self._next_prom = 0.0
         self._next_history = 0.0
         self._next_prune = 0.0
@@ -208,6 +212,7 @@ class MonitorDaemon:
 
     def _read_failed(self, reason):
         """Count one failed read and rescan after ``RESCAN_AFTER_FAILURES``."""
+        self.last_failure = reason
         self.failures += 1
         logger.error(f'Read failed ({self.failures}/{RESCAN_AFTER_FAILURES}): {reason}')
         if self.failures >= RESCAN_AFTER_FAILURES:
@@ -296,6 +301,24 @@ class MonitorDaemon:
                     monitor.format_multirail_prometheus(self.ocp_multirail, sensors.get('product'))
                 )
         stats.atomic_write_text(target, '\n'.join(body) + '\n')
+        self.prom_failure = None
+        return target
+
+    def write_prometheus_failure(self, reason, output=None):
+        """Overwrite the textfile with ``msi_psu_up 0`` after a failed read.
+
+        ``write_prometheus`` only runs when a sample succeeded, so an unplugged
+        PSU used to leave the last healthy file on disk: node_exporter re-exports
+        the unchanged ``msi_psu_up 1`` and the last wattage on every scrape, and
+        the dashboard shows a PSU that was removed an hour ago as current. The
+        same reason is written once (not once per second) so a PSU that stays
+        away does not rewrite the file every tick.
+        """
+        target = Path(output) if output else self.prom_path
+        if target is None or self.prom_failure == reason:
+            return None
+        stats.atomic_write_text(target, monitor.format_prometheus({'error': reason}) + '\n')
+        self.prom_failure = reason
         return target
 
     def record_history(self, sensors):
@@ -322,6 +345,11 @@ class MonitorDaemon:
         now = self.clock()
         sensors = self.sample()
         if sensors is None:
+            # The textfile must not keep claiming the last reading is live.
+            try:
+                self.write_prometheus_failure(self.last_failure or 'no reading')
+            except OSError as exc:
+                logger.error(f'Cannot write {self.prom_path}: {exc}')
             return not self.stopping
 
         if now >= self._next_prom:

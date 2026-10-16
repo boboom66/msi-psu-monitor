@@ -770,7 +770,9 @@ def run_once(psu, args, cfg, monitor_state, engine):
         sensors['status'] = status_from(active, have_e1h)
     apply_stats(sensors, monitor_state)
     if monitor_state is not None:
-        monitor_state.prune()
+        # Same retention the daemon uses: pruning with the built-in default
+        # would drop buckets a user asked to keep for 60 days.
+        monitor_state.prune(days=cfg['retention_days'])
         monitor_state.save(stats.state_path(_state_dir(cfg)))
 
     emit(FORMATTERS[args.format](sensors), args.output)
@@ -835,7 +837,7 @@ def run_watch(psu, args, cfg, monitor_state, engine):
 
             now = time.time()
             if monitor_state is not None and now - last_save >= 30.0:
-                monitor_state.prune()
+                monitor_state.prune(days=cfg['retention_days'])
                 monitor_state.save(stats.state_path(_state_dir(cfg)))
                 last_save = now
 
@@ -982,7 +984,15 @@ def run_export(args, cfg):
         logger.error(f'Error: {exc}')
         return EXIT_ERROR
 
-    header, rows = stats.build_export(_state_dir(cfg), time.time() - window, columns)
+    state_dir = _state_dir(cfg)
+    header, rows = stats.build_export(state_dir, time.time() - window, columns)
+    if not rows:
+        # A header-only CSV is exactly what a wrong state dir, a daemon that
+        # never ran and a window wider than the retention all look like.
+        logger.warning(
+            f'No history rows in {state_dir} for the last {args.from_spec}; '
+            'only the header is written.'
+        )
     if not args.output:
         _write_csv(sys.stdout, header, rows)
         return EXIT_OK

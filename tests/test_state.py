@@ -480,3 +480,21 @@ def test_old_naive_history_rows_still_read(tmp_path):
         + '\n2026-02-09T10:00:00,12.100,5.040,3.320,50.000,56.0,2050,600.0,94.00,24.0,96.0\n'
     )
     assert stats.build_export(tmp_path, None, ['12v'])[1] == [['2026-02-09T10:00:00', '12.100']]
+
+
+def test_a_backwards_clock_says_the_integral_is_frozen(tmp_path, caplog):
+    """The AVG keeps moving while the kWh total stops: that must not be silent."""
+    monitor_state = stats.MonitorState()
+    monitor_state.update(600.0, 94.0, ts=1000.0)  # starts the clock
+    monitor_state.update(600.0, 94.0, ts=1010.0)
+    energy = monitor_state.energy_wh
+    assert energy > 0
+    with caplog.at_level('WARNING'):
+        monitor_state.update(600.0, 94.0, ts=1005.0)  # NTP stepped the clock back
+        monitor_state.update(600.0, 94.0, ts=1006.0)  # still behind: no new spam
+    assert monitor_state.energy_wh == energy
+    assert monitor_state.count == 4  # the average still counts the sample
+    assert caplog.text.count('clock went backwards') == 1
+    with caplog.at_level('WARNING'):
+        monitor_state.update(600.0, 94.0, ts=1020.0)  # caught up: integrates again
+    assert monitor_state.energy_wh > energy

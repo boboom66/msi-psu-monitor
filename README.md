@@ -221,6 +221,11 @@ session). On models without those registers — the MEG units, where 0xC1h is th
 dashboard can tell "not supported" from "exporter broken"; the multi-rail MEG
 models add `msi_psu_multirail_ocp` (1 = per-rail protection) from the same address.
 
+A failed read does not leave the last healthy file behind either: the daemon rewrites
+the same file with `msi_psu_up 0` and the reason (`msi_psu_error_info{reason="..."}`),
+once per distinct reason rather than once per second — otherwise a PSU unplugged an
+hour ago still reads as `up 1` with its last wattage on every scrape.
+
 The daemon replaces the file atomically (`.tmp` + rename), so scrapers never read a
 partial file:
 

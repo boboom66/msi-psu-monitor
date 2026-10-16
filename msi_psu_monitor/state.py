@@ -164,6 +164,7 @@ class MonitorState:
         self.energy_wh = float(energy_wh)
         self.last_ts = None if last_ts is None else float(last_ts)
         self.daily = dict(daily or {})
+        self._clock_warned = False
         self.product = str(product or '')
         self.serial = str(serial or '')
 
@@ -208,6 +209,17 @@ class MonitorState:
         # the real interval) and invent energy that was never drawn.
         if self.last_ts is None or ts > self.last_ts:
             self.last_ts = ts
+            self._clock_warned = False
+        elif not self._clock_warned:
+            # A clock that was ahead and got corrected (dead RTC, NTP step, a VM
+            # host) freezes the integral silently: the AVG keeps updating while
+            # the kWh total stops, with nothing to say why. Warn once per
+            # excursion instead of once per sample.
+            self._clock_warned = True
+            logger.warning(
+                f'The clock went backwards by {self.last_ts - ts:.0f}s; energy is not '
+                'being integrated until it catches up (the kWh totals stay frozen).'
+            )
         self.count += 1
         self.watt_sum += watts
         self.efficiency_sum += float(efficiency)

@@ -607,3 +607,35 @@ def test_export_reports_an_unwritable_output(monkeypatch, capsys, tmp_path):
     )
     assert code == EXIT_ERROR
     assert 'cannot write' in captured.err
+
+
+def test_an_empty_export_says_the_window_found_nothing(monkeypatch, capsys, tmp_path):
+    """Header-only CSV used to be indistinguishable from a wrong state dir."""
+    stub = StubPSU(sensors())
+    code, captured = run_main(monkeypatch, capsys, stub, ['--export', '--from', '2h'])
+    assert code == EXIT_OK
+    assert captured.out.strip() == 'time,cpu,gpu,12v,5v,3v3,temp,fan,eff'
+    assert 'No history rows' in captured.err
+
+
+def test_once_prunes_with_the_configured_retention(monkeypatch, capsys, tmp_path):
+    """[daemon] retention_days = 60 must not be cut to 30 by a --once run."""
+    from msi_psu_monitor import state as stats
+
+    cfg = tmp_path / 'psu.conf'
+    cfg.write_text('[daemon]\nretention_days = 60\n')
+    state_dir = tmp_path / 'state'
+    state_dir.mkdir()
+    old = time.time() - 40 * 86400
+    monitor_state = stats.MonitorState()
+    monitor_state.update(600.0, 94.0, ts=old)
+    monitor_state.update(600.0, 94.0, ts=old + 10)
+    assert monitor_state.daily  # a bucket dated 40 days ago
+    monitor_state.save(stats.state_path(state_dir))
+    monkeypatch.setenv('MSI_PSU_STATE_DIR', str(state_dir))
+
+    stub = StubPSU(sensors())
+    code, _ = run_main(monkeypatch, capsys, stub, ['--config', str(cfg), '--once'])
+    assert code == EXIT_OK
+    kept = stats.MonitorState.load(stats.state_path(state_dir))
+    assert kept.daily, 'the 40-day-old bucket must survive with retention_days = 60'
