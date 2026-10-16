@@ -789,7 +789,6 @@ def run_watch(psu, args, cfg, monitor_state, engine):
             return EXIT_ERROR
         print(f'Appending frames to {args.output} (Ctrl-C to stop)', file=sys.stderr, flush=True)
     last_save = 0.0
-    last_save = 0.0
     try:
         while True:
             sensors = psu.get_sensors()

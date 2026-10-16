@@ -137,7 +137,13 @@ assert_exit "--dashboard 不与动作混用" 2 "$?"
 WATCH_LOG="$WORK/watch.log"
 timeout 3 $MONITOR --watch 1 -i 0.05 -O "$WATCH_LOG" >"$WORK/watch.out" 2>/dev/null
 assert_contains "--watch -O 写文件" "MSI PSU:" "$(cat "$WATCH_LOG" 2>/dev/null)"
-[ -s "$WORK/watch.out" ] && bad "--watch -O 不打屏" "stdout 仍有输出" || ok "--watch -O 不打屏"
+# `if` rather than `[ ... ] && bad ... || ok ...`: bad() returns non-zero when it
+# gets no detail argument, which would then also run the ok branch.
+if [ -s "$WORK/watch.out" ]; then
+    bad "--watch -O 不打屏" "stdout 仍有输出"
+else
+    ok "--watch -O 不打屏"
+fi
 
 printf '\n\033[1m[6] daemon 链路（prometheus + 历史 + 状态）\033[0m\n'
 cat > "$WORK/daemon.conf" <<EOF
