@@ -246,6 +246,10 @@ See [`docs/verify.md`](docs/verify.md) for the full no-hardware checklist —
 quality gates, the `MSI_PSU_DEMO=1` demo mode, alert paths, the daemon + dashboard
 chain, `.deb` construction, and the list of items that still require a real PSU.
 
+[`docs/requirements-traceability.md`](docs/requirements-traceability.md) maps every
+line of the requirements document to the code, the test that covers it and the
+verification method, so acceptance can be ticked off item by item.
+
 ## Kernel Module
 
 For kernel-level integration (hwmon sysfs interface), see the `kernel/` directory.

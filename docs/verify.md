@@ -34,14 +34,34 @@ uv run --group dev mypy msi_psu_monitor/
 uv run --group dev ruff format --check .
 ```
 
-另有两条结构性回归在 `pytest` 里（无需额外命令）：
+### 1.1 测试模块清单
 
-* `tests/test_pid_consistency.py`：`PSU_PRODUCT_IDS` / `VARIANTS[*]["pid"]` /
-  `systemd/99-msi-psu.rules` / `scripts/install.sh` / README 硬件表五处的 PID 必须一致
-  （少一处就是「某个机型拿不到 uaccess」这类静默缺陷）。
-* `tests/test_stdlib_only.py`：在 `python -I` 子进程里导入全部模块，第三方依赖混入即失败。
+| 模块 | 覆盖 |
+|------|------|
+| `tests/test_protocol.py` | 命令帧拼装、握手、NAK 处理、`lin11_to_int` 标度 |
+| `tests/test_protocol_lin11.py` | LINEAR11 原始向量（含 exp −4 / −7 边界与无符号尾数） |
+| `tests/test_psu_sensors.py` | 62 B / 40 B / 20 B 三种载荷解析、P 系五轨、未知机型拒解 |
+| `tests/test_alerts.py` | 阈值判定、`consecutive_required` 去抖、严重度、告警行格式 |
+| `tests/test_state.py` | 累计统计、`rail_watts()`、历史追加/裁剪、`--export` 列 |
+| `tests/test_config.py` | INI 解析、`[daemon]`、`[fan]` 段与非法值回落 |
+| `tests/test_monitor_format.py` | text / json / prometheus 三种 formatter 输出串 |
+| `tests/test_cli_alerts.py` | CLI 告警路径与退出码 2 |
+| `tests/test_cli_features.py` | `--watch`/`-O`/`--serial`/`--show-log`/`--fan-*`/`--export`/互斥校验 |
+| `tests/test_ocp.py` | 0xC0 阈值 / 0xC1 状态 / 单多轨标志的三格式输出与机型门 |
+| `tests/test_daemon.py` | 采样节拍、原子写、重扫、历史、风扇 Profile 恢复 |
+| `tests/test_dashboard.py` | HTTP 端点、历史/状态载荷、导出 |
+| `tests/test_demo.py` | 合成电源、5 机型切换、告警位注入 |
+| `tests/test_schema.py` | JSON / prometheus 输出结构契约 |
+| `tests/test_monitor.py` | 遗留冒烟（兼容旧接口，勿删） |
+| `tests/test_pid_consistency.py` | 五处 USB PID 列表 + README 载荷大小一致性 |
+| `tests/test_stdlib_only.py` | `python -I` 子进程导入全部模块（零第三方依赖） |
+| `tests/test_docs_consistency.py` | 文档里的用例数、测试文件名不得与事实不符 |
 
-三条全绿即通过。当前基线：**249 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
+`tests/test_docs_consistency.py` 是这轮新加的「文档防伪」：任何文档写了
+`N passed` 就必须等于 `pytest --collect-only` 的真实数字，引用的
+`` `tests/xxx.py` `` 必须存在，且每个测试文件都必须在某处文档里被提到。
+
+三条全绿即通过。当前基线：**252 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
 
 > `ruff format --check` **不要全仓跑**：`protocol.py`/`__init__.py`/`__main__.py`/`tests/test_monitor.py`
 > 等历史文件混用引号风格，全仓 format 会产生大量无意义 diff。只对本次改动的文件跑。
