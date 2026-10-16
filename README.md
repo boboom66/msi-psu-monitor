@@ -101,7 +101,8 @@ msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
       --export     Export the daemon history as CSV
       --from       Export window: 30m, 2h, 7d, ... (required with --export)
       --columns    Export columns (default: all)
-      --dashboard  Serve local charts on 127.0.0.1
+      --dashboard  Serve local charts on 127.0.0.1 (it reads the history
+                   files: --once/--serial/--format/-O do not apply)
       --port       Dashboard port (default 8899)
       --show-log   Dump the PSU black-box alert records (C1h)
       --ocp        Show the OCP view (C0h/C1h): 12V-2x6 thresholds + state on

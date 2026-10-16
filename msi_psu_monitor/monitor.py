@@ -457,7 +457,7 @@ def format_ocp_json(config, state, product):
     return json.dumps(payload, indent=2)
 
 
-#: HELP line of the always-exported OCP availability gauge (see below).
+#: HELP line of the OCP availability gauge (see below).
 OCP_AVAILABLE_HELP = (
     '# HELP msi_psu_ocp_available 12V-2x6 OCP registers exposed by this model (1) or not (0)'
 )
@@ -466,8 +466,10 @@ OCP_AVAILABLE_HELP = (
 def format_ocp_availability_prometheus(available):
     """The honest stand-in for a model without the C0h/C1h OCP registers.
 
-    The daemon always exports this gauge: an absent ``msi_psu_ocp_*`` block is
-    indistinguishable from a broken exporter on a dashboard.
+    Every prometheus write the daemon makes (and those are only the writes it
+    makes after a successful sample) carries this gauge: an absent
+    ``msi_psu_ocp_*`` block is indistinguishable from a broken exporter on a
+    dashboard.
     """
     return '\n'.join(
         [
@@ -1194,10 +1196,15 @@ def _validate_args(parser, args):
         or args.watch is not None
         or args.fan_mode
         or args.fan_duty is not None
+        or args.once
+        or args.serial is not None
     ):
+        # The page reads the history files, not the device: --once never gets to
+        # "read once and exit", and --serial cannot pick a PSU for it (the page
+        # labels whichever serial the daemon last sampled).
         parser.error(
             '--dashboard serves the local page only: it cannot be combined with '
-            '--export, --show-log, --watch or a fan write'
+            '--export, --show-log, --watch, --once, --serial or a fan write'
         )
     if args.dashboard and args.format not in (None, 'text'):
         parser.error('--dashboard serves the HTML page; --format does not apply')

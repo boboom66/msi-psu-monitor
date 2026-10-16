@@ -127,6 +127,8 @@ def isolated_state(tmp_path, monkeypatch):
         ['--port', '0'],  # valid, but only with --dashboard
         ['--fan-mode', 'auto', '--fan-duty', '50'],
         ['--dashboard', '-O', '/tmp/page.html'],
+        ['--dashboard', '--once'],  # the page is a server: it never "reads once"
+        ['--dashboard', '--serial', 'ABC123'],  # the page reads history, not a device
         ['-i', '5'],  # a bare --interval used to be accepted and then ignored
         ['--once', '-O', ''],  # an unset $OUT is not "no -O"
         ['--watch', '1', '-O', ''],

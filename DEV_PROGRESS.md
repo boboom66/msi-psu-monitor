@@ -164,6 +164,15 @@
     也没有一行提示——需求里 `-O` 的定义是「存成文件，不打屏」。现按需求实现：追加到文件
     （行缓冲，`tail -f` 能实时看到）、stdout 保持干净、启动时在 stderr 说明一句，
     路径写不了就 exit 1。smoke 增两条检查（文件有内容 / stdout 为空）。
+- **两条指标检查本来永远查不出问题（本轮，复核子代理挑出）**：smoke 用子的 `case *"$2"*`
+  子串匹配去查 `msi_psu_up 1` / `msi_psu_ocp_available 1`，而这两个指标上方的
+  `# HELP msi_psu_up 1 when the last sample carried sensor readings` /
+  `# HELP msi_psu_ocp_available 12V-2x6 … (1) or not (0)` **本身就含这串**——把 gauge 改成 0
+  也照样打印 ok（已用最小脚本复现：旧写法 ok、新写法 FAIL）。现加 `assert_line`
+  整行锚定（首行/末行都测过，因为命令替换会吃掉文件末尾换行），三条指标检查改用它；
+  顺带补上 P 系那半边本来只有单测覆盖的端到端检查（`msi_psu_multirail_ocp{} 1` +
+  `msi_psu_ocp_available 0`）。smoke 51 → 53 项。
+
 - **复核子代理挑出的「`-O`/`-i` 被接受然后无视」整类（本轮）**：只读审计发现同一类缺陷还留着
   四个口子，逐条复跑确认后全部堵上：
   - `-O ""`（`$OUT` 没设）此前等价于「没给 `-O`」→ 输出照旧打屏、文件不建。与 `--columns ''`/
@@ -199,12 +208,12 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 379 passed
+uv run --group dev pytest -q                     → 381 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 32 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
 bash scripts/build_deb.sh                        → dist/msi-psu-monitor_1.0.0_all.deb
-bash scripts/smoke.sh                            → 51 项全过（三种格式/告警按机型/黑盒/OCP/风扇/daemon/dashboard）
+bash scripts/smoke.sh                            → 53 项全过（三种格式/告警按机型/黑盒/OCP/风扇/daemon/dashboard）
 ```
 
 护栏（机器强制，不靠人记）：

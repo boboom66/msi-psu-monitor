@@ -34,10 +34,28 @@ PASS=0
 FAIL=0
 # Keep in sync with the count quoted in docs/verify.md: a check that quietly
 # disappears from this script is a gap nobody notices.
-EXPECTED_TOTAL=51
+EXPECTED_TOTAL=53
 
 ok()   { PASS=$((PASS + 1)); printf '\033[0;32m  ok\033[0m   %s\n' "$1"; }
 bad()  { FAIL=$((FAIL + 1)); printf '\033[0;31m  FAIL\033[0m %s\n' "$1"; [ $# -gt 1 ] && printf '       %s\n' "$2"; }
+
+# assert_line <label> <exact line> <haystack>
+# Whole-line match: a substring match on a metric name is worthless here, because
+# the "# HELP <name> ..." line above it contains the name too. `msi_psu_up 1` was
+# "found" in a file whose sample read `msi_psu_up 0` (the HELP text is
+# "# HELP msi_psu_up 1 when the last sample carried sensor readings").
+# The haystack is padded with newlines so both the first and the last line match,
+# even though command substitution strips the file's trailing newline.
+assert_line() {
+    case "
+$3
+" in
+        *"
+$2
+"*) ok "$1" ;;
+        *) bad "$1" "expected the line: $2" ;;
+    esac
+}
 
 # assert_contains <label> <needle> <haystack>
 assert_contains() {
@@ -165,10 +183,10 @@ grep -q "Restored the configured fan profile" "$WORK/daemon.log" \
 
 PROM=$(cat "$WORK/psu.prom" 2>/dev/null)
 assert_contains "prom 有机型标签" 'msi_psu_info{product="MPG Ai1600TS' "$PROM"
-assert_contains "prom 有 up 指标" 'msi_psu_up 1' "$PROM"
+assert_line "prom 有 up 指标" 'msi_psu_up 1' "$PROM"
 assert_contains "prom 有状态指标" 'msi_psu_status_12v_2x6{status="Normal"}' "$PROM"
-assert_contains "prom 有 OCP 块" 'msi_psu_ocp_available 1' "$PROM"
-assert_contains "prom 有 OCP 阈值" 'msi_psu_ocp_pin_point_a{} 12.0' "$PROM"
+assert_line "prom 有 OCP 块" 'msi_psu_ocp_available 1' "$PROM"
+assert_line "prom 有 OCP 阈值" 'msi_psu_ocp_pin_point_a{} 12.0' "$PROM"
 [ -f "$MSI_PSU_STATE_DIR/state.json" ] && ok "state.json 落盘" || bad "state.json 落盘"
 HIST=$(cat "$MSI_PSU_STATE_DIR"/daily-*.log 2>/dev/null | head -1)
 case "$HIST" in
@@ -185,6 +203,8 @@ MSI_PSU_STATE_DIR="$WORK/state-p" $DAEMON --config <(sed "s|$MSI_PSU_STATE_DIR|$
 PROM=$(cat "$WORK/psu.prom" 2>/dev/null)
 assert_contains "P 系 prom 出五条轨道" 'msi_psu_rail_current{rail="12V5"}' "$PROM"
 assert_contains "P 系 prom 出 CPU 瓦特" "msi_psu_cpu_watts" "$PROM"
+assert_line "P 系 prom 出多轨标志" 'msi_psu_multirail_ocp{} 1' "$PROM"
+assert_line "P 系 prom 不出 OCP 阈值" 'msi_psu_ocp_available 0' "$PROM"
 CSV=$(MSI_PSU_STATE_DIR="$WORK/state-p" $MONITOR --export --from 30m --columns cpu,gpu 2>/dev/null)
 assert_contains "P 系导出含 cpu,gpu 列" "time,cpu,gpu" "$CSV"
 unset MSI_PSU_DEMO_MODEL
