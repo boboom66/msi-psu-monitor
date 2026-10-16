@@ -272,12 +272,12 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 421 passed
+uv run --group dev pytest -q                     → 431 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 32 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
 bash scripts/build_deb.sh                        → dist/msi-psu-monitor_1.0.0_all.deb
-bash scripts/smoke.sh                            → 53 项全过（三种格式/告警按机型/黑盒/OCP/风扇/daemon/dashboard）
+bash scripts/smoke.sh                            → 56 项全过（三种格式/告警按机型/黑盒/OCP/风扇/daemon/dashboard/.deb 内容与权限）
 ```
 
 护栏（机器强制，不靠人记）：
@@ -289,7 +289,7 @@ bash scripts/smoke.sh                            → 53 项全过（三种格式
 - `ast.parse(feature_version=(3, 10))`：全部 `.py` 通过 3.10 语法校验（本机只有 3.12/3.13）。
 - **3.12 矩阵真跑过**（本轮补）：用 `uv venv --python 3.12` 建了个裸 3.12 环境（离线装 pytest），
   把工作树复制一份、不带 `.venv`、也不装本包，直接跑 `python3 -m pytest`（**414 通过**）与
-  `bash scripts/smoke.sh`（**53 项全过**）。3.10 本机无解释器也无网络装，只能靠三重静态把关。
+  `bash scripts/smoke.sh`（**56 项全过**）。3.10 本机无解释器也无网络装，只能靠三重静态把关。
 - CI 含 3.10 / 3.12 双矩阵 + `ruff check` + `ruff format --check` + `mypy` + `pytest`
   + **构建 `.deb`**。
 
@@ -336,6 +336,54 @@ Ai1600T 的 20 字节布局里正好是 `data[0:2]`）和 uptime 计数器（每
 现 byte-2 判定只在 `data[0] == PSU_WRITE` 时生效，并把三种形状都写进了参数化测试
 （读 2 字节 NAK / 写 2 字节 NAK / 写被拒 3 字节 NAK / 读载荷以 0xFE 开头），另加一条
 端到端测试：MEG Ai1600T 的 0xE0 帧首字节 0xFE 必须解出 `vout_12v == 11.984 V`。
+
+### 每条安装路径都启用了一个没有配置文件的 daemon（本轮，P1）
+
+`systemd/msi-psu-monitor.service` 的 `ExecStart` 写死了
+`--config /etc/msi-psu-monitor.conf`，而 `scripts/install.sh` 只在收尾**打印**一句「想配置的话
+自己 `install` 那个示例文件」，`scripts/build_deb.sh` 只 stage 模块/unit/udev/文档、
+**不装任何 `/etc` 文件**——可它的 postinst 照旧 `systemctl enable` + `restart`（三条都带 `|| true`，
+失败也不出声）。于是 apt 打印成功、unit 被启用，然后每一次启动都撞上
+`config.py` 的 `ConfigError`；CLI 侧有 `try`（`monitor.py` 把参数错误变成一行 + exit 1），
+**daemon 侧没有**：`daemon.main()` 唯一的 `try` 包着 `daemon.run()`，`load_config()` 在它外面，
+异常直接以 traceback 逃逸 → `Restart=always` 每 `RestartSec` 再撞一次，journal 里堆栈刷屏。
+
+三处一起改：unit 不再钉 `--config`（配置文件本来就是可选的、走 `CONFIG_FILES` 搜索路径，
+所以「什么都没配」的机器也能正常起来）；`build_deb.sh` 把示例 stage 成
+`/etc/msi-psu-monitor.conf`（dpkg conffile，用户改过会在升级时被询问保留），
+`install.sh` 只在文件不存在时写它（**永不覆盖用户改过的那份**）；`daemon.main()` 捕 `ConfigError`
+打一行 `Error: ...` 并返回 1（与 CLI 同一套退出码）。
+
+### 打包/冒烟里三个「看着通过其实没测」的口子（本轮，P2）
+
+- **`.deb` 里的权限跟着构建者的 umask 走**：`build_deb.sh` 用 `cp` 拷模块与 unit，`umask 077`
+  下产物是 **root-only**，而 udev 规则的 `uaccess` 承诺本来就是给非 root 会话用的——权限错了
+  等于功能坏了。改成 `install -m 644`，并在 `scripts/smoke.sh` 里**用 `umask 077` 构建、
+  再从 `dpkg-deb -c` 读回模式**（此前没有任何一步看过产物内部）。
+- **`smoke.sh --keep` 是空头承诺**：`cleanup()` 读的是 `$1`，而 `trap 'cleanup' EXIT` 一个参数都不传，
+  于是 `--keep` 被文档化、被接受、然后静默忽略（临时目录照删）。改成在脚本开头记住 `$KEEP`。
+- **dashboard 段可能在对着别人的服务器打勾**：4 条检查只看 `curl` 的响应，端口上如果是
+  （残留的）别的 dashboard，本脚本的子进程明明以 `cannot serve ... Address already in use` 死了，
+  这一段仍然全绿。现加一条「子进程还活着且 stderr 为空」的检查——注意**只 `kill -0` 不够**：
+  未被回收的子进程是僵尸，照样通过；而 curl 会在我们子进程还没跑到 `bind()` 时就被占用端口的
+  监听者应答，所以检查前留 1 秒宽限。实测：外来 dashboard 占住端口时，该检查如实 FAIL、脚本 exit 1。
+
+### 文档里的 `[fan]` 示例其实不生效（本轮，P1）
+
+README 的配置片段写的是
+
+```ini
+mode = customized   ; auto | customized
+duty = 60           ; 0-100, ignored by the PSU in auto mode
+```
+
+而 `ConfigParser` **不剥行尾注释**：`mode` 的真实取值是
+`customized   ; auto | customized`，不是任何已知模式，于是 `load_config` 告警一次、整节被忽略
+——照文档抄一遍，功能一点没生效，而且（在 `-q` 下）连那句告警都看不见。这与本项目一直在堵的
+「参数被接受然后无声不生效」是同一类。现把注释挪到独立行，并加两条测试：
+`test_the_readme_fan_snippet_is_copy_pasteable`（把 README 里的 ```ini``` 块抽出来
+反解析，取值必须等于它声称的 `customized`/`60`）与「README 不得有两个同名 `##` 标题」
+（同一轮还发现 `## Kernel Module` 连写两遍，第二遍是空的）。
 
 ### 测试自身的环境依赖（本轮抓到）
 

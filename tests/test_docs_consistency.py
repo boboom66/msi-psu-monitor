@@ -183,3 +183,15 @@ def test_the_quoted_real_hardware_check_count_matches_verify_md():
     assert len(HARDWARE_ENTRY_RE.findall(section)) == expected, (
         'DEV_PROGRESS.md lists a different number of hardware checks than verify.md §8'
     )
+
+
+def test_the_readme_has_no_duplicate_section_heading():
+    """A duplicated `## ...` heading means a merge lost a paragraph boundary.
+
+    `## Kernel Module` appeared twice in a row (the second copy was empty), which
+    renders as one section and hides the accidental duplication.
+    """
+    text = (ROOT / 'README.md').read_text(encoding='utf-8')
+    headings = re.findall(r'^## (.+)$', text, re.M)
+    duplicates = {h for h in headings if headings.count(h) > 1}
+    assert not duplicates, f'duplicate README headings: {sorted(duplicates)}'

@@ -251,9 +251,22 @@ way MSI Center re-asserts its profile when it takes the device over. It is off u
 
 ```ini
 [fan]
-mode = customized   ; auto | customized
-duty = 60           ; 0-100, ignored by the PSU in auto mode
+# Off unless `mode` is set: `auto` hands the fan back to the PSU, `customized`
+# holds the fixed `duty` (0-100).
+mode = customized
+duty = 60
 ```
+
+Both installers (`apt install`, `scripts/install.sh`) drop
+`docs/msi-psu-monitor.conf.example` at `/etc/msi-psu-monitor.conf`; it is entirely
+commented out, so installing it changes no behaviour, and `install.sh` never
+overwrites a file the user has edited.
+
+Keep trailing comments off the value lines: ConfigParser does not strip them, so
+`mode = customized   ; auto | customized` is read as the literal value
+`customized   ; auto | customized`, which is no known mode — the daemon warns and
+ignores the whole section. This snippet shipped in exactly that broken form until a
+review caught it.
 
 State lives in `/var/lib/msi-psu-monitor` (created by the unit's
 `StateDirectory`), falling back to `$XDG_STATE_HOME/msi-psu-monitor`; override with
@@ -278,7 +291,6 @@ chain, `.deb` construction, and the list of items that still require a real PSU.
 line of the requirements document to the code, the test that covers it and the
 verification method, so acceptance can be ticked off item by item.
 
-## Kernel Module
 ## Kernel Module
 
 **Not usable yet — the patch in `kernel/` is an unbuilt draft.** Jack Doan's

@@ -8,7 +8,7 @@ Protocol rules live in `msi_psu_monitor/AGENTS.md` (auto-loaded via `opencode.js
 
 ```bash
 uv sync --group dev                                  # py>=3.10, dev toolchain (pytest/ruff/mypy), zero runtime deps
-uv run --group dev pytest -q                         # 421 tests, no hardware needed
+uv run --group dev pytest -q                         # 431 tests, no hardware needed
 uv run --group dev pytest -q tests/test_state.py     # single file
 uv run --group dev ruff check .                      # must be clean
 uv run --group dev mypy msi_psu_monitor/             # must be clean
@@ -92,9 +92,22 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12.
   daemon. The old `msi-psu-monitor.timer` was deleted (D-02: one daemon, not a timer).
   The commented sandbox lines are intentional — do not add `PrivateDevices`, the daemon
   holds `/dev/hidraw*` open for its whole runtime.
-- **`scripts/install.sh` only probes `ID_MODEL_ID=808c`** (Ai1600TS). The other 4 PIDs
-  work at runtime via `PSU_PRODUCT_IDS` — a detection miss in the script is not a
-  missing-device bug.
+- **`scripts/install.sh` probes all 5 PIDs** (`808c aa6f 56d4 e749 c9eb`) and installs the
+  udev rule, the unit and `/etc/msi-psu-monitor.conf` (only when absent). The unit must
+  not pin `--config` at a path nothing installs: it used to, so the daemon died on start
+  and `Restart=always` looped forever while `apt` reported success.
+  `tests/test_packaging.py` holds this invariant — read the script, do not trust a
+  comment (one here claimed `808c` only, and that was wrong).
+- **Both installers ship a config**: `build_deb.sh` stages
+  `/etc/msi-psu-monitor.conf` (a dpkg conffile) and `install.sh` writes it if missing.
+  The example is all comments — `tests/test_packaging.py` proves installing it changes
+  no value — and `install.sh` never overwrites the user's copy.
+- **`daemon.main` catches `ConfigError`** and prints one `Error: ...` line (exit `1`), the
+  same as the CLI. A traceback here is a systemd restart loop with 400 lines per cycle.
+- **`build_deb.sh` stages with `install -m 644`, never bare `cp`**: under `umask 077` a
+  `cp` shipped root-only modules and `.service` files, breaking the uaccess use case the
+  udev rule exists for. `scripts/smoke.sh` builds the `.deb` under `umask 077` and reads
+  the modes back out of the archive.
 - **Line endings**: `.gitattributes` enforces LF; CRLF breaks the shell scripts.
 - **`kernel/` patch is out-of-tree** (Proxmox 7.0 headers unavailable) — never build it
   here; the userspace tool is the supported path.

@@ -74,7 +74,7 @@ uv run --group dev ruff format --check .
    ——该常量同时会被脚本自己核对，检查项被误删时脚本也会失败。
 
 一条命令跑完整条无硬件链路（三种格式 / 告警 exit 2 及按机型鉴名 / 黑盒 / OCP /
-风扇写 / daemon→prometheus+历史 / dashboard HTTP / 3.10 语法），共 53 项，失败即非零退出：
+风扇写 / daemon→prometheus+历史 / dashboard HTTP / 3.10 语法），共 56 项，失败即非零退出：
 
 ```bash
 bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
@@ -83,7 +83,7 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。当前基线：**421 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
+三条全绿即通过。当前基线：**431 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
 
 > `ruff format --check` **不要全仓跑**：`protocol.py`/`__init__.py`/`__main__.py`/`tests/test_monitor.py`
 > 等历史文件混用引号风格，全仓 format 会产生大量无意义 diff。只对本次改动的文件跑。
@@ -346,6 +346,26 @@ PYTHONPATH=/tmp/debroot/usr/lib/python3/dist-packages /tmp/debroot/usr/bin/msi-p
 ```bash
 systemd-analyze verify systemd/msi-psu-monitor.service   # 退出码 0；坏 ExecStart 会非零
 udevadm verify systemd/99-msi-psu.rules                  # Success: 1  Fail: 0（systemd ≥ 250）
+```
+安装路径的完整性由 `tests/test_packaging.py` 机器把关（unit 的 `--config` 指向的文件必须有人装、
+两个安装器都要落 `/etc/msi-psu-monitor.conf`、`install.sh` 不得覆盖用户改过的那份、
+示例文件装上去不改变任何取值、staged 文件必须带 `-m` 模式）。smoke 的 [10] 另外用
+`umask 077` 构建一次 `.deb`，再从 `dpkg-deb -c` 读回模式：`cp` 而不是 `install -m` 会让产物
+变成 root-only，而 udev 的 `uaccess` 本来就是给非 root 会话用的：
+
+```bash
+(umask 077; bash scripts/build_deb.sh)
+dpkg-deb -c dist/msi-psu-monitor_1.0.0_all.deb | grep -E 'protocol|\.service'   # 期望 -rw-r--r--
+dpkg-deb -c dist/msi-psu-monitor_1.0.0_all.deb | grep etc/msi-psu-monitor.conf  # 全注释的 conffile
+```
+
+`/etc/msi-psu-monitor.conf` 里的每一个值都是注释掉的，所以装上它不改变任何行为；
+unit 也不钉 `--config`，直接走 `/etc` → `~/.config` 搜索路径，机器上没人配置过也能启动。
+daemon 被显式喂了一个不存在的 `--config` 时只打一行 `Error: ...` 并 exit 1（不是 traceback，
+否则 `Restart=always` 会每 `RestartSec` 刷一次堆栈）：
+
+```bash
+msi-psu-monitor-daemon --config /nonexistent.conf; echo $?   # 一行错误，exit 1
 ```
 
 ## 8. 真机到达后（唯一待补）
