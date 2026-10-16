@@ -5,6 +5,7 @@ import pytest
 from msi_psu_monitor.alerts import (
     AlertEngine,
     describe,
+    evaluate_pin_alerts,
     format_alert_line,
     severity_of,
 )
@@ -101,3 +102,27 @@ def test_retain_drops_what_the_device_cannot_report():
     assert engine.active_alerts == ['fan'], 'a retained name stays fired'
     engine.update({'fan': False})
     assert engine.active_alerts == []
+
+
+def test_the_pin_mirror_trips_at_the_threshold_not_above_it():
+    """The documented boundary is `>= 12 A`, matching the C0h trip point.
+
+    README said "> 12 A" and nothing pinned the boundary, so a maintainer
+    "fixing" the code to strict `>` would weaken the mirror by one quantisation
+    step -- the PSU trips *at* the configured point, not above it.
+    """
+    exactly_twelve = [name for name, active in evaluate_pin_alerts([12.0] * 12).items() if active]
+    assert sorted(exactly_twelve, key=lambda name: int(name.removeprefix('ocp_pin'))) == [
+        f'ocp_pin{index}' for index in range(1, 13)
+    ]
+    just_below = evaluate_pin_alerts([11.9] * 12)
+    assert not any(just_below.values())
+    # The spread rule is strict (`> 5 A`): exactly 5 A apart is not an imbalance,
+    # and it is evaluated per 6-pin connector, not across the whole 12.
+    exactly_five = [12.0, 7.0, 7.0, 7.0, 7.0, 7.0] * 2
+    assert not evaluate_pin_alerts(exactly_five)['pin_imbalance']
+    just_over = [12.1, 7.0, 7.0, 7.0, 7.0, 7.0] * 2
+    assert evaluate_pin_alerts(just_over)['pin_imbalance']
+    # 6 A across the two connectors, but only 1 A inside either one.
+    per_connector = [13.0, 13.0, 13.0, 13.0, 13.0, 13.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0]
+    assert not evaluate_pin_alerts(per_connector)['pin_imbalance']

@@ -83,10 +83,13 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。当前基线：**436 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
+三条全绿即通过。当前基线：**437 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
 
-> `ruff format --check` **不要全仓跑**：`protocol.py`/`__init__.py`/`__main__.py`/`tests/test_monitor.py`
-> 等历史文件混用引号风格，全仓 format 会产生大量无意义 diff。只对本次改动的文件跑。
+> `ruff format --check .` **可以全仓跑**（CI 也跑）：`protocol.py`/`__init__.py`/`__main__.py`/
+> `tests/test_monitor.py` 这四个历史文件混用引号风格，已由 `[tool.ruff.format] exclude` +
+> `force-exclude = true` 挡在格式化之外，所以不会产生 churn diff。
+> `uv run --group dev ruff format .` 是安全的；这里以前写着「不要全仓跑」，那句话已被上面的
+> 配置作废，留着只会让人不敢跑门禁。
 
 ## 2. 演示模式（合成电源，无需真机）
 

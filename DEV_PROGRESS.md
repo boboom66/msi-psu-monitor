@@ -272,7 +272,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 436 passed
+uv run --group dev pytest -q                     → 437 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 32 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
@@ -393,6 +393,22 @@ Ai1600T 的 20 字节布局里正好是 `data[0:2]`）和 uptime 计数器（每
    `msi_psu_alert{…}` 照导出。现 daemon 与 CLI 同样处理：不轮询、`status`/`alerts` 两个键
    都不设（于是没有 Status 行、没有告警指标、没有 ALERT 行），并在启动时打一行
    「Alert polling disabled by config」——**「什么都没报」和「一切正常」不是一件事**。
+
+### 只读复核（turn6）docs-truth 车道剩下的三条 P2（本轮）
+
+- **README 写「单针 > 12 A」，代码是 `>= 12 A`**（`alerts.py:125`）。C0h 的触发点本身是**含**端点
+  的（`value >= PIN_OCP_THRESHOLD_A`），照 README 去「修」成严格大于，等于把镜像削弱一个量化
+  步进。改文案，并补一条钉住边界的测试：`[12.0]*12` 必须 12 个 `ocp_pinN` 全亮、`[11.9]*12`
+  一个不亮；针差是**严格** `> 5 A`（正好 5.0 不算）且**按 6 针连接器**分别算（跨连接器差 6 A、
+  各自内部只差 1 A 时不算）——这三处此前没有任何测试。
+- **AGENTS.md 把 unit 的沙箱行说成「注释掉的」**：实际上 `ProtectSystem=full`/`ProtectHome=yes`/
+  `PrivateTmp=yes`/`NoNewPrivileges=yes` **都是生效的**，注释只解释了为什么不加
+  `PrivateDevices`。照旧文案去「解开沙箱注释」可能顺手加进 `PrivateDevices`——正是那条注释要
+  防的故障（daemon 全程持有 `/dev/hidraw*`）。
+- **「不要全仓跑 `ruff format`」这句话已经作废**：四个混引号的历史文件早被
+  `[tool.ruff.format] exclude` + `force-exclude = true` 挡住，`ruff format --check .` 全仓绿、
+  且已进 CI 门禁。同一份 `docs/verify.md` 在 50 行前刚说过它安全，两句自相矛盾。两处都改成
+  当前事实（「exclude 列表就是那个修复」），免得后来者不敢跑门禁或以为 CI 是红的。
 
 ### 文档里的 `[fan]` 示例其实不生效（本轮，P1）
 

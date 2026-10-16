@@ -12,7 +12,7 @@ Python standard library only — no third-party runtime dependencies.
 
 - **One-shot, watch and machine-readable output** — text, JSON and Prometheus.
 - **Per-pin 12V-2x6 current** with a software mirror of the PSU's own OCP thresholds
-  (single pin > 12 A, spread > 5 A per connector).
+  (single pin ≥ 12 A — the C0h trip point is inclusive — spread > 5 A per connector).
 - **Alerting with exit codes** — hardware alert bits (E1h) plus the software mirror,
   debounced, reported on stderr; `0` normal / `1` fault / `2` alert.
 - **Fan display and control** — read mode/duty/Zero Fan (41h/42h), write and save a

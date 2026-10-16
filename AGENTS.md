@@ -8,7 +8,7 @@ Protocol rules live in `msi_psu_monitor/AGENTS.md` (auto-loaded via `opencode.js
 
 ```bash
 uv sync --group dev                                  # py>=3.10, dev toolchain (pytest/ruff/mypy), zero runtime deps
-uv run --group dev pytest -q                         # 436 tests, no hardware needed
+uv run --group dev pytest -q                         # 437 tests, no hardware needed
 uv run --group dev pytest -q tests/test_state.py     # single file
 uv run --group dev ruff check .                      # must be clean
 uv run --group dev mypy msi_psu_monitor/             # must be clean
@@ -102,8 +102,9 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12.
   never let demo values reach a real read.
 - **`systemd/msi-psu-monitor.service` is `Type=simple`/`Restart=always`** running the
   daemon. The old `msi-psu-monitor.timer` was deleted (D-02: one daemon, not a timer).
-  The commented sandbox lines are intentional — do not add `PrivateDevices`, the daemon
-  holds `/dev/hidraw*` open for its whole runtime.
+  The sandbox lines are **active** (`ProtectSystem=full`, `ProtectHome=yes`, `PrivateTmp=yes`,
+  `NoNewPrivileges=yes`) — do not "uncomment the sandbox" (there is nothing to uncomment) and
+  never add `PrivateDevices`: the daemon holds `/dev/hidraw*` open for its whole runtime.
 - **`scripts/install.sh` probes all 5 PIDs** (`808c aa6f 56d4 e749 c9eb`) and installs the
   udev rule, the unit and `/etc/msi-psu-monitor.conf` (only when absent). The unit must
   not pin `--config` at a path nothing installs: it used to, so the daemon died on start
@@ -123,6 +124,8 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12.
 - **Line endings**: `.gitattributes` enforces LF; CRLF breaks the shell scripts.
 - **`kernel/` patch is out-of-tree** (Proxmox 7.0 headers unavailable) — never build it
   here; the userspace tool is the supported path.
-- **`ruff format` must not run repo-wide**: `protocol.py`, `__init__.py`, `__main__.py`
-  and `tests/test_monitor.py` mix quote styles, so a full pass creates a churn diff.
-  Format only the files you touched (`uv run --group dev ruff format <files>`).
+- **`ruff format --check .` is safe repo-wide** (and is a CI gate): the four legacy files
+  that mix quote styles (`protocol.py`, `__init__.py`, `__main__.py`, `tests/test_monitor.py`)
+  are excluded by `[tool.ruff.format] exclude` with `[tool.ruff] force-exclude = true`, which
+  also blocks them when named explicitly. Do not re-add a "don't format repo-wide" warning —
+  the exclusion list is the fix, and an outdated warning here contradicted `docs/verify.md`.
