@@ -272,7 +272,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 414 passed
+uv run --group dev pytest -q                     → 418 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 32 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
@@ -310,6 +310,19 @@ bash scripts/smoke.sh                            → 53 项全过（三种格式
   代码把 62B 载荷填进 `msipsu_all_ai1600ts`（**即便编译过也只会报未初始化的针脚电流**——
   正是本项目最忌讳的「没测到的健康」）。现三处如实标注为草稿 + 列出致命点，不再指示用户 build。
   要做完需要：钉版的上游 `msi-psu.c`、目标内核头文件、真机 62B 回读验证——三者仓库内都没有。
+
+### 读回包首字节是 0xFE 时不再被当成 NAK（本轮，P0 级数据丢失）
+
+`HIDDevice.send_command()` 里判「写被拒」的那个 `resp[2] == PSU_NAK` 被同时用在了**读**上，
+而读回包的 byte 2 是**载荷第一个字节**：12 V 轨的 LINEAR11 字（11.984 V = `0xCEFE`，MEG
+Ai1600T 的 20 字节布局里正好是 `data[0:2]`）和 uptime 计数器（每 256 秒出现一次 0xFE）
+都能取到这个值。后果：**整帧 0xE0 被丢掉**——`get_sensors()` 只回 ident、`--once` 报
+`Error: no sensor payload in this sample` 并 exit 1，daemon 把健康电源记成读失败并改写
+`msi_psu_up 0`，uptime 每 256 秒静默消失一次。参考实现 `msi-psu.c:186-198` 写得很清楚：
+不支持寄存器的回包只有两字节 `[cmd, NAK]`（读也一样），`[cmd, reg, NAK]` 是**写**被拒的形状。
+现 byte-2 判定只在 `data[0] == PSU_WRITE` 时生效，并把三种形状都写进了参数化测试
+（读 2 字节 NAK / 写 2 字节 NAK / 写被拒 3 字节 NAK / 读载荷以 0xFE 开头），另加一条
+端到端测试：MEG Ai1600T 的 0xE0 帧首字节 0xFE 必须解出 `vout_12v == 11.984 V`。
 
 ### 测试自身的环境依赖（本轮抓到）
 

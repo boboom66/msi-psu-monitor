@@ -311,11 +311,22 @@ class HIDDevice:
                 return None
             if resp and len(resp) >= 2:
                 # Check for NAK. An unsupported register answers with only two
-                # bytes, [command, NAK] (msi-psu.c:190-194), while a refused write
-                # to a real register echoes the register first, [cmd, reg, NAK].
-                # Both mean the PSU did not accept the command; the 2-byte form
-                # used to fall through as b"" and read as success on a write.
-                if resp[1] == PSU_NAK or (len(resp) >= 3 and resp[2] == PSU_NAK):
+                # bytes, [command, NAK] (msi-psu.c:186-198), for reads and writes
+                # alike; a *refused write* to a real register instead echoes the
+                # register first, [cmd, reg, NAK]. Both mean the PSU did not
+                # accept the command, and the 2-byte form used to fall through as
+                # b"" and read as success on a write.
+                #
+                # The byte-2 test is for writes only. On a read, byte 2 is the
+                # first byte of the payload, and 0xFE is an ordinary data value
+                # there: the low byte of a 12 V LINEAR11 word (11.984 V is
+                # 0xCEFE) or of the uptime counter is 0xFE once every 256
+                # seconds -- testing it on reads threw away measured data and
+                # reported a healthy 0xE0 read as a failure.
+                refused_write = (
+                    data[0] == PSU_WRITE and len(resp) >= 3 and resp[2] == PSU_NAK
+                )
+                if resp[1] == PSU_NAK or refused_write:
                     return None
                 return resp[2:]  # Skip 2-byte echo header
         return None

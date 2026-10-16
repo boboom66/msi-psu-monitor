@@ -584,18 +584,31 @@ def test_send_command_without_an_open_fd_is_a_failure():
 
 
 @pytest.mark.parametrize(
-    'reply,expected',
+    'command,reply,expected',
     [
-        (b'\x51\xfe', None),  # unsupported register: [cmd, NAK], no register echo
-        (b'\x50\x41\xfc', b'\xfc'),  # accepted write: echoed register, then ACK
-        (b'\x50\x41\xfe', None),  # refused write: echoed register, then NAK
+        # Unsupported register, read or write: the reply is [cmd, NAK] with no
+        # register echo, so there is nothing to mistake for a payload.
+        ([0x51, 0xE0], b'\x51\xfe', None),
+        ([0x50, 0x69], b'\x50\xfe', None),
+        # Accepted write: echoed register, then ACK as the status byte.
+        ([0x50, 0x41, 0x55, 0x55, 0x55], b'\x50\x41\xfc', b'\xfc'),
+        # Rejected write to a real register: echoed register, then NAK.
+        ([0x50, 0x41, 0x55, 0x55, 0x55], b'\x50\x41\xfe', None),
+        # A *read* whose first payload byte is 0xFE is data, not a NAK: byte 2
+        # carries the low byte of a 12 V LINEAR11 word (11.984 V = 0xCEFE) or of
+        # the uptime counter, so the byte-2 test must not run on reads.
+        ([0x51, 0x69], b'\x51\x69\xfe', b'\xfe'),
+        ([0x51, 0xE0], b'\x51\xe0\xfe\xce' + bytes(4), b'\xfe\xce' + bytes(4)),
     ],
 )
-def test_every_documented_nak_reply_shape_is_a_failure(monkeypatch, reply, expected):
-    """``msi-psu.c:190-194`` documents both NAK shapes; only the 3-byte one was mapped.
+def test_every_documented_nak_reply_shape_is_a_failure(monkeypatch, command, reply, expected):
+    """``msi-psu.c:186-198``: [cmd, NAK] for any unsupported register, and an
+    echoed register + NAK for a refused write.
 
-    The 2-byte form came back as ``b""``, so ``write_command`` reported success for
-    a register the PSU had just refused (``reply is not None``).
+    The 2-byte form used to come back as ``b""``, so ``write_command`` reported
+    success for a register the PSU had just refused (``reply is not None``). The
+    byte-2 test that fixed that must not be applied to reads: there byte 2 is
+    the first payload byte.
     """
     import os
 
@@ -612,7 +625,7 @@ def test_every_documented_nak_reply_shape_is_a_failure(monkeypatch, reply, expec
     monkeypatch.setattr('select.select', lambda r, w, x, timeout: (r, [], []))
 
     device = _dead_device()
-    assert device.send_command([0x51, 0xE0]) == expected
+    assert device.send_command(command) == expected
 
 
 def test_opening_without_a_detected_device_is_an_oserror():
@@ -628,3 +641,66 @@ def test_opening_without_a_detected_device_is_an_oserror():
     device.path = None
     with pytest.raises(FileNotFoundError):
         device.open()
+
+
+def _answering_device(monkeypatch, replies):
+    """A real HIDDevice wired to ``replies`` keyed by the 2-byte (cmd, reg) sent.
+
+    Unlike ``FakeHID`` this runs the real framing code in ``send_command``, which
+    is where the NAK rule lives. The written command is a zero-padded 64-byte
+    buffer, so the reply key is its first two bytes.
+    """
+    import os
+
+    from msi_psu_monitor.protocol import HIDDevice
+
+    state = {'reply': b'', 'n': 0}
+
+    def fake_write(fd, data):
+        # The reply repeats the command/register it answers, exactly like the
+        # device does (``msi-psu.c``: "at the start of the reply is an echo of
+        # the send command/address in the same order it was sent").
+        key = tuple(bytes(data).rstrip(b'\x00')[:2])
+        state['reply'] = replies.get(key, b'')
+        return len(data)
+
+    def fake_read(fd, size):
+        # The drain probe runs first and must report "nothing pending"; every
+        # following read is the reply itself.
+        state['n'] += 1
+        return b'' if state['n'] % 2 else state['reply']
+
+    monkeypatch.setattr(os, 'read', fake_read)
+    monkeypatch.setattr(os, 'write', fake_write)
+    monkeypatch.setattr('select.select', lambda r, w, x, timeout: (r, [], []))
+    device = HIDDevice('fake:0')
+    device.fd = 0
+    return device
+
+
+def test_a_meg_frame_whose_first_payload_byte_is_0xfe_is_still_decoded(monkeypatch):
+    """11.984 V is 0xCEFE in LINEAR11, so byte 2 of a valid 0xE0 reply is 0xFE.
+
+    The read path used to treat any reply whose byte 2 was 0xFE as a NAK, so a
+    perfectly healthy 20-byte MEG frame was discarded: ``get_sensors`` returned an
+    ident-only dict and the daemon exported ``msi_psu_up 0`` for a PSU that had
+    just answered. One sample in every 256 also lost its uptime this way.
+    """
+    from msi_psu_monitor.protocol import HIDDevice, MSIPSU  # noqa: F401
+
+    payload = _u16(_encode(1534, 0x19)) + bytes(18)  # 11.984 V, then zeros
+    assert payload[0] == 0xFE
+    replies = {
+        (0xFA, 0x51): b'MEG Ai1600T\x00',
+        (0x51, 0x10): b'MSI\x00',
+        (0x51, 0x11): b'MEG Ai1600T\x00',
+        (0x51, 0x12): b'10',
+        (0x51, 0x13): bytes([1]) + b'S',
+        (0x51, 0xE0): payload,
+    }
+    replies = {key: bytes(key) + value for key, value in replies.items()}
+    psu = MSIPSU(_answering_device(monkeypatch, replies))
+    psu.init()
+    sensors = psu.get_sensors()
+    assert 'error' not in sensors and 'payload_error' not in sensors
+    assert sensors['vout_12v'] == (11.984, 'V')
