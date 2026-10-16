@@ -30,6 +30,11 @@
 - **PID**：补齐 `0xAA6F`（Ai1300TS），共 5 个 `0db0:*`。
 - **未知机型拒解**：产品字符串匹配不上时抛错，不再猜布局。
 - **变体分派**：按产品字符串子串（`Ai1600TS` → mpg 先于 `Ai1600` → meg，然后 `Ai1300`/`Ai1000`），**不按 PID**。
+- **截断的机型名不再被当成另一台机器（本轮）**：`MPG Ai1300TS` 是 12 个字符，而 MSI Center 只在 TS 的 PID 上向
+  `GET_MFR_MODEL` 要 12 字节、MEG 上要 11 字节（`CPSU.cs`）——短读恰好丢掉结尾那个 `S`，
+  而 `MPG Ai1300T` **仍然**匹配 `Ai1300` 分支，于是被按 MEG Ai1300P 的载荷布局解码：
+  数值全错、报错为零、`--ocp` 还会输出一套不存在的 8 字节阈值。现识别这种「MPG + 结尾 T」
+  的形态并**拒解**（`variant=None` → `error`），不猜。
 - **0xC0 是重载寄存器**：同一地址既是 `MULTIRAIL_OCP`（1B，`==2`，仅 MEG P 系）又是
   `OCP12V2x6_CONFIG`（8B，仅 MPG TS 系），两条命令的机型门互补；MEG Ai1600T 两条都不支持。
   因此 `--ocp` 按变体判定能力，绝不按载荷长度猜（`CPSU.cs:823-832` vs `840-856`）。
@@ -94,16 +99,71 @@
   `ALERT_INDEXES` 分机型解名、按各自长度收包，未知机型**拒答**（Status 显示 `Unknown`）
   而不猜；`demo` 同步按所模拟机型出位图，否则无法在无硬件时覆盖这条路径。
 - **P 系 40B 布局**：`0-19` 是 12V1..12V5 各 (V,I)，`20-23` 是**合并** 12V (V,I)——文档此前误记为「6 轨 × 4B」，且这 5 条单轨读数此前被整段丢弃。
+- **dashboard 页面拿不到 Python 常量，图表其实一张都没画（本轮）**：页内 JS 里写了
+  `rows.slice(-ROW_LIMIT)`，而 `ROW_LIMIT = 20000` 只存在于 Python 侧——
+  浏览器里那是个未声明标识符，`load()` 一进去就 `ReferenceError`，`render()` 永不执行；
+  HTTP 全 200、接口全正常、测试因为只 grep HTML 而全绿，**页面却是空的**。现改为占位符
+  注入（`render_page()` 替换 `__REFRESH_MS__`/`__ROW_LIMIT__`），并加两条机器护栏：
+  「PAGE 里出现的每个 `__X__` 都必须被替换」「JS 用到的 UPPER_SNAKE 标识符必须在页内声明」；
+  `load()` 也补了 `r.ok` 检查与 try/catch，轮询失败会写进 `#info` 而不是静静留白。
+- **FW 版本是厂商的两位数字串（本轮）**：设备回的是 `b'10'`，MSI 自己插小数点
+  （`CPSU.cs:497-507` 的 `Insert(1, ".")`）→ `1.0`。此前按 `<I` 解成十进制整数，
+  上游 README 里的 `FW: 49.48` 就是这么来的（`'0'`=48、`'1'`=49 拼出来的假版本号）。
+- **两字节 NAK 不再被当成成功（本轮）**：`msi-psu.c:190-194` 说明拒绝回复有两种长度
+  （`[cmd, NAK]` 与 `[cmd, reg, NAK]`），此前只认后者，前者落进「有回复」分支 →
+  `write_command()` 对**被拒绝的写入返回 True**，风扇/OCP 写会被报成成功。
+- **`read_multirail_ocp()` 按机型门控**：0xC0 在 TS 系是 8 字节 12V-2x6 配置，其第 0 字节
+  恰好也是「OCP 使能」标志，读成「单多轨」会**看起来像有数据**。现只在 `MULTIRAIL_VARIANTS`
+  上发问，其余机型返回 `None`（拒答而不是编造）。
+- **坏 `state.json` / 坏历史行不再伪装成数据（本轮）**：合法 JSON 里的错误类型
+  （`{"count": "bad"}`、`{"last_ts": []}`）此前直接抛 `ValueError`/`TypeError` 穿出
+  `main()`；`iter_history` 只挡 `OSError`，NUL 字节会渲染成 `{'time': '\x00'}`、非法
+  UTF-8 会带着 `UnicodeDecodeError` 逃出去；`append_history` 用「文件大小 > 0」判表头，
+  被截断的表头文件从此每天都错列；时钟回拨后 `last_ts` 无条件覆盖，**能量被重复积分**
+  （600 W / 100 s 记成 33.3 Wh，真值 16.7 Wh）。现：数值一律过 `_finite_float`
+  （非数值/NaN/inf 回落 0）、日桶非法即丢、历史坏行跳过并告警、表头按**内容**判断
+  （能解析成时间戳就当数据行只补表头，否则当残片重写）、`last_ts` 只在时间前进时更新；
+  「每次写入都原子」也收敛成一个 `state.atomic_write_text()`。
+- **配置文件里的 `%` 与 `nan`（本轮）**：`ConfigParser()` 默认开
+  `BasicInterpolation`，值里一个游离 `%`（路径、注释里的百分号）会在 `.get()` 时抛
+  `InterpolationSyntaxError`——而 `try/except` 只包了 `parser.read()`，于是 traceback
+  照样穿出。现 `interpolation=None`（这些就是普通取值）。`_as_float` 也补了有限性检查：
+  `nan`/`inf` 能通过「`<= 0` 回退」的守卫，随后 `time.sleep(nan)` 直接抛异常、
+  `now >= now + nan` 永远为假 → **prometheus 与历史再也不写**，而日志里一句抱怨都没有。
+- **prometheus 输出不再「谎报健康」（本轮）**：ident-only 或长度错配的样本以前仍导出
+  `msi_psu_info ... 1`（`_info` 按惯例恒为 1，但没有任何健康信号），Grafana 上看起来
+  一切正常。现始终导出 `msi_psu_up`（有读数才 1）并在 0 时附
+  `msi_psu_error_info{reason="..."}`（reason 取实测原因：`error` / `payload_error`）。
+- **`--ocp` 写文件时把首行写丢（本轮）**：不支持 OCP 的机型走 text 分支，两次 `emit()`
+  指向同一个 `-O` 路径——第二次把第一次覆盖，于是**文件里没有表头行，stdout 却有**。
+  现合并成一次 `emit()`；`emit()` 本身也改成原子写（fifo/`/dev/stdout` 这类特殊文件除外，
+  它们无法被 `os.replace` 替换）。
+- **`--serial` 不再把「打不开设备」说成「没有这个序列号」（本轮）**：扫描时
+  `except (OSError, DeviceBusyError): continue` 把 `PermissionError`（没装 udev 规则）
+  和「daemon 正占用」一起吞掉，最后只打印 `Available: none`——用户会去找一个**正插在
+  机器上**的电源。现逐台告警 `Skipping <path>: <原因>`，并在**一台都打不开**时明确说
+  「could not open any MSI PSU device…（试试 root / 装 udev 规则）」；`--export -O` 写不
+  下去也报一行错误 + exit 1，而不是留个截断文件或 traceback。
+- **参数校验补漏（本轮）**：`--watch -1`／`--watch 0`／`--watch nan`／`-i 0` 此前全部放行
+  （`--watch 0` 会变成忙循环），`--dashboard` 与 `--export`/`--watch`/`--show-log`/风扇写
+  混用也静默「按第一种动作执行」。现前者 usage error（exit 2），后者明确拒绝；
+  `--dashboard -f json` 同样拒绝（页面只出 HTML，配置里的 `format` 仍不冲突）。
+- **daemon 打不开设备时的重试节奏（本轮）**：`_ensure_psu()` 的 except 分支设了
+  `_next_discovery` 却**没有清掉 `device_path`**，下一 tick 直接跳过发现节流、每秒重开
+  一次设备刷一行告警（`DISCOVERY_RETRY_S = 5` 形同虚设）。现清空路径，节流真正生效。
+- **demo 也要讲真话（本轮）**：`demo.read_ocp_thresholds()` 未按机型门控，给非 TS 机型
+  「编造」了 8 字节 0xC0 配置——无硬件时最容易把错的验收结论跑成「通过」。现与真机一致
+  地返回 `None`。
 
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 318 passed
+uv run --group dev pytest -q                     → 348 passed
 uv run --group dev ruff check .                  → All checks passed
-uv run --group dev ruff format --check .         → 30 files already formatted
+uv run --group dev ruff format --check .         → 32 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
 bash scripts/build_deb.sh                        → dist/msi-psu-monitor_1.0.0_all.deb
-bash scripts/smoke.sh                            → 39 项全过（三种格式/告警按机型/黑盒/OCP/风扇/daemon/dashboard）
+bash scripts/smoke.sh                            → 45 项全过（三种格式/告警按机型/黑盒/OCP/风扇/daemon/dashboard）
 ```
 
 护栏（机器强制，不靠人记）：

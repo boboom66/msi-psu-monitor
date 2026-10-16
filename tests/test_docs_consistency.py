@@ -22,7 +22,9 @@ DOCS = [
     *sorted((ROOT / 'docs').glob('*.md')),
     *sorted((ROOT / 'docs').glob('*.example')),
 ]
-TEST_COUNT_RE = re.compile(r'(\d+)\s+passed')
+# "341 passed", "341 tests" and "341 个单测" all quote the same fact. No \b after
+# the CJK alternatives: 测 is a word character, so \b would never match there.
+TEST_COUNT_RE = re.compile(r'(\d+)\s*(?:passed|个单测|个單測|tests?\b)')
 PY_FILE_RE = re.compile(r'`tests/(test_[a-z_]+\.py)`')
 
 
@@ -109,3 +111,33 @@ def test_build_script_takes_the_version_from_pyproject():
     script = (ROOT / 'scripts' / 'build_deb.sh').read_text()
     assert 'pyproject.toml' in script
     assert not re.search(r'VERSION=\d', script), 'version is hardcoded again'
+
+
+def test_the_quoted_smoke_check_count_matches_the_script():
+    """The smoke script quotes its own total, and the docs quote that total."""
+    script = (ROOT / 'scripts' / 'smoke.sh').read_text(encoding='utf-8')
+    total = re.search(r'EXPECTED_TOTAL=(\d+)', script)
+    assert total, 'smoke.sh must keep a quoted check total'
+    expected = int(total.group(1))
+    # The constant has to be checked against the real count, not just declared.
+    assert '"$PASS" -ne "$EXPECTED_TOTAL"' in script
+
+    # Only the two phrasings that quote the smoke total: a bare "N 项" also counts
+    # the real-hardware checklist in verify.md §8, which is a different number.
+    patterns = (
+        re.compile(r'smoke\.sh\s*→\s*(\d+) 项'),
+        re.compile(r'，共 (\d+) 项，失败即非零退出'),
+    )
+    quoted = 0
+    stale = []
+    for doc in DOCS:
+        if not doc.is_file():
+            continue
+        text = doc.read_text(encoding='utf-8')
+        for pattern in patterns:
+            for claimed in pattern.findall(text):
+                quoted += 1
+                if int(claimed) != expected:
+                    stale.append(f'{doc.relative_to(ROOT)}: says {claimed}, actual {expected}')
+    assert quoted >= 2, 'the smoke total is no longer quoted in the docs'
+    assert not stale, '\n'.join(stale)

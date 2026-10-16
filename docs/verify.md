@@ -57,15 +57,20 @@ uv run --group dev ruff format --check .
 | `tests/test_stdlib_only.py` | `python -I` 子进程导入全部模块（零第三方依赖） |
 | `tests/test_docs_consistency.py` | 文档里的用例数、测试文件名、CLI 参数清单、版本号双重来源不得与事实不符 |
 
-`tests/test_docs_consistency.py` 是这轮新加的「文档防伪」，四项检查：
+`tests/test_docs_consistency.py` 是「文档防伪」：文档里写下的数字与文件名，都由测试去核对一遍。
 
-1. 任何文档写了 `N passed` 就必须等于 `pytest --collect-only` 的真实数字；
+1. 任何文档写了 `N passed` / `N tests` / `N 个单测` 就必须等于 `pytest --collect-only` 的真实数字
+   （`* tests`、`* 个单测` 这类写法此前逃过了正则，`git log` 里两个老旧数字就是这么烂掉的）；
 2. 引用的 `` `tests/xxx.py` `` 必须存在；
 3. 每个测试文件都必须在某处文档里被提到；
-4. README 的 Usage 参数清单必须与 `build_parser()` 完全一致（少写/多写都失败）。
+4. README 的 Usage 参数清单必须与 `build_parser()` 完全一致（少写/多写都失败）；
+5. `__version__` 与 `pyproject.toml` 的 `version` 必须一致（`--version`、`.deb` 控制文件各读一份）；
+6. `scripts/build_deb.sh` 的版本必须从 `pyproject.toml` 解析，不得硬编码；
+7. 文档引用的「`smoke.sh` 共 N 项」必须等于 `scripts/smoke.sh` 里的 `EXPECTED_TOTAL`
+   ——该常量同时会被脚本自己核对，检查项被误删时脚本也会失败。
 
 一条命令跑完整条无硬件链路（三种格式 / 告警 exit 2 及按机型鉴名 / 黑盒 / OCP /
-风扇写 / daemon→prometheus+历史 / dashboard HTTP / 3.10 语法），共 39 项，失败即非零退出：
+风扇写 / daemon→prometheus+历史 / dashboard HTTP / 3.10 语法），共 45 项，失败即非零退出：
 
 ```bash
 bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
@@ -74,7 +79,7 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。当前基线：**318 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
+三条全绿即通过。当前基线：**348 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
 
 > `ruff format --check` **不要全仓跑**：`protocol.py`/`__init__.py`/`__main__.py`/`tests/test_monitor.py`
 > 等历史文件混用引号风格，全仓 format 会产生大量无意义 diff。只对本次改动的文件跑。
@@ -119,7 +124,7 @@ MSI_PSU_DEMO_MODEL=meg_ai1600 .venv/bin/msi-psu-monitor --ocp; echo "exit=$?"
 ```
 
 ```bash
-.venv/bin/msi-psu-monitor -f prometheus | grep -E 'power_avg|status_12v_2x6|zero_fan|total_energy|serial='
+.venv/bin/msi-psu-monitor -f prometheus | grep -E 'msi_psu_up|power_avg|status_12v_2x6|zero_fan|total_energy|serial='
 ```
 
 ```bash

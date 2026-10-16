@@ -32,6 +32,9 @@ trap 'cleanup' EXIT
 
 PASS=0
 FAIL=0
+# Keep in sync with the count quoted in docs/verify.md: a check that quietly
+# disappears from this script is a gap nobody notices.
+EXPECTED_TOTAL=45
 
 ok()   { PASS=$((PASS + 1)); printf '\033[0;32m  ok\033[0m   %s\n' "$1"; }
 bad()  { FAIL=$((FAIL + 1)); printf '\033[0;31m  FAIL\033[0m %s\n' "$1"; [ $# -gt 1 ] && printf '       %s\n' "$2"; }
@@ -108,6 +111,11 @@ assert_exit "MEG P 系 --ocp 退出码 0" 0 "$RC"
 OUT=$(MSI_PSU_DEMO_MODEL=meg_ai1600 $MONITOR --ocp 2>/dev/null); RC=$?
 assert_contains "Ai1600T --ocp 解释原因" "not available" "$OUT"
 assert_exit "Ai1600T --ocp 退出码 0" 0 "$RC"
+# The unsupported model writes two lines to -O; two emit() calls kept only the last.
+OCP_FILE="$WORK/ocp.txt"
+MSI_PSU_DEMO_MODEL=meg_ai1600 $MONITOR --ocp -O "$OCP_FILE" >/dev/null 2>&1
+assert_contains "-O 保留首行表头" "MSI PSU: MEG Ai1600" "$(cat "$OCP_FILE" 2>/dev/null)"
+assert_contains "-O 保留原因行" "not available" "$(cat "$OCP_FILE" 2>/dev/null)"
 
 printf '\n\033[1m[4] 风扇写入\033[0m\n'
 OUT=$($MONITOR --fan-mode customized --fan-duty 55 2>/dev/null)
@@ -118,6 +126,12 @@ $MONITOR --ocp --watch 1 >/dev/null 2>&1
 assert_exit "--ocp 与 --watch 互斥" 2 "$?"
 $MONITOR --port 9000 >/dev/null 2>&1
 assert_exit "--port 需配 --dashboard" 2 "$?"
+$MONITOR --watch 0 >/dev/null 2>&1
+assert_exit "--watch 0 不是忙循环" 2 "$?"
+$MONITOR --watch 1 -i nan >/dev/null 2>&1
+assert_exit "间隔 nan 被拒" 2 "$?"
+$MONITOR --dashboard --export --from 2h >/dev/null 2>&1
+assert_exit "--dashboard 不与动作混用" 2 "$?"
 
 printf '\n\033[1m[6] daemon 链路（prometheus + 历史 + 状态）\033[0m\n'
 cat > "$WORK/daemon.conf" <<EOF
@@ -139,6 +153,7 @@ grep -q "Restored the configured fan profile" "$WORK/daemon.log" \
 
 PROM=$(cat "$WORK/psu.prom" 2>/dev/null)
 assert_contains "prom 有机型标签" 'msi_psu_info{product="MPG Ai1600TS' "$PROM"
+assert_contains "prom 有 up 指标" 'msi_psu_up 1' "$PROM"
 assert_contains "prom 有状态指标" 'msi_psu_status_12v_2x6{status="Normal"}' "$PROM"
 [ -f "$MSI_PSU_STATE_DIR/state.json" ] && ok "state.json 落盘" || bad "state.json 落盘"
 HIST=$(cat "$MSI_PSU_STATE_DIR"/daily-*.log 2>/dev/null | head -1)
@@ -187,5 +202,8 @@ print('  3.10 syntax ok')
 EOF
 [ $? -eq 0 ] && ok "全部 .py 通过 3.10 语法校验" || bad "全部 .py 通过 3.10 语法校验"
 
+if [ "$PASS" -ne "$EXPECTED_TOTAL" ]; then
+    bad "检查项数量应为 $EXPECTED_TOTAL" "实际 $PASS（有检查被删掉或没加进计数？）"
+fi
 printf '\n\033[1m结果: %d passed, %d failed\033[0m\n\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -9,7 +9,7 @@
 | 🧪 待真机 | 代码完成、单测覆盖，但结论必须样机复核（见 [`verify.md`](verify.md) §8） |
 | ⏸ 冻结 | 明确留待后续批准批次，本轮不做 |
 
-> 回归命令：`uv run --group dev pytest -q` → **318 passed**（18 个测试模块）。
+> 回归命令：`uv run --group dev pytest -q` → **348 passed**（18 个测试模块）。
 > 无硬件全链路自检见 [`verify.md`](verify.md)。
 
 ---
@@ -35,7 +35,7 @@
 | 純 CLI、標準庫-only 零第三方依賴 | 全包仅用 stdlib；`pyproject.toml` 无 `dependencies` | `test_stdlib_only.py`（`python -I` 子进程导入全部模块） | ✅ 已实现 |
 | 人讀文字輸出 | `format_text()` | `test_monitor_format.py` | ✅ 已实现 |
 | JSON 輸出 | `format_json()` | `test_monitor_format.py`、`test_schema.py` | ✅ 已实现 |
-| Prometheus textfile（`msi_psu_` 前綴，per-pin 帶 connector/pin 標籤） | `format_prometheus()`（`msi_psu_pin_current{connector=,pin=}`、`msi_psu_rail_*{rail=}`） | `test_monitor_format.py`、`test_schema.py` | ✅ 已实现 |
+| Prometheus textfile（`msi_psu_` 前綴，per-pin 帶 connector/pin 標籤） | `format_prometheus()`（`msi_psu_pin_current{connector=,pin=}`、`msi_psu_rail_*{rail=}`；`msi_psu_up` 0/1 + `msi_psu_error_info{reason=}` 讓「沒讀到」不會看起來像健康） | `test_monitor_format.py`、`test_schema.py`、`test_cli_features.py` | ✅ 已实现 |
 | 輸出重導向到檔案（三格式皆可） | `-O/--output` + `emit()` | `test_cli_features.py` | ✅ 已实现 |
 | 單常駐 daemon（替代 timer） | `daemon.MonitorDaemon`（flock 獨占、1 s 判警、30 s 原子寫 prom、60 s 追加 history、1 h 輪轉） | `test_daemon.py` | ✅ 已实现 |
 | Linux 維運鏈路（node_exporter → Prometheus → Grafana；告警只走 stderr + exit 2） | `write_prometheus()`、`alerts.format_alert_line()` | `test_daemon.py`、`test_alerts.py`、`test_cli_alerts.py` | ✅ 已实现 |
@@ -106,7 +106,7 @@
 ## 7. 无硬件可覆盖的验证方式
 
 所有 🧪 项在无样机时的最大覆盖：`bash scripts/smoke.sh` 一条命令跑完全链路（CI 也跑），`MSI_PSU_DEMO=1` 合成电源（`MSI_PSU_DEMO_MODEL` 可切
-全部 5 机型、`MSI_PSU_DEMO_ALERT` 可卡任意告警位），配合 301 个单测覆盖解析、告警、
+全部 5 机型、`MSI_PSU_DEMO_ALERT` 可卡任意告警位），配合 348 个单测覆盖解析、告警、
 落盘、导出的全部分支。**每一条待真机项的判定标准与命令见 [`verify.md`](verify.md) §8（共 10 项）。**
 
 ## 非需求交付物（如实标注）
