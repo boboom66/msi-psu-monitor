@@ -67,7 +67,7 @@ If a command is not supported or an error occurs, the response starts with:
 |----------|---------|------|-------------|
 | VENDOR_STRING | 0x10 | 16 bytes | Vendor name (ASCII) |
 | PRODUCT_STRING | 0x11 | 16 bytes | Product name (ASCII) |
-| REVISION | 0x12 | 4 bytes | Firmware revision（冻结：TS 按 2B ASCII 透传如 `1.0`，非可打印再回退；旧 `<I` 十进制拼法废弃） |
+| REVISION | 0x12 | 2 bytes | Firmware revision（冻结：设备只发 **2 个 ASCII 数字** `b"10"`，小数点由读取方插入 → `1.0`，对齐 `CPSU.cs:497-507` `GetString(...,2).Insert(1,".")`；非「两位数字」的载荷才原样透传；旧 `<I` 十进制拼法废弃） |
 | SERIAL | 0x13 | 16 bytes | Serial number（冻结：TS 按首字节长度切片，后面才是号码，别把长度当号码） |
 | IN_VOLTS | 0x20 | 2 bytes | AC input voltage (LINEAR11, mV) |
 | VOUT_12V | 0x24 | 2 bytes | 12V rail voltage (LINEAR11, mV) |

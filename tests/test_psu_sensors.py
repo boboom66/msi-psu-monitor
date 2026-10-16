@@ -57,6 +57,24 @@ def test_fw_revision_decoded_as_ascii():
     assert psu.fw_revision == '1.0'
 
 
+def test_fw_revision_is_two_digits_with_the_msi_decimal_point():
+    """The device answers "10"; MSI Center inserts the dot itself.
+
+    ``CPSU.cs:497-507`` reads two bytes and calls ``GetString(...).Insert(1, '.')``,
+    and the upstream README's real capture "FW: 49.48" is exactly those two bytes
+    ('1','0') printed as numbers -- decoding them verbatim displayed "10".
+    """
+    psu = _psu_1300ts(registers={0x12: b'10\x00'})
+    assert psu.fw_revision == '1.0'
+
+
+def test_fw_revision_falls_back_for_a_payload_that_is_not_two_digits():
+    """A non-conforming answer is passed through rather than guessed at."""
+    assert _psu_1300ts(registers={0x12: b'1.0'}).fw_revision == '1.0'
+    assert _psu_1300ts(registers={0x12: b'7'}).fw_revision == '7'
+    assert _psu_1300ts(registers={0x12: b'\xff\xfe'}).fw_revision == '\ufffd\ufffd'
+
+
 def test_ai1300ts_detected_as_7zpu_variant():
     psu = _psu_1300ts()
     assert psu.product == 'MPG Ai1300TS'
@@ -535,3 +553,50 @@ def test_send_command_without_an_open_fd_is_a_failure():
     device.fd = None
     assert device.send_command([0x51, 0xE0]) is None
     assert device.write_command([0x41, 0x01, 0x00, 0x40]) is False
+
+
+@pytest.mark.parametrize(
+    'reply,expected',
+    [
+        (b'\x51\xfe', None),  # unsupported register: [cmd, NAK], no register echo
+        (b'\x50\x41\xfc', b'\xfc'),  # accepted write: echoed register, then ACK
+        (b'\x50\x41\xfe', None),  # refused write: echoed register, then NAK
+    ],
+)
+def test_every_documented_nak_reply_shape_is_a_failure(monkeypatch, reply, expected):
+    """``msi-psu.c:190-194`` documents both NAK shapes; only the 3-byte one was mapped.
+
+    The 2-byte form came back as ``b""``, so ``write_command`` reported success for
+    a register the PSU had just refused (``reply is not None``).
+    """
+    import os
+
+    calls = {'n': 0}
+
+    def fake_read(fd, size):
+        # The drain probe runs first and must report "nothing pending"; every
+        # following read is the reply itself.
+        calls['n'] += 1
+        return b'' if calls['n'] % 2 else reply
+
+    monkeypatch.setattr(os, 'read', fake_read)
+    monkeypatch.setattr(os, 'write', lambda fd, data: len(data))
+    monkeypatch.setattr('select.select', lambda r, w, x, timeout: (r, [], []))
+
+    device = _dead_device()
+    assert device.send_command([0x51, 0xE0]) == expected
+
+
+def test_opening_without_a_detected_device_is_an_oserror():
+    """No PSU and no path must fail like every other device error.
+
+    ``os.open(None, ...)`` raises ``TypeError``, which no caller (the daemon's
+    ``except (OSError, DeviceBusyError)`` or ``monitor.main``) treats as a device
+    failure.
+    """
+    from msi_psu_monitor.protocol import HIDDevice
+
+    device = HIDDevice('unused:0')
+    device.path = None
+    with pytest.raises(FileNotFoundError):
+        device.open()

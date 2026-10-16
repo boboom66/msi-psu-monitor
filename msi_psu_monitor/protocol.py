@@ -13,10 +13,8 @@ PSU_VENDOR_ID = 0x0DB0
 # 0x56D4/0xE749/0xC9EB = legacy MEG/Ai-P models (layouts unverified, read-only compat).
 PSU_PRODUCT_IDS = [0x808C, 0xAA6F, 0x56D4, 0xE749, 0xC9EB]
 
-HIDRAW_PATH = None  # auto-detected
 CMD_TIMEOUT_MS = 250
 CMD_BUFFER_SIZE = 64
-REPLY_SIZE = 40
 
 # Protocol commands
 PSU_INIT = 0xFA
@@ -230,7 +228,12 @@ class HIDDevice:
 
         Raises:
             DeviceBusyError: when another process (CLI or daemon) holds the lock.
+            FileNotFoundError: when no PSU was found and no path was given.
         """
+        if self.path is None:
+            # os.open(None) would raise TypeError, which no caller expects:
+            # "no device" is an OSError-shaped failure everywhere else here.
+            raise FileNotFoundError("no MSI PSU hidraw device found")
         self.fd = os.open(self.path, os.O_RDWR | os.O_NONBLOCK)
         try:
             fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -292,8 +295,12 @@ class HIDDevice:
             except (OSError, ValueError):
                 return None
             if resp and len(resp) >= 2:
-                # Check for NAK
-                if len(resp) >= 3 and resp[2] == PSU_NAK:
+                # Check for NAK. An unsupported register answers with only two
+                # bytes, [command, NAK] (msi-psu.c:190-194), while a refused write
+                # to a real register echoes the register first, [cmd, reg, NAK].
+                # Both mean the PSU did not accept the command; the 2-byte form
+                # used to fall through as b"" and read as success on a write.
+                if resp[1] == PSU_NAK or (len(resp) >= 3 and resp[2] == PSU_NAK):
                     return None
                 return resp[2:]  # Skip 2-byte echo header
         return None
@@ -306,7 +313,8 @@ class HIDDevice:
         """Read all sensor values via the 0xE0 bulk command.
 
         Returns:
-            Raw bytes of the 62-byte payload, or None on failure
+            Raw bytes of the 0xE0 bulk frame (44 bytes of data on the TS models,
+            the whole frame on the MEG models), or None on failure
         """
         return self.send_command([PSU_READ, REG_READ_EVERYTHING])
 
@@ -395,12 +403,18 @@ class MSIPSU:
                 bytes(resp).rstrip(b"\x00").decode("ascii", errors="replace").strip()
             )
 
-        # Read firmware revision (REV6 MFR_REVISION: ASCII, e.g. '1.0')
+        # Read firmware revision (REV6 MFR_REVISION: two ASCII digits, "10" = 1.0).
+        # MSI Center supplies the decimal point itself: CPSU.cs:497-507 reads two
+        # bytes and calls GetString(...).Insert(1, "."), and the upstream README's
+        # real capture "FW: 49.48" is those two digits ('1','0') printed as numbers.
         resp = self.hid.read_register(REG_REVISION)
         if resp:
-            self.fw_revision = (
-                bytes(resp).rstrip(b"\x00").decode("ascii", errors="replace").strip()
-            )
+            revision = bytes(resp).rstrip(b"\x00")
+            if len(revision) >= 2 and revision[:2].isdigit():
+                self.fw_revision = f"{chr(revision[0])}.{chr(revision[1])}"
+            else:
+                # Anything else is passed through instead of turned into a guess.
+                self.fw_revision = revision.decode("ascii", errors="replace").strip()
 
         # Read serial number (REV6 MFR_SERIAL: Byte1 = length prefix)
         resp = self.hid.read_register(REG_SERIAL)
@@ -899,6 +913,11 @@ class MSIPSU:
             True/False for per-rail protection, or None when the model does not
             answer (MEG Ai1600T and the MPG TS models) or the read failed.
         """
+        if self.variant not in self.MULTIRAIL_VARIANTS:
+            # On these models 0xC0 is the 8-byte 12V-2x6 configuration instead; its
+            # first byte is the OCP enable flag (1 by default), which would be read
+            # as "one combined rail" on a model that has no multirail flag at all.
+            return None
         data = self.hid.read_register(REG_MULTIRAIL)
         if data is None or len(data) < 1:
             return None

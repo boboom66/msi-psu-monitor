@@ -297,6 +297,19 @@ def test_read_multirail_ocp_missing_or_empty():
     assert _psu(product='MEG Ai1300P', registers={0xC0: b''}).read_multirail_ocp() is None
 
 
+@pytest.mark.parametrize('product', ['MPG Ai1600TS', 'MPG Ai1300TS', 'MEG Ai1600T'])
+def test_read_multirail_ocp_stays_none_on_models_without_the_flag(product):
+    """0xC0 is the 8-byte 12V-2x6 config there; byte 0 is its OCP *enable* flag.
+
+    Reading it as the multirail answer turned "config enabled" (the factory
+    default, 1) into "one combined rail" -- a protection mode these models do
+    not have.
+    """
+    assert (
+        _psu(product=product, registers={0xC0: b'\x01' + b'\x00' * 7}).read_multirail_ocp() is None
+    )
+
+
 @pytest.mark.parametrize(
     'product,expected',
     [

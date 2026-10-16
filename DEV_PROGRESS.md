@@ -25,7 +25,7 @@
 
 ### 数据正确性修复（P0，已冻结）
 
-- **FW revision**：TS 按 2 字节 ASCII 透传（`1.0`），非可打印才回退；废弃旧的 `<I` 十进制拼法。
+- **FW revision**：设备只回 **2 个 ASCII 数字**（`b"10"`），小数点由读取方插入 → `1.0`（对齐 `CPSU.cs:497-507`）；非「两位数字」的载荷原样透传。旧 `<I` 十进制拼法（上游 README 的 `FW: 49.48`）已废弃。
 - **Serial**：TS 的首字节是长度前缀，按长度切片，不再把长度当号码。
 - **PID**：补齐 `0xAA6F`（Ai1300TS），共 5 个 `0db0:*`。
 - **未知机型拒解**：产品字符串匹配不上时抛错，不再猜布局。
@@ -98,7 +98,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 309 passed
+uv run --group dev pytest -q                     → 318 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 30 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
