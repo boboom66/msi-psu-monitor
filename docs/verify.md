@@ -129,7 +129,8 @@ ls /tmp/psu-demo && head -3 /tmp/psu-demo/msi-psu.prom && cat /tmp/psu-demo/stat
 MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --export --from 30m --columns all | head -3
 ```
 
-首行表头固定为 `time,cpu,gpu,12v,5v,3v3,temp,fan,eff`；7ZPU 单轨机型 `cpu`/`gpu` 记 `N/A`。
+首行表头固定为 `time,cpu,gpu,12v,5v,3v3,temp,fan,eff`；`cpu`/`gpu` 是瓦特
+（CPU=12V2 轨、GPU=12V3+4+5，同 MSI Center），单轨机型（TS / Ai1600T）记 `N/A`。
 
 ```bash
 MSI_PSU_STATE_DIR=/tmp/psu-demo .venv/bin/msi-psu-monitor --dashboard --port 8899 &

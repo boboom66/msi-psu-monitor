@@ -107,6 +107,23 @@ def format_text(sensors):
             value, unit = sensors[key]
             lines.append(f'  {label:8s}: {value:8.3f} {unit}')
 
+    if 'iout_12v_rails' in sensors:
+        rails, unit = sensors['iout_12v_rails']
+        voltages = stats.reading(sensors, 'vout_12v_rails') or []
+        lines.append('  Per-rail 12V:')
+        for index, rail_value in enumerate(rails):
+            volts = voltages[index] if index < len(voltages) else None
+            prefix = f'    12V{index + 1}'
+            if volts is None:
+                lines.append(f'{prefix}: {rail_value:8.3f} {unit}')
+            else:
+                lines.append(f'{prefix}: {volts:8.3f} V {rail_value:8.3f} {unit}')
+        watts = stats.rail_watts(sensors)
+        watts = stats.rail_watts(sensors)
+        if watts is not None:
+            for label, value in zip(('CPU', 'GPU'), watts):
+                lines.append(f'  {label:8s}: {value:8.1f} W')
+
     if 'iout_pins' in sensors:
         pins, unit = sensors['iout_pins']
         lines.append('  Per-pin currents (12V-2x6 GPU Safeguard+):')
@@ -193,6 +210,29 @@ def format_prometheus(sensors):
             lines.append(f'# TYPE {prefix}_{name} gauge')
             lines.append(f'{prefix}_{name}{{rail="{key}"}} {value}')
 
+    rails = stats.reading(sensors, 'iout_12v_rails')
+    if rails:
+        voltages = stats.reading(sensors, 'vout_12v_rails') or []
+        lines.append('# HELP msi_psu_rail_voltage Voltage of a discrete 12V rail in volts')
+        lines.append('# TYPE msi_psu_rail_voltage gauge')
+        for index, rail_value in enumerate(rails):
+            if index < len(voltages):
+                lines.append(f'msi_psu_rail_voltage{{rail="12V{index + 1}"}} {voltages[index]}')
+        lines.append('# HELP msi_psu_rail_current Current of a discrete 12V rail in amps')
+        lines.append('# TYPE msi_psu_rail_current gauge')
+        for index, rail_value in enumerate(rails):
+            lines.append(f'msi_psu_rail_current{{rail="12V{index + 1}"}} {rail_value}')
+
+    watts = stats.rail_watts(sensors)
+    if watts is not None:
+        lines.append('# HELP msi_psu_cpu_watts Wattage drawn by the CPU rail (12V2) in watts')
+        lines.append('# TYPE msi_psu_cpu_watts gauge')
+        lines.append(f'msi_psu_cpu_watts {{}} {watts[0]}')
+        lines.append(
+            '# HELP msi_psu_gpu_watts Wattage drawn by the GPU rails (12V3+12V4+12V5) in watts'
+        )
+        lines.append('# TYPE msi_psu_gpu_watts gauge')
+        lines.append(f'msi_psu_gpu_watts {{}} {watts[1]}')
     if 'iout_pins' in sensors:
         pins, _ = sensors['iout_pins']
         lines.append('# HELP msi_psu_pin_current Per-pin current on 12V-2x6 connector in amps')
@@ -265,7 +305,7 @@ FORMATTERS = {'text': format_text, 'json': format_json, 'prometheus': format_pro
 # Display labels, in report order (the 7ZPU layout omits the 5V/3.3V rails).
 _VOLTAGE_LABELS = {'vout_12v': '+12V', 'vout_5v': '+5V', 'vout_3v3': '+3.3V'}
 _CURRENT_LABELS = {'iout_12v_total': '12V TOTAL', 'iout_5v': '5V', 'iout_3v3': '3.3V'}
-
+_CURRENT_LABELS = {'iout_12v_total': '12V TOTAL', 'iout_5v': '5V', 'iout_3v3': '3.3V'}
 _BLACKBOX_STATUS = {
     0: 'normal',
     1: 'single-pin OCP (>12A)',

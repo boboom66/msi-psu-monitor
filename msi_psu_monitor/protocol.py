@@ -76,14 +76,15 @@ ALERT_NAMES = (
     "fan",
 )
 
-# 0xE0 bulk read layout offsets for MPG Ai1600TS (62-byte payload)
-# First 44 bytes contain data, remaining 18 bytes are zero padding
+# 0xE0 bulk read layout for MPG Ai1600TS / Ai1300TS (62-byte payload).
+# The first 44 bytes carry data, the remaining 18 bytes are zero padding; a
+# shorter payload cannot be decoded (see ``get_sensors``). The order matches
+# ``CPSU.cs GET_ALL`` for ``PID_MPG_Ai1300TS``/``PID_MPG_Ai1600TS``.
 BULK_IOUT_12V = 0  # u16, LINEAR11 mA
 BULK_IOUT_5V = 2  # u16, LINEAR11 mA
 BULK_IOUT_3V3 = 4  # u16, LINEAR11 mA
 BULK_IOUT_PINS_START = 6  # 12 x u16, LINEAR11 mA (per-pin currents)
 BULK_IOUT_PINS_COUNT = 12
-BULK_UNKNOWN = 28  # u16, unknown current value
 BULK_POWER = 30  # u16, LINEAR11 uW
 BULK_EFFICIENCY = 32  # u16, LINEAR11 x100
 BULK_TEMP = 34  # u16, LINEAR11 mC
@@ -91,6 +92,8 @@ BULK_FAN_RPM = 36  # u16, LINEAR11 (unsigned)
 BULK_VOUT_12V = 38  # u16, LINEAR11 mV
 BULK_VOUT_5V = 40  # u16, LINEAR11 mV
 BULK_VOUT_3V3 = 42  # u16, LINEAR11 mV
+BULK_DATA_SIZE = 44  # bytes of real data (the rest of the frame is zero padding)
+BULK_FRAME_SIZE = 62  # bytes returned by the device for a 0xE0 read
 
 
 def lin11_to_int(v16, scale=1000, signed=True):
@@ -115,6 +118,17 @@ def lin11_to_int(v16, scale=1000, signed=True):
         mantissa = v16 & 0x7FF
     val = mantissa * scale
     return val << exponent if exponent >= 0 else val >> -exponent
+
+
+def _bulk_lin11(data, offset, scale=1000, signed=False):
+    """Decode one LINEAR11 word at ``offset`` of a 0xE0 payload.
+
+    ``scale`` matches ``lin11_to_int``: 1000 for mV/mA/mC, 100 for the x100
+    efficiency, 1000000 for uW and 1 for the fan's raw RPM. REV6 leaves the
+    mantissa unsigned, so ``signed`` stays False unless a variant says otherwise.
+    """
+    raw = struct.unpack("<H", data[offset : offset + 2])[0]
+    return lin11_to_int(raw, scale, signed)
 
 
 def detect_devices():
@@ -232,13 +246,6 @@ class HIDDevice:
         """Read a single register and return raw bytes."""
         return self.send_command([PSU_READ, reg])
 
-    def read_u16(self, reg):
-        """Read a register and return as uint16."""
-        data = self.read_register(reg)
-        if data is None or len(data) < 2:
-            return None
-        return struct.unpack("<H", bytes(data[:2]))[0]
-
     def read_all(self):
         """Read all sensor values via the 0xE0 bulk command.
 
@@ -272,14 +279,19 @@ class MSIPSU:
     Supports multiple PSU variants with different 0xE0 payload layouts.
     """
 
+    # ``bulk_size`` is the frame the device returns for 0xE0; ``payload_size``
+    # is the shortest frame that can still be decoded (the MPG models pad their
+    # 44-byte payload out to 62 bytes).
     VARIANTS = {
-        "ai1000p": {"name": "MEG Ai1000P", "bulk_size": 40},
-        "ai1300p": {"name": "MEG Ai1300P", "bulk_size": 40},
-        "meg_ai1600": {"name": "MEG Ai1600(T)", "bulk_size": 20},
-        "mpg_ai1300ts": {"name": "MPG Ai1300TS", "bulk_size": 62},
-        "mpg_ai1600ts": {"name": "MPG Ai1600TS", "bulk_size": 62},
+        "ai1000p": {"name": "MEG Ai1000P", "bulk_size": 40, "payload_size": 40},
+        "ai1300p": {"name": "MEG Ai1300P", "bulk_size": 40, "payload_size": 40},
+        "meg_ai1600": {"name": "MEG Ai1600(T)", "bulk_size": 20, "payload_size": 20},
+        "mpg_ai1300ts": {"name": "MPG Ai1300TS", "bulk_size": 62, "payload_size": 44},
+        "mpg_ai1600ts": {"name": "MPG Ai1600TS", "bulk_size": 62, "payload_size": 44},
     }
     SEVEN_ZPU_VARIANTS = ("mpg_ai1600ts", "mpg_ai1300ts")
+    # Ai1000P/Ai1300P expose five discrete 12V rails plus a combined rail.
+    RAIL_COUNT = 5
 
     def __init__(self, hid_device=None):
         self.hid = hid_device or HIDDevice()
@@ -368,95 +380,61 @@ class MSIPSU:
 
         # Read bulk data
         bulk_data = self.hid.read_all()
-        if bulk_data is None or len(bulk_data) < 44:
+        payload_size = self.VARIANTS.get(self.variant, {}).get('payload_size', BULK_DATA_SIZE)
+        if bulk_data is None or len(bulk_data) < payload_size:
+            # A short frame cannot be decoded: reading zeros out of the padding
+            # would look like a healthy PSU (REQ-P0-2).
             return sensors
 
-        data = bulk_data[:62]
+        data = bulk_data[:BULK_FRAME_SIZE]
 
         # Parse based on variant
         if self.variant in MSIPSU.SEVEN_ZPU_VARIANTS:
             # 7ZPU 44-byte layout (REV6 E0h) with per-pin currents
             sensors["vout_12v"] = (
-                round(
-                    lin11_to_int(struct.unpack("<H", data[38:40])[0], 1000, False)
-                    / 1000,
-                    3,
-                ),
+                round(_bulk_lin11(data, BULK_VOUT_12V) / 1000, 3),
                 "V",
             )
             sensors["vout_5v"] = (
-                round(
-                    lin11_to_int(struct.unpack("<H", data[40:42])[0], 1000, False)
-                    / 1000,
-                    3,
-                ),
+                round(_bulk_lin11(data, BULK_VOUT_5V) / 1000, 3),
                 "V",
             )
             sensors["vout_3v3"] = (
-                round(
-                    lin11_to_int(struct.unpack("<H", data[42:44])[0], 1000, False)
-                    / 1000,
-                    3,
-                ),
+                round(_bulk_lin11(data, BULK_VOUT_3V3) / 1000, 3),
                 "V",
             )
             sensors["iout_12v_total"] = (
-                round(
-                    lin11_to_int(struct.unpack("<H", data[0:2])[0], 1000, False) / 1000,
-                    3,
-                ),
+                round(_bulk_lin11(data, BULK_IOUT_12V) / 1000, 3),
                 "A",
             )
             sensors["iout_5v"] = (
-                round(
-                    lin11_to_int(struct.unpack("<H", data[2:4])[0], 1000, False) / 1000,
-                    3,
-                ),
+                round(_bulk_lin11(data, BULK_IOUT_5V) / 1000, 3),
                 "A",
             )
             sensors["iout_3v3"] = (
-                round(
-                    lin11_to_int(struct.unpack("<H", data[4:6])[0], 1000, False) / 1000,
-                    3,
-                ),
+                round(_bulk_lin11(data, BULK_IOUT_3V3) / 1000, 3),
                 "A",
             )
 
             # Per-pin currents
             pin_currents = []
-            for i in range(12):
-                off = 6 + i * 2
-                if off + 2 <= len(data):
-                    pin_val = round(
-                        lin11_to_int(
-                            struct.unpack("<H", data[off : off + 2])[0], 1000, False
-                        )
-                        / 1000,
-                        3,
-                    )
-                    pin_currents.append(pin_val)
+            for i in range(BULK_IOUT_PINS_COUNT):
+                off = BULK_IOUT_PINS_START + i * 2
+                pin_currents.append(round(_bulk_lin11(data, off) / 1000, 3))
             sensors["iout_pins"] = (pin_currents, "A")
 
             sensors["power_total"] = (
-                round(
-                    lin11_to_int(struct.unpack("<H", data[30:32])[0], 1000000, False)
-                    / 1000000,
-                    1,
-                ),
+                round(_bulk_lin11(data, BULK_POWER, 1000000) / 1000000, 1),
                 "W",
             )
-            eff_raw = lin11_to_int(struct.unpack("<H", data[32:34])[0], 100, False)
+            eff_raw = _bulk_lin11(data, BULK_EFFICIENCY, 100)
             sensors["efficiency"] = (round(eff_raw / 100, 2), "%")
             sensors["temp"] = (
-                round(
-                    lin11_to_int(struct.unpack("<H", data[34:36])[0], 1000, False)
-                    / 1000,
-                    1,
-                ),
+                round(_bulk_lin11(data, BULK_TEMP) / 1000, 1),
                 "°C",
             )
             sensors["fan_rpm"] = (
-                int(lin11_to_int(struct.unpack("<H", data[36:38])[0], 1, False)),
+                int(_bulk_lin11(data, BULK_FAN_RPM, 1)),
                 "RPM",
             )
 
@@ -530,7 +508,16 @@ class MSIPSU:
             )
 
         elif self.variant in ("ai1000p", "ai1300p"):
-            # 40-byte layout (Ai1000P/Ai1300P with 6 per-rail 12V)
+            # 40-byte layout: 12V1..12V5 as (voltage, current) pairs, then the
+            # combined 12V rail, then 5V/3.3V/power/efficiency/temp/fan
+            # (CPSU.cs GET_ALL, PID_MEG_Ai1000P/PID_MEG_Ai1300P).
+            rail_voltages = []
+            rail_currents = []
+            for rail in range(MSIPSU.RAIL_COUNT):
+                rail_voltages.append(round(_bulk_lin11(data, rail * 4) / 1000, 3))
+                rail_currents.append(round(_bulk_lin11(data, rail * 4 + 2) / 1000, 3))
+            sensors["vout_12v_rails"] = (rail_voltages, "V")
+            sensors["iout_12v_rails"] = (rail_currents, "A")
             sensors["vout_12v"] = (
                 round(
                     lin11_to_int(struct.unpack("<H", data[20:22])[0], 1000, False)

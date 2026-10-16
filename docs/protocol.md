@@ -94,17 +94,26 @@ If a command is not supported or an error occurs, the response starts with:
 ## Bulk Read (0xE0)
 
 The 0xE0 command returns all sensor values in a single bulk payload. The
-payload size and layout vary by PSU model:
+payload size and layout vary by PSU model. Each layout below is a payload of
+its own right:
 
-### MPG Ai1600TS (62 bytes)
+- the MPG models return 62 bytes of which only the first 44 are data, so
+  `payload_size` is 44;
+- the MEG Ai1600T returns 20 bytes — MSI Center's `i = 10` merely offsets its
+  *output array*, it does not skip a prefix of the payload;
+- the MEG Ai1000P/Ai1300P return 40 bytes.
+
+A shorter frame than the variant's `payload_size` is rejected outright rather
+than decoded from zero padding.
+
+### MPG Ai1600TS / Ai1300TS (44 bytes of data in a 62-byte frame)
 
 Offset | Size | Field | Format
 -------|------|-------|-------
 0 | 2 | Total +12V current | LINEAR11, mA
 2 | 2 | +5V current | LINEAR11, mA
 4 | 2 | +3.3V current | LINEAR11, mA
-6-28 | 24 | Per-pin currents (12 pins × 2 bytes) | LINEAR11, mA
-28 | 2 | Unknown current value | LINEAR11, mA
+6-29 | 24 | Per-pin currents (12 pins × 2 bytes) | LINEAR11, mA
 30 | 2 | Total output power | LINEAR11, uW
 32 | 2 | Efficiency | LINEAR11, x100
 34 | 2 | Internal temperature | LINEAR11, mC
@@ -114,7 +123,7 @@ Offset | Size | Field | Format
 42 | 2 | +3.3V voltage | LINEAR11, mV
 44-61 | 18 | Zero padding | -
 
-### MEG Ai1600(T) (20 bytes)
+### MEG Ai1600T (20 bytes)
 
 Offset | Size | Field | Format
 -------|------|-------|-------
@@ -133,7 +142,9 @@ Offset | Size | Field | Format
 
 Offset | Size | Field | Format
 -------|------|-------|-------
-0-24 | 24 | Per-rail 12V (6 rails × 4 bytes) | 6× (LINEAR11 mV, LINEAR11 mA)
+0-19 | 20 | 12V1..12V5, each (voltage, current) | 5× (LINEAR11 mV, LINEAR11 mA)
+20 | 2 | Combined +12V voltage | LINEAR11, mV
+22 | 2 | Combined +12V current | LINEAR11, mA
 24 | 2 | +5V voltage | LINEAR11, mV
 26 | 2 | +5V current | LINEAR11, mA
 28 | 2 | +3.3V voltage | LINEAR11, mV
@@ -145,27 +156,35 @@ Offset | Size | Field | Format
 
 ## LINEAR11 Encoding
 
-SMBus LINEAR11 format encodes a floating-point value in 16 bits:
+LINEAR11 packs a floating-point value into 16 bits:
 
 ```
 Bit 15-11: Signed exponent (5-bit, two's complement)
-Bit 10-0:  Signed mantissa (11-bit, two's complement)
-
+Bit 10-0:  Mantissa (11-bit; signed per SMBus, but REV6 leaves it unsigned)
 Value = mantissa × 2^exponent
 ```
 
-The mantissa is scaled by a unit multiplier:
+MSI Center's decoder is literally `Mantissa * Math.Pow(2, Exponent)`
+(`CPSU.cs:1248`), i.e. the value is returned in whatever unit the exponent
+implies. This implementation keeps an integer path instead — the mantissa is
+multiplied by a unit scale before the shift and divided back out afterwards —
+which yields the same number:
+
 - Voltage: 1000 → result in mV
 - Current: 1000 → result in mA
 - Power: 1000000 → result in uW
 - Efficiency: 100 → result in percent × 100
 - Temperature: 1000 → result in m°C
 
+Because the mantissa is only 11 bits, the exponent decides the resolution: the
+3.3 V rail cannot be expressed with a 1 mV or 500 mV LSB, only with a
+sufficiently negative exponent (1/128 LSB gives 3.296 V). The OCP amp fields
+use exponent −4 in the setter (`value << 4` with a `0xE0` high byte).
 ## Per-Pin Current Monitoring (GPU Safeguard+)
 
 The MPG Ai1600TS features GPU Safeguard+ which monitors current on each of the
 12 pins across both 12V-2x6 connectors. The 12 per-pin current values are
-located at offsets 6-28 of the 0xE0 bulk read payload.
+located at offsets 6-29 of the 0xE0 bulk read payload.
 
 Each pin current is a 16-bit LINEAR11 value in milliamps. The pins are ordered
 sequentially: pins 1-6 on connector 1, then pins 1-6 on connector 2.

@@ -33,8 +33,10 @@ runtime imports.
   `signed=False` only for fan RPM. Scales: V/A ×1000, W ×1e6, EFF ×100, TEMP ×1000.
 - Variant dispatch is by **product-string substring** (`Ai1600TS`→mpg before the
   `Ai1600`→meg wildcard, then `Ai1300`/`Ai1000`), never by USB PID.
-- `BULK_*` offsets describe the Ai1600TS 62-byte layout only (44B data + 18B zero
-  pad; bail if bulk `<44B`). Other variants use inline slices in `get_sensors()`.
+- `BULK_*` offsets describe the MPG TS layout only (44B of data in a 62B frame).
+  Each `VARIANTS` entry carries `bulk_size` (frame the device returns) and
+  `payload_size` (shortest decodable frame); `get_sensors()` gates on the latter, so
+  the Ai1600T's 20-byte payload is decoded rather than dropped.
 - Sensors dict: ident keys are plain strings; readings are `(value, unit)` tuples;
   formatters branch on `isinstance(v, tuple)`.
 
@@ -54,8 +56,11 @@ runtime imports.
 - **`--ocp` is read-only and model-gated**: `MSIPSU.supports_ocp_config` (TS variants only,
   mirroring `CPSU.cs:843`) guards the read; a MEG model gets the explanation and `EXIT_OK`,
   never an error. The C0/C1 write path stays frozen for a later approved batch.
-- History CSV columns are frozen (`HISTORY_COLUMNS`); `--export` renames some and
-  maps `cpu`/`gpu` to `N/A` because the 7ZPU single-rail layout cannot split them.
+- `HISTORY_COLUMNS` is append-only: `cpu_w`/`gpu_w` were added for the multi-rail
+  models, and older 9-column files must keep loading (absent columns export as `N/A`).
+- `state.rail_watts()` is the single definition of the CPU/GPU split (CPU = 12V2,
+  GPU = 12V3+12V4+12V5, `UC_Dashboard_Page.xaml.cs:203`); do not re-derive it in the
+  formatters.
 
 ## Anti-patterns
 

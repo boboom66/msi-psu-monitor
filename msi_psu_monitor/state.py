@@ -36,15 +36,34 @@ HISTORY_PREFIX = 'daily-'
 HISTORY_SUFFIX = '.log'
 
 # CSV columns of a history line (the --export view renames some of them).
-HISTORY_COLUMNS = ('time', '12v', '5v', '3v3', 'total_a', 'temp', 'fan', 'power', 'eff')
+# ``cpu_w``/``gpu_w`` are empty on single-rail models, which is what makes the
+# export render them as N/A.
+HISTORY_COLUMNS = (
+    'time',
+    '12v',
+    '5v',
+    '3v3',
+    'total_a',
+    'temp',
+    'fan',
+    'power',
+    'eff',
+    'cpu_w',
+    'gpu_w',
+)
 
 # --columns tokens, in canonical (report) order. ``all`` expands to all of them.
 COLUMN_CPU = 'cpu'
 COLUMN_GPU = 'gpu'
 EXPORT_COLUMNS = ('cpu', 'gpu', '12v', '5v', '3v3', 'temp', 'fan', 'eff')
-# CPU/GPU wattage needs per-rail 12V currents; the 7ZPU single-rail layout
-# cannot provide them, so the export records them as N/A (REQ-9).
+# CPU/GPU wattage needs the discrete 12V rails that only the multi-rail MEG
+# models report, so single-rail models record them as N/A (REQ-9).
 NOT_AVAILABLE = 'N/A'
+# Rail selection behind CPU/GPU wattage, straight from the MSI Center dashboard:
+# CPU = 12V2, GPU = 12V3+12V4+12V5 (UC_Dashboard_Page.xaml.cs:203-204).
+CPU_RAIL_INDEX = 1
+GPU_RAIL_INDEXES = (2, 3, 4)
+REQUIRED_RAILS = max(GPU_RAIL_INDEXES) + 1
 
 _UNIT_SECONDS = {'m': 60.0, 'h': 3600.0, 'd': 86400.0}
 _FROM_RE = re.compile(r'^(\d+(?:\.\d+)?)\s*([mhd])$', re.IGNORECASE)
@@ -235,16 +254,40 @@ def append_history(state_dir, sensors, ts=None):
     return path
 
 
-def _history_row(sensors, ts):
-    def reading(key):
-        value = sensors.get(key)
-        if isinstance(value, tuple):
-            return value[0]
-        return value
+def rail_watts(sensors):
+    """Return ``(cpu_watts, gpu_watts)`` for a multi-rail PSU, else ``None``.
 
+    MSI Center derives both figures from the discrete 12V rails of the
+    Ai1000P/Ai1300P (CPU = 12V2, GPU = 12V3+12V4+12V5). Single-rail models
+    report no per-rail data at all, which the export shows as N/A.
+    """
+    voltages = reading(sensors, 'vout_12v_rails')
+    currents = reading(sensors, 'iout_12v_rails')
+    if not isinstance(voltages, list) or not isinstance(currents, list):
+        return None
+    if len(voltages) < REQUIRED_RAILS or len(currents) < REQUIRED_RAILS:
+        return None
+    cpu = voltages[CPU_RAIL_INDEX] * currents[CPU_RAIL_INDEX]
+    gpu = sum(voltages[i] * currents[i] for i in GPU_RAIL_INDEXES)
+    return round(cpu, 1), round(gpu, 1)
+
+
+def reading(sensors, key):
+    """Return the value of a sensors entry, unwrapping ``(value, unit)``."""
+    value = sensors.get(key)
+    if isinstance(value, tuple):
+        return value[0]
+    return value
+
+
+def _history_row(sensors, ts):
     def fmt(key, digits, default=''):
-        value = reading(key)
+        value = reading(sensors, key)
         return default if value is None else f'{float(value):.{digits}f}'
+
+    watts = rail_watts(sensors)
+    cpu_w = '' if watts is None else f'{watts[0]:.1f}'
+    gpu_w = '' if watts is None else f'{watts[1]:.1f}'
 
     return (
         datetime.fromtimestamp(ts).strftime('%Y-%m-%dT%H:%M:%S'),
@@ -256,6 +299,8 @@ def _history_row(sensors, ts):
         fmt('fan_rpm', 0),
         fmt('power_total', 1),
         fmt('efficiency', 2),
+        cpu_w,
+        gpu_w,
     )
 
 
@@ -347,8 +392,10 @@ def build_export(state_dir, since_ts, columns):
     for row in iter_history(state_dir, since_ts=since_ts):
         out = [row.get('time', '')]
         for name in columns:
-            if name in (COLUMN_CPU, COLUMN_GPU):
-                out.append(NOT_AVAILABLE)
+            if name == COLUMN_CPU:
+                out.append(row.get('cpu_w') or NOT_AVAILABLE)
+            elif name == COLUMN_GPU:
+                out.append(row.get('gpu_w') or NOT_AVAILABLE)
             else:
                 out.append(row.get(name, ''))
         rows.append(out)

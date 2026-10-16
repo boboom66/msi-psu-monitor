@@ -35,9 +35,9 @@ Python standard library only — no third-party runtime dependencies.
 |-----------|--------|--------------|----------|
 | MPG Ai1600TS | `0db0:808c` | 62 bytes | Per-pin current monitoring (GPU Safeguard+), combined 12V rail |
 | MPG Ai1300TS | `0db0:aa6f` | 62 bytes | Per-pin current monitoring (GPU Safeguard+), combined 12V rail |
-| MEG Ai1600(T) | `0db0:c9eb` | 20 bytes | Combined 12V rail, no per-pin monitoring |
-| MEG Ai1300P | `0db0:56d4` | 40 bytes | 6 per-rail 12V, multi-rail switching |
-| MEG Ai1000P | `0db0:e749` | 40 bytes | 6 per-rail 12V, multi-rail switching |
+| MEG Ai1600T | `0db0:c9eb` | 20 bytes | Combined 12V rail, no per-pin monitoring |
+| MEG Ai1300P | `0db0:56d4` | 40 bytes | 5 per-rail 12V plus a combined rail, CPU/GPU wattage |
+| MEG Ai1000P | `0db0:e749` | 40 bytes | 5 per-rail 12V plus a combined rail, CPU/GPU wattage |
 
 The variant is chosen from the product string reported by the PSU, never from the USB
 PID, so a re-badged device with a known product name still parses correctly.
@@ -125,6 +125,10 @@ sudo msi-psu-monitor --fan-mode auto
 # Last two hours of temperature and fan as CSV
 sudo msi-psu-monitor --export --from 2h --columns temp,fan -O psu-2h.csv
 
+The `cpu`/`gpu` columns are wattages derived the way MSI Center derives them —
+CPU from the 12V2 rail and GPU from 12V3+12V4+12V5 — so they are populated on the
+multi-rail MEG models and stay `N/A` on the single-rail ones.
+
 # Local charts (reads the daemon history, never touches the PSU)
 msi-psu-monitor --dashboard --port 8899
 ```
@@ -184,7 +188,9 @@ black box, so scripts can call it unconditionally).
 
 The `prometheus` format targets the
 [node_exporter textfile collector](https://github.com/prometheus/node_exporter#textfile-collector)
-and exports `msi_psu_info{product,vendor,fw,serial}`, per-rail voltages/currents,
+and exports `msi_psu_info{product,vendor,fw,serial}`, rail voltages/currents,
+`msi_psu_rail_voltage{rail}`/`msi_psu_rail_current{rail}` plus
+`msi_psu_cpu_watts`/`msi_psu_gpu_watts` on the multi-rail MEG models,
 `msi_psu_pin_current{connector,pin}`, `msi_psu_power_total`, `msi_psu_power_avg`,
 `msi_psu_efficiency`, `msi_psu_efficiency_avg`, `msi_psu_temperature`,
 `msi_psu_fan_speed`, `msi_psu_zero_fan{state}`,

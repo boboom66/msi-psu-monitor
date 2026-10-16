@@ -114,7 +114,12 @@ def test_append_history_writes_a_header_once(tmp_path):
     assert len(lines) == 3
     expected = datetime.fromtimestamp(1700000000.0).strftime('%Y-%m-%dT%H:%M:%S')
     assert lines[1].startswith(expected)
-    assert lines[1].split(',')[-1] == '94.00'
+    columns = dict(zip(lines[0].split(','), lines[1].split(',')))
+    assert columns['eff'] == '94.00'
+    # Single-rail models have no discrete 12V rails, so the CPU/GPU wattage
+    # columns stay empty and --export renders them as N/A.
+    assert columns['cpu_w'] == ''
+    assert columns['gpu_w'] == ''
 
 
 def test_iter_history_respects_the_since_cutoff(tmp_path):
@@ -166,3 +171,59 @@ def test_build_export_marks_cpu_gpu_as_na(tmp_path):
     assert header == ['time', 'cpu', 'gpu', 'temp']
     assert rows[0][1:3] == ['N/A', 'N/A']
     assert rows[0][3] == '56.0'
+
+
+def multi_rail_sensors(**extra):
+    """Sensors of an Ai1000P/Ai1300P sample with five discrete 12V rails."""
+    rails_v = [12.0, 12.0, 12.0, 12.0, 12.0]
+    rails_a = [0.5, 2.0, 3.0, 1.0, 4.0]
+    return sensors(
+        vout_12v_rails=(rails_v, 'V'),
+        iout_12v_rails=(rails_a, 'A'),
+        **extra,
+    )
+
+
+def test_rail_watts_follows_the_msi_center_split():
+    # CPU = 12V2, GPU = 12V3+12V4+12V5 (UC_Dashboard_Page.xaml.cs:203-204).
+    assert stats.rail_watts(multi_rail_sensors()) == (24.0, 96.0)
+
+
+def test_rail_watts_needs_both_rail_lists():
+    assert stats.rail_watts(sensors()) is None
+    assert stats.rail_watts(sensors(vout_12v_rails=([12.0] * 5, 'V'))) is None
+    # A truncated rail list must not silently shift the CPU/GPU mapping.
+    assert (
+        stats.rail_watts(
+            sensors(vout_12v_rails=([12.0, 12.0], 'V'), iout_12v_rails=([1.0, 2.0], 'A'))
+        )
+        is None
+    )
+
+
+def test_history_records_cpu_gpu_watts_for_multi_rail(tmp_path):
+    stats.append_history(tmp_path, multi_rail_sensors(), ts=1700000000.0)
+    path = stats.history_path(tmp_path, date.fromtimestamp(1700000000.0))
+    header, line = path.read_text().splitlines()[:2]
+    row = dict(zip(header.split(','), line.split(',')))
+    assert row['cpu_w'] == '24.0'
+    assert row['gpu_w'] == '96.0'
+
+
+def test_build_export_uses_recorded_cpu_gpu_watts(tmp_path):
+    stats.append_history(tmp_path, multi_rail_sensors(), ts=1700000000.0)
+    header, rows = stats.build_export(tmp_path, since_ts=None, columns=['cpu', 'gpu', 'temp'])
+    assert header == ['time', 'cpu', 'gpu', 'temp']
+    assert rows[0][1:3] == ['24.0', '96.0']
+    assert rows[0][3] == '56.0'
+
+
+def test_build_export_reads_older_history_without_rail_columns(tmp_path):
+    """A history file written before this feature still exports N/A."""
+    path = stats.history_path(tmp_path, date(2026, 2, 9))
+    path.write_text(
+        'time,12v,5v,3v3,total_a,temp,fan,power,eff\n'
+        '2026-02-09T10:00:00,12.100,5.040,3.320,50.000,56.0,2050,600.0,94.00\n'
+    )
+    _, rows = stats.build_export(tmp_path, since_ts=None, columns=['cpu', 'gpu'])
+    assert rows[0][1:3] == ['N/A', 'N/A']

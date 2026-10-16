@@ -33,9 +33,14 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12.
   before the `Ai1600` → meg wildcard, then `Ai1300`/`Ai1000` (`protocol.py:MSIPSU.init`).
   Never dispatch by USB PID; `PSU_PRODUCT_IDS` (5 PIDs) and the variant map are
   maintained separately.
-- **`BULK_*` offsets are Ai1600TS-only** (62B payload: 44B data + 18B zero pad, bail if
-  bulk `<44B`). meg_ai1600 (20B) and ai1000p/ai1300p (40B) use inline slices in
-  `get_sensors()` — do not "unify" them onto `BULK_*`.
+- **`BULK_*` offsets are the MPG TS layout only** (44B of data inside a 62B frame).
+  `VARIANTS[...]['payload_size']` is the per-variant minimum: 44 for the TS, 40 for
+  ai1000p/ai1300p, 20 for meg_ai1600 — a single 44B gate silently drops every
+  Ai1600T sensor. The non-TS branches use inline slices in `get_sensors()`; do not
+  "unify" them onto `BULK_*`.
+- **MSI's `ValueCalc` is `mantissa * 2**exponent`** (`CPSU.cs:1248`), so the unit comes
+  from the exponent; the 11-bit mantissa means 3.3 V needs a negative exponent
+  (−7 → 3.296 V) and cannot be written as 3300 mV.
 - **Sensors dict shape**: ident keys (`vendor/product/fw_revision/serial`) are plain
   strings; readings are `(value, unit)` tuples. Formatters branch on
   `isinstance(v, tuple)` — keep that contract.
