@@ -34,7 +34,9 @@
   `OCP12V2x6_CONFIG`（8B，仅 MPG TS 系），两条命令的机型门互补；MEG Ai1600T 两条都不支持。
   因此 `--ocp` 按变体判定能力，绝不按载荷长度猜（`CPSU.cs:823-832` vs `840-856`）。
 - **0xC1 同样重载**：InfoID `0x00` 为 42B OCP 实时状态，InfoID `1..10` 为黑盒日志。
-- **LINEAR11 尾数符号**：REV6 无符号（`signed=False` 仅风扇 RPM），调用点四舍五入（V/A 3dp、W 1dp、% 2dp、RPM int）。
+- **LINEAR11 尾数符号**：REV6 无符号，MSI 的 `ValueCalc` 也是 `Mantissa = ((High & 7) << 8) + Low`（不扩展符号），因此 `lin11_to_int` 的默认值
+  改为 `signed=False`（此前默认 `True` 是个陷阱：任何漏传实参的新调用点都会静默偏离参考实现）。
+  调用点四舍五入（V/A 3dp、W 1dp、% 2dp、RPM int）。
 - **标度真义**：MSI 的 `ValueCalc` 就是 `mantissa * 2**exponent`（`CPSU.cs:1248`），单位由指数决定；11 位尾数意味着 3.3 V 只能靠负指数表示（−7 → 3.296 V），不可写成 3300 mV。
 - **变体最小载荷**：原先 44B 硬门槛会把 **Ai1600T（20B 载荷）整段拒掉**；现按 `VARIANTS[...]['payload_size']`（TS 44 / P 40 / 1600T 20）裁定。MSI 的 `i = 10` 只是输出数组下标，不是载荷前缀跳过。
 - **E1h 告警位序按机型查表**：MSI Center 在解名之前先按 PID 选三张索引数组之一
@@ -48,7 +50,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 267 passed
+uv run --group dev pytest -q                     → 276 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 30 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues

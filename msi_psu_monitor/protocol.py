@@ -131,13 +131,19 @@ BULK_DATA_SIZE = 44  # bytes of real data (the rest of the frame is zero padding
 BULK_FRAME_SIZE = 62  # bytes returned by the device for a 0xE0 read
 
 
-def lin11_to_int(v16, scale=1000, signed=True):
+def lin11_to_int(v16, scale=1000, signed=False):
     """Convert SMBus LINEAR11 encoded value to integer.
+
+    Mirrors MSI's ``ValueCalc`` (``CPSU.cs:1248``): the 5-bit exponent is
+    two's complement, the 11-bit mantissa is **not** — ``Mantissa = ((High & 7)
+    << 8) + Low`` never sign-extends, and REV6 agrees. Keep ``signed`` at its
+    default for every device value; it exists for encodings that really do use
+    a two's-complement mantissa.
 
     Args:
         v16: 16-bit raw value from the device
         scale: Multiplier for the mantissa (e.g., 1000 for mV or mA)
-        signed: Whether the mantissa is signed (True for voltage/current)
+        signed: Whether the mantissa is two's complement (default: unsigned)
 
     Returns:
         Integer value in the scaled unit (e.g., microvolts, milliamps)

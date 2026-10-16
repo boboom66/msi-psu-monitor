@@ -2,10 +2,13 @@
 
 Vectors are built as raw = (exp & 0x1F) << 11 | (mantissa & 0x7FF) and
 checked against integer-exact expectations. Exponent is 5-bit two's
-complement (positive range 0..15); mantissa is 11-bit two's complement
-(positive range 0..1023). Each vector mirrors a real call-site pattern
-from MSIPSU.get_sensors(), including its scale, rounding and unit.
+complement (range -16..15); mantissa is 11-bit **unsigned** (range 0..2047),
+exactly as MSI's ``ValueCalc`` decodes it (``CPSU.cs:1248``) and as REV6
+specifies. Each vector mirrors a real call-site pattern from
+MSIPSU.get_sensors(), including its scale, rounding and unit.
 """
+
+import pytest
 
 from msi_psu_monitor.protocol import lin11_to_int
 
@@ -66,3 +69,35 @@ def test_fan_unsigned_vs_signed():
 
 def test_defaults_match_voltage_call_pattern():
     assert lin11_to_int(0xE860) == 12000
+
+
+def _value_calc(low, high):
+    """Transcription of MSI's ``ValueCalc`` (``CPSU.cs:1248``), int32 and all."""
+    shifted = (high << 24) & 0xFFFFFFFF  # C# int32 overflow, kept explicit
+    if shifted & 0x80000000:
+        shifted -= 1 << 32
+    exponent = shifted >> 27  # arithmetic shift = sign-extended 5-bit exponent
+    mantissa = ((high & 7) << 8) + low  # never sign-extended
+    return mantissa * 2**exponent
+
+
+@pytest.mark.parametrize('raw', [0x0000, 0xE860, 0xEAF3, 0x10A5, 0xFFFF, 0x07FF, 0x87FF, 0x7C00])
+def test_every_word_agrees_with_msi_value_calc(raw):
+    """The reference decoder, reimplemented from the C# — unsigned mantissa.
+
+    Scaled to 2^16 so the integer shifts stay exact: the function returns scaled
+    integers, so comparing at 1000 would only measure truncation.
+    """
+    low, high = raw & 0xFF, raw >> 8
+    scale = 1 << 16
+    assert lin11_to_int(raw, scale) / scale == _value_calc(low, high)
+
+
+def test_default_mantissa_is_unsigned_not_twos_complement():
+    """A mantissa with bit 0x400 set must stay a large positive number.
+
+    Reading it as two's complement would turn a fan's 2050 RPM into -2046 and a
+    near-full-scale power reading into a nonsensical negative.
+    """
+    assert lin11_to_int(enc(1025, 1), 1) == 2050
+    assert lin11_to_int(enc(2047, 0), 1) == 2047

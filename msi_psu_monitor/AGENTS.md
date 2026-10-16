@@ -30,7 +30,9 @@ runtime imports.
 - LINEAR11 call pattern (keep exactly):
   `lin11_to_int(struct.unpack('<H', data[o:o+2])[0], scale, signed) / scale`,
   rounded at the call site: V/A 3dp, W 1dp, % 2dp, RPM int.
-  `signed=False` only for fan RPM. Scales: V/A ×1000, W ×1e6, EFF ×100, TEMP ×1000.
+  `signed=False` — always: REV6 and MSI's `ValueCalc` both leave the
+  mantissa unsigned (`((High & 7) << 8) + Low`), so the default must not be
+  flipped back to `True`. Scales: V/A ×1000, W ×1e6, EFF ×100, TEMP ×1000.
 - Variant dispatch is by **product-string substring** (`Ai1600TS`→mpg before the
   `Ai1600`→meg wildcard, then `Ai1300`/`Ai1000`), never by USB PID.
 - `BULK_*` offsets describe the MPG TS layout only (44B of data in a 62B frame).

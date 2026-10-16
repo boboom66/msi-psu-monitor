@@ -160,9 +160,17 @@ LINEAR11 packs a floating-point value into 16 bits:
 
 ```
 Bit 15-11: Signed exponent (5-bit, two's complement)
-Bit 10-0:  Mantissa (11-bit; signed per SMBus, but REV6 leaves it unsigned)
+Bit 10-0:  Mantissa (11-bit, UNSIGNED — REV6 and MSI both decode it that way)
 Value = mantissa × 2^exponent
 ```
+
+`lin11_to_int(v16, scale=1000, signed=False)` — the default **must** stay
+unsigned: MSI writes `Mantissa = ((High & 7) << 8) + Low` with no sign
+extension, so a mantissa with bit 10 set is a large positive number, not a
+negative one. Reading it as two's complement turns a 2050 RPM fan into −2046
+and any near-full-scale current into a nonsense negative.
+`tests/test_protocol_lin11.py` cross-checks every word against a transcription
+of `ValueCalc`, so the default cannot drift back.
 
 MSI Center's decoder is literally `Mantissa * Math.Pow(2, Exponent)`
 (`CPSU.cs:1248`), i.e. the value is returned in whatever unit the exponent

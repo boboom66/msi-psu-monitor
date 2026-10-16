@@ -46,7 +46,9 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12.
   `isinstance(v, tuple)` — keep that contract.
 - **LINEAR11 call pattern, keep exactly**:
   `lin11_to_int(struct.unpack('<H', data[o:o+2])[0], scale, signed) / scale`, rounded at
-  the call site (V/A 3dp, W 1dp, % 2dp, RPM int). `signed=False` only for fan RPM.
+  the call site (V/A 3dp, W 1dp, % 2dp, RPM int). `signed=False` — always: REV6 and MSI's `ValueCalc` both leave the
+  mantissa unsigned (`((High & 7) << 8) + Low`), so the default must not be
+  flipped back to `True`.
   Scales: V/A ×1000, W ×1e6, EFF ×100, TEMP ×1000.
 - **HID framing**: always 64B reports, 250ms timeout, drain-before-write, strip 2-byte
   echo header, NAK (`0xFE`) → `None`.
