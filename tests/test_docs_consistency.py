@@ -141,3 +141,45 @@ def test_the_quoted_smoke_check_count_matches_the_script():
                     stale.append(f'{doc.relative_to(ROOT)}: says {claimed}, actual {expected}')
     assert quoted >= 2, 'the smoke total is no longer quoted in the docs'
     assert not stale, '\n'.join(stale)
+
+
+HARDWARE_CLAIM_RE = re.compile(r'§8[（(，,]\s*共\s*(\d+)\s*项')
+HARDWARE_ENTRY_RE = re.compile(r'^(?:\d+b?)\.\s', re.M)
+
+
+def _verify_section_8():
+    """The real-hardware checklist: everything after the §8 heading in verify.md."""
+    verify = (ROOT / 'docs' / 'verify.md').read_text(encoding='utf-8')
+    assert '## 8.' in verify
+    return verify.split('## 8.', 1)[1]
+
+
+def test_the_quoted_real_hardware_check_count_matches_verify_md():
+    """That checklist is the last thing blocking release, and it grows by hand.
+
+    DEV_PROGRESS.md once said "共 10 项" above a list of nine (item 4b and the
+    Ai1600T case were added to verify.md and never mirrored), so the two numbers
+    are now tied together instead of trusted.
+    """
+    expected = len(HARDWARE_ENTRY_RE.findall(_verify_section_8()))
+    assert expected >= 10, f'only {expected} hardware checks found in verify.md §8'
+
+    quoted = 0
+    stale = []
+    for doc in DOCS:
+        if not doc.is_file():
+            continue
+        for claimed in HARDWARE_CLAIM_RE.findall(doc.read_text(encoding='utf-8')):
+            quoted += 1
+            if int(claimed) != expected:
+                stale.append(f'{doc.relative_to(ROOT)}: says {claimed}, actual {expected}')
+    assert quoted >= 2, 'the hardware checklist total is no longer quoted in the docs'
+    assert not stale, '\n'.join(stale)
+
+    # The list in DEV_PROGRESS.md mirrors verify.md by hand: make sure the two
+    # agree item by item, not just in the total.
+    progress = (ROOT / 'DEV_PROGRESS.md').read_text(encoding='utf-8')
+    section = progress.split('### 真机验收', 1)[1].split('## ', 1)[0]
+    assert len(HARDWARE_ENTRY_RE.findall(section)) == expected, (
+        'DEV_PROGRESS.md lists a different number of hardware checks than verify.md §8'
+    )

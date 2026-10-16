@@ -272,7 +272,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 413 passed
+uv run --group dev pytest -q                     → 414 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 32 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
@@ -308,17 +308,29 @@ bash scripts/smoke.sh                            → 53 项全过（三种格式
   正是本项目最忌讳的「没测到的健康」）。现三处如实标注为草稿 + 列出致命点，不再指示用户 build。
   要做完需要：钉版的上游 `msi-psu.c`、目标内核头文件、真机 62B 回读验证——三者仓库内都没有。
 
-### 真机验收（`docs/verify.md` §8，共 10 项，均待样机）
+### 文档不实（本轮又抓到一处）
+
+- `DEV_PROGRESS.md` 的真机验收小节声称 10 项、下面只列 9 条，`requirements-traceability.md`
+  也引用 10 项，而 `verify.md` §8 实际有 11 条（4b 与 Ai1600T 那条是后加的，没回头同步总数）。
+  现全部改为 11 项，并加文档测试 `test_the_quoted_real_hardware_check_count_matches_verify_md`
+  把「§8 里的编号条目数 == 文档里引用的总数 == DEV_PROGRESS 列表条数」变成机器护栏。
+
+### 真机验收（`docs/verify.md` §8，共 11 项，均待样机）
+
+诊断命令与判定标准在 `docs/verify.md` §8；这里只列清单，项数与它逐条对齐（文档测试强制）。
 
 1. `--once` 读数与 MSI Center 对照（误差 <1%）。
 2. 抓包核对 62B 与 40B 变体的 `0xE0` 布局。
 3. Ai1300TS（PID `0xAA6F`）变体识别。
 4. `--fan-duty 0/50/100` 读回一致 + F1h 断电重启后仍生效。
+4b. `[fan] mode = customized` 的 daemon 恢复确实改写了电源侧设置（`journalctl` 有
+   `Restored the configured fan profile`）。
 5. 满载 >12A/针差 >5A 能触发告警。
-6. 拔插 5 次失败后自动重连。
-7. 72h 烤机 kWh 与实测电量对照。
+6. 拔插 5 次失败后 daemon 自动重连。
+7. 72h 烤机 kWh 与插座功率计积分对照。
 8. `--ocp` 阈值与 MSI Center/出厂规格一致，且连接器状态与 `12V-2x6 Status` 行不矛盾。
-9. `--ocp` 在 MEG 机型上打印「not available」并 exit 0（不发 NAK、不超时）。
+9. `--ocp` 在 MEG P 系上输出单多轨标志，与 MSI Center 开关一致（不发 NAK、不超时）。
+10. `--ocp` 在 MEG Ai1600T 上打印「not available」并 exit 0（不发 NAK、不超时）。
 
 ## 决策记录（本轮新增）
 
