@@ -49,6 +49,8 @@ cp "$ROOT/README.md" "$ROOT/LICENSE" "$ROOT/docs/protocol.md" \
    "$ROOT/docs/verify.md" "$ROOT/docs/requirements-traceability.md" \
    "$ROOT/docs/msi-psu-monitor.conf.example" \
    "$STAGE/usr/share/doc/$PKG/"
+# Debian policy 12.5: the machine-readable copyright goes next to LICENSE.
+cp "$ROOT/docs/copyright" "$STAGE/usr/share/doc/$PKG/copyright"
 
 for entry in monitor daemon; do
     name="msi-psu-monitor"
@@ -75,7 +77,7 @@ Architecture: $ARCH
 Depends: python3 (>= 3.10)
 Recommends: prometheus-node-exporter
 Maintainer: MSI PSU Monitor Contributors <contributors@example.com>
-Homepage: https://github.com/msi-psu-monitor/msi-psu-monitor
+Homepage: https://github.com/HesiPullupTimbo/msi-psu-monitor
 Description: Userspace monitor for MSI MPG PSUs over USB HID
  Reads voltages, currents, power, efficiency, temperature and fan telemetry
  from MSI MPG Ai1600TS / Ai1300TS (GPU Safeguard+ per-pin current monitoring)

@@ -25,9 +25,10 @@ requires-python = ">=3.10"
 keywords = ["msi", "psu", "monitoring", "hidraw", "gpu-safeguard", "power-supply"]
 
 [project.urls]
-Homepage = "https://github.com/msi-psu-monitor/msi-psu-monitor"
-Repository = "https://github.com/msi-psu-monitor/msi-psu-monitor"
-BugTracker = "https://github.com/msi-psu-monitor/msi-psu-monitor/issues"
+# This tree is a fork of https://github.com/HesiPullupTimbo/msi-psu-monitor (MIT); that repository is the
+# only public URL, so it is the honest place to point at until this fork has one.
+Homepage = "https://github.com/HesiPullupTimbo/msi-psu-monitor"
+Repository = "https://github.com/HesiPullupTimbo/msi-psu-monitor"
 
 [project.scripts]
 msi-psu-monitor = "msi_psu_monitor.monitor:main"

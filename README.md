@@ -51,8 +51,8 @@ PID, so a re-badged device with a known product name still parses correctly.
 bash scripts/build_deb.sh
 sudo apt install ./dist/msi-psu-monitor_*_all.deb
 
-# Or from source
-git clone https://github.com/msi-psu-monitor/msi-psu-monitor
+# Or from source (this fork; the upstream base is linked under Attribution)
+git clone <this repository>
 cd msi-psu-monitor
 pip install -e .
 
@@ -279,6 +279,20 @@ make -C /lib/modules/$(uname -r)/build M=$(pwd) modules
 See [`docs/protocol.md`](docs/protocol.md) for full protocol documentation, including
 the 62-byte `0xE0` bulk read layout and the register map.
 
+## Attribution
+
+This tree is a fork of [HesiPullupTimbo/msi-psu-monitor](https://github.com/HesiPullupTimbo/msi-psu-monitor) v1.0.0 (MIT): the
+device discovery, the HID transport and the original sensor parsing come from there.
+Everything added on top — the variant-aware 0xE0 parsing, the E1h alert engine, the
+black-box reader, the OCP views, the daemon, the dashboard, the packaging and the
+tests — is described in [`DEV_PROGRESS.md`](DEV_PROGRESS.md) and
+[`docs/requirements-traceability.md`](docs/requirements-traceability.md).
+
+The protocol details were cross-checked against the CWT REV6 USB command
+specification that ships with the PSU and against MSI Center's own reading
+behaviour; no vendor code was copied.
+
 ## License
 
-MIT
+MIT — see [`LICENSE`](LICENSE). The upstream MIT notice is retained verbatim in that
+file, which is what the license requires of a redistribution.

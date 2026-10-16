@@ -1,6 +1,6 @@
 [Unit]
 Description=MSI PSU Monitor daemon (GPU Safeguard+ per-pin current alerts)
-Documentation=https://github.com/msi-psu-monitor/msi-psu-monitor
+Documentation=https://github.com/HesiPullupTimbo/msi-psu-monitor
 Documentation=file:/usr/share/doc/msi-psu-monitor/README.md
 After=local-fs.target
 StartLimitIntervalSec=0
