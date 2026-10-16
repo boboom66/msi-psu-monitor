@@ -164,6 +164,21 @@
     也没有一行提示——需求里 `-O` 的定义是「存成文件，不打屏」。现按需求实现：追加到文件
     （行缓冲，`tail -f` 能实时看到）、stdout 保持干净、启动时在 stderr 说明一句，
     路径写不了就 exit 1。smoke 增两条检查（文件有内容 / stdout 为空）。
+- **复核子代理挑出的「`-O`/`-i` 被接受然后无视」整类（本轮）**：只读审计发现同一类缺陷还留着
+  四个口子，逐条复跑确认后全部堵上：
+  - `-O ""`（`$OUT` 没设）此前等价于「没给 `-O`」→ 输出照旧打屏、文件不建。与 `--columns ''`/
+    `--from ''` 同一类，现 usage error（exit 2）。`--once`/`--watch`/`--export` 都覆盖。
+  - `--show-log`、`--fan-mode/--fan-duty` 此前**完全无视 `-O`**（直接 `print`）：现走 `emit()`，
+    与其它模式一致（文件替代屏幕）。`--dashboard` 没有输出文件，改为明确拒绝而不是收下不用。
+  - `-i` 单独用此前被静默忽略（手册写的是「与 `-w` 搭，单用无效」）→ usage error。
+  - `[monitor] interval` 此前是**死配置**：`conf.example` 写着「--watch 的默认轮询间隔」，
+    但没有任何代码读它（裸 `--watch` 永远用 argparse 的 const 2.0）。现裸 `--watch` 取该值，
+    `--watch <n>` 与 `-i <n>` 依次优先。实现上 `--watch` 的 const 用字符串哨兵 + 自定义
+    `type` 转换器（argparse 会把 `type` 也套在 const 上，`type=float` 会直接炸）。
+  - 顺带两处「静默」：`[monitor] format = json` 配 `--watch` 会被丢掉（命令行同样组合是
+    usage error）→ 现在告警并回落 text；`-q` 之前压不住新加的 `-O` 横幅（横幅不是错误）→
+    现在压得住；首帧就报错时 `-O` 文件会留个 0 字节空壳 → 现在把原因行写进去（对齐 `--once`）。
+
 - **daemon 的 prometheus 现在也带 OCP 块（本轮）**：`--ocp` 只读展示此前只有 CLI 有，daemon
   的 textfile 里没有任何 OCP 指标——Grafana 上看不到单针阈值，也没法按它告警。现在 daemon
   在每次写 prom 时（默认 30 s）读一次 C0h/C1h 并附上 `msi_psu_ocp_*`。两个「不许骗人」的
@@ -184,7 +199,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 365 passed
+uv run --group dev pytest -q                     → 379 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 32 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues

@@ -88,11 +88,12 @@ msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
                 [--version]
 
   -f, --format     Output format: text (default), json, prometheus
-  -w, --watch      Watch mode; optional refresh seconds (default 2.0)
-  -i, --interval   Polling interval in seconds (legacy; pairs with --watch)
+  -w, --watch      Watch mode; optional refresh seconds (default: [monitor]
+                   interval, 2.0)
+  -i, --interval   Polling interval in seconds (only valid with --watch)
   -o, --once       Read sensors once and exit (also the default)
   -O, --output     Write output to a file instead of stdout (with --watch the
-                   frames are appended to that file)
+                   frames are appended to that file; --dashboard has no output)
       --serial     Select one of several PSUs by serial number
       --fan-mode   Write the fan control mode (41h) and save it (F1h)
       --fan-duty   Custom fan duty in percent; implies --fan-mode customized,

@@ -79,7 +79,7 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。当前基线：**365 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
+三条全绿即通过。当前基线：**379 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
 
 > `ruff format --check` **不要全仓跑**：`protocol.py`/`__init__.py`/`__main__.py`/`tests/test_monitor.py`
 > 等历史文件混用引号风格，全仓 format 会产生大量无意义 diff。只对本次改动的文件跑。
@@ -292,7 +292,11 @@ daemon 在无设备时应正常空转退出 0（这是 systemd 常驻服务等�
 .venv/bin/msi-psu-monitor --dashboard --export --from 2h; echo "exit=$?" # 2：dashboard 不混动作
 .venv/bin/msi-psu-monitor --fan-mode auto --fan-duty 50; echo "exit=$?"  # 2：auto 下 duty 无意义
 .venv/bin/msi-psu-monitor --export --from 2h --columns ''; echo "exit=$?" # 1：空列清单
-timeout 3 .venv/bin/msi-psu-monitor --watch 1 -O /tmp/frames.log; echo "exit=$?"  # 帧进文件
+MSI_PSU_DEMO=1 timeout 3 .venv/bin/msi-psu-monitor --watch 1 -O /tmp/frames.log
+# ↑ 帧写进 /tmp/frames.log 而不是打屏；exit=124 来自 timeout（等价于 Ctrl-C），不是 0/1/2
+.venv/bin/msi-psu-monitor --once -O "";                   echo "exit=$?"   # 2：-O 拿到空路径（$OUT 没设）
+.venv/bin/msi-psu-monitor -i 5;                          echo "exit=$?"   # 2：-i 只能配 --watch
+.venv/bin/msi-psu-monitor --dashboard -O /tmp/page.html; echo "exit=$?"   # 2：dashboard 没有输出文件
 .venv/bin/msi-psu-monitor --ocp --show-log;             echo "exit=$?"   # 2：两个查询互斥
 ```
 

@@ -126,6 +126,11 @@ def isolated_state(tmp_path, monkeypatch):
         ['--dashboard', '--port', '-1'],
         ['--port', '0'],  # valid, but only with --dashboard
         ['--fan-mode', 'auto', '--fan-duty', '50'],
+        ['--dashboard', '-O', '/tmp/page.html'],
+        ['-i', '5'],  # a bare --interval used to be accepted and then ignored
+        ['--once', '-O', ''],  # an unset $OUT is not "no -O"
+        ['--watch', '1', '-O', ''],
+        ['--export', '--from', '2h', '-O', ''],
     ],
 )
 def test_conflicting_flags_are_rejected(argv):
@@ -397,6 +402,147 @@ def test_serial_scan_reports_devices_it_cannot_open(monkeypatch, capsys):
     assert 'Permission denied' in err
     assert 'could not open any MSI PSU device' in err
     assert 'Available: none' not in err
+
+
+def test_show_log_writes_to_the_output_file(monkeypatch, capsys, tmp_path):
+    """-O means "file instead of screen"; --show-log printed instead."""
+    target = tmp_path / 'blackbox.txt'
+    stub = StubPSU(sensors())
+    stub.read_blackbox = lambda max_records=10: [
+        {
+            'info_id': 3,
+            'pin_set': 1,
+            'status': 1,
+            'run_time': 100,
+            'total_time': 200000,
+            'pins_1_6': [13.5] * 6,
+            'total_count': 2,
+        }
+    ]
+    code, captured = run_main(monkeypatch, capsys, stub, ['--show-log', '-O', str(target)])
+    assert code == EXIT_OK
+    assert captured.out == ''
+    assert 'GPU Safeguard+' in target.read_text()
+
+
+def test_a_fan_write_writes_to_the_output_file(monkeypatch, capsys, tmp_path):
+    target = tmp_path / 'fan.txt'
+    stub = StubPSU(sensors())
+    code, captured = run_main(
+        monkeypatch,
+        capsys,
+        stub,
+        ['--fan-mode', 'customized', '--fan-duty', '40', '-O', str(target)],
+    )
+    assert code == EXIT_OK
+    assert captured.out == ''
+    assert target.read_text().strip() == 'Fan mode: customized   Duty: 40%'
+
+
+def test_the_watch_banner_is_silent_under_quiet(monkeypatch, capsys, tmp_path):
+    """-q promises "errors only on stderr"; the banner is not an error."""
+    stub = StubPSU(sensors())
+    read = stub.get_sensors
+    frames = []
+
+    def counting():
+        frames.append(1)
+        if len(frames) > 1:
+            raise KeyboardInterrupt
+        return read()
+
+    stub.get_sensors = counting
+    target = tmp_path / 'frames.log'
+    code, captured = run_main(
+        monkeypatch,
+        capsys,
+        stub,
+        ['--watch', '1', '-i', '0.01', '-O', str(target), '-q'],
+    )
+    assert code == EXIT_OK
+    assert 'Appending frames to' not in captured.err
+    assert 'MSI PSU:' in target.read_text()
+
+
+@pytest.mark.parametrize(
+    ('argv', 'expected'),
+    [
+        (['--watch'], 2.0),  # bare --watch: the documented default
+        (['--watch', '5'], 5.0),
+        (['--watch', '-i', '0.25'], 0.25),  # -i wins over the default
+    ],
+)
+def test_the_watch_interval_resolution(monkeypatch, capsys, argv, expected):
+    slept = []
+    monkeypatch.setattr(time, 'sleep', slept.append)
+    stub = StubPSU(sensors())
+    read = stub.get_sensors
+    frames = []
+
+    def counting():
+        frames.append(1)
+        if len(frames) > 1:
+            raise KeyboardInterrupt
+        return read()
+
+    stub.get_sensors = counting
+    code, _ = run_main(monkeypatch, capsys, stub, argv)
+    assert code == EXIT_OK
+    assert slept == [expected]
+
+
+def test_bare_watch_takes_the_interval_from_the_config(monkeypatch, capsys, tmp_path):
+    """[monitor] interval used to be dead: the example config advertised it."""
+    cfg = tmp_path / 'psu.conf'
+    cfg.write_text('[monitor]\ninterval = 7\n')
+    slept = []
+    monkeypatch.setattr(time, 'sleep', slept.append)
+    stub = StubPSU(sensors())
+    read = stub.get_sensors
+    frames = []
+
+    def counting():
+        frames.append(1)
+        if len(frames) > 1:
+            raise KeyboardInterrupt
+        return read()
+
+    stub.get_sensors = counting
+    code, _ = run_main(monkeypatch, capsys, stub, ['--config', str(cfg), '--watch'])
+    assert code == EXIT_OK
+    assert slept == [7.0]
+
+
+def test_a_config_format_is_not_silently_ignored_in_watch_mode(monkeypatch, capsys, tmp_path):
+    """`-f json --watch` is a usage error; from the config it must not be silent."""
+    cfg = tmp_path / 'psu.conf'
+    cfg.write_text('[monitor]\nformat = json\n')
+    stub = StubPSU(sensors())
+    read = stub.get_sensors
+    frames = []
+
+    def counting():
+        frames.append(1)
+        if len(frames) > 1:
+            raise KeyboardInterrupt
+        return read()
+
+    stub.get_sensors = counting
+    code, captured = run_main(
+        monkeypatch, capsys, stub, ['--config', str(cfg), '--watch', '1', '-i', '0.01']
+    )
+    assert code == EXIT_OK
+    assert 'ignoring [monitor] format' in captured.err
+    assert 'MSI PSU:' in captured.out
+
+
+def test_a_failed_first_frame_leaves_a_self_explanatory_output_file(monkeypatch, capsys, tmp_path):
+    """An empty -O artifact explains nothing; --once puts the reason in the file."""
+    target = tmp_path / 'frames.log'
+    stub = StubPSU({'product': 'MEG Ai1600T', 'error': 'unknown model'})
+    code, _ = run_main(monkeypatch, capsys, stub, ['--watch', '1', '-O', str(target)])
+    assert code == EXIT_ERROR
+    assert 'ERROR' in target.read_text()
 
 
 def test_watch_appends_frames_to_the_output_file(monkeypatch, capsys, tmp_path):

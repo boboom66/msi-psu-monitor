@@ -38,6 +38,8 @@ EXIT_ALERT = 2
 
 FAN_MODE_AUTO = 'auto'
 FAN_MODE_CUSTOMIZED = 'customized'
+#: `--watch` without a number: take [monitor] interval from the config file.
+WATCH_FROM_CONFIG = 'config'
 _FAN_MODE_TO_BYTE = {FAN_MODE_AUTO: 1, FAN_MODE_CUSTOMIZED: 3}
 _FAN_BYTE_TO_MODE = {1: FAN_MODE_AUTO, 3: FAN_MODE_CUSTOMIZED}
 
@@ -779,7 +781,9 @@ def run_watch(psu, args, cfg, monitor_state, engine):
     instead ("file instead of screen", like every other mode): printing to stdout
     and never touching the file was the silent half of that promise.
     """
-    interval = args.interval if args.interval is not None else args.watch
+    interval = args.interval
+    if interval is None:
+        interval = cfg['interval'] if args.watch == WATCH_FROM_CONFIG else args.watch
     stream = None
     if args.output:
         try:
@@ -787,13 +791,22 @@ def run_watch(psu, args, cfg, monitor_state, engine):
         except OSError as exc:
             logger.error(f'Error: cannot write {args.output}: {exc}')
             return EXIT_ERROR
-        print(f'Appending frames to {args.output} (Ctrl-C to stop)', file=sys.stderr, flush=True)
+        if not args.quiet:
+            print(
+                f'Appending frames to {args.output} (Ctrl-C to stop)',
+                file=sys.stderr,
+                flush=True,
+            )
     last_save = 0.0
     try:
         while True:
             sensors = psu.get_sensors()
             if 'error' in sensors:
                 logger.error(f'Error: {sensors["error"]}')
+                if stream is not None:
+                    # Keep the file self-explanatory, the way --once -O does: an
+                    # empty artifact says nothing about why the run stopped.
+                    stream.write(format_text(sensors) + '\n')
                 return EXIT_ERROR
             if not has_readings(sensors):
                 # A stream survives one missed frame; the next one may land.
@@ -865,15 +878,15 @@ def apply_fan_setting(psu, mode, duty=None):
     return None
 
 
-def run_fan_write(psu, mode, duty):
-    """Apply the fan setting and describe the result on stdout."""
+def run_fan_write(psu, mode, duty, output=None):
+    """Apply the fan setting and describe the result (stdout or ``-O`` file)."""
     applied = apply_fan_setting(psu, mode, duty)
     if applied is None:
         logger.error('Error: the PSU did not accept the fan setting (read-back mismatch).')
         return EXIT_ERROR
     mode, duty = applied
     duty_text = '' if mode == FAN_MODE_AUTO else f'   Duty: {duty}%'
-    print(f'Fan mode: {mode}{duty_text}')
+    emit(f'Fan mode: {mode}{duty_text}', output)
     return EXIT_OK
 
 
@@ -1000,6 +1013,21 @@ def run_dashboard(args, cfg):
 # ---- argument parsing ---------------------------------------------------
 
 
+def _watch_interval(value):
+    """``--watch`` value converter that lets the config sentinel through.
+
+    argparse applies ``type`` to ``const`` as well, so ``float`` would blow up on
+    a bare ``--watch`` (the sentinel) instead of leaving it for main() to resolve
+    against ``[monitor] interval``.
+    """
+    if value == WATCH_FROM_CONFIG:
+        return WATCH_FROM_CONFIG
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(f'invalid watch interval: {value!r}') from None
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         prog='msi-psu-monitor',
@@ -1018,17 +1046,20 @@ def build_parser():
         '-w',
         '--watch',
         nargs='?',
-        const=2.0,
+        # No number means "use [monitor] interval" (the config example has always
+        # documented that); a string sentinel keeps `--watch 2` distinguishable
+        # from bare `--watch`, which a numeric const cannot do.
+        const=WATCH_FROM_CONFIG,
         default=None,
-        type=float,
-        help='Watch mode; optional refresh seconds (default 2.0)',
+        type=_watch_interval,
+        help='Watch mode; optional refresh seconds (default: [monitor] interval, 2.0)',
     )
     parser.add_argument(
         '-i',
         '--interval',
         type=float,
         default=None,
-        help='Polling interval in seconds (legacy; pairs with --watch)',
+        help='Polling interval in seconds (only valid together with --watch)',
     )
     parser.add_argument('-o', '--once', action='store_true', help='Read sensors once and exit')
     parser.add_argument(
@@ -1137,14 +1168,26 @@ def _validate_args(parser, args):
         )
     if args.export and args.watch is not None:
         parser.error('--export cannot be combined with --watch')
+    if args.output is not None and not args.output:
+        # `--columns "$COLS"` with COLS unset was the same silent no-op: the flag
+        # was accepted and the output went to stdout instead of the named file.
+        parser.error('--output requires a path')
     if (args.from_spec is not None or args.columns is not None) and not args.export:
         parser.error('--from and --columns are only valid together with --export')
     # A non-positive or non-finite interval would busy-loop or raise inside
     # time.sleep() instead of failing here with a usage message.
-    if args.watch is not None and not (math.isfinite(args.watch) and args.watch > 0):
+    if (
+        args.watch is not None
+        and args.watch != WATCH_FROM_CONFIG
+        and not (math.isfinite(args.watch) and args.watch > 0)
+    ):
         parser.error('--watch must be a positive number of seconds')
     if args.interval is not None and not (math.isfinite(args.interval) and args.interval > 0):
         parser.error('--interval must be a positive number of seconds')
+    if args.interval is not None and args.watch is None:
+        # The manual says `-i` is only valid together with `-w`; accepting it made
+        # `-i 5` look like it changed the cadence of a single read.
+        parser.error('--interval only applies together with --watch')
     if args.dashboard and (
         args.export
         or args.show_log
@@ -1158,6 +1201,8 @@ def _validate_args(parser, args):
         )
     if args.dashboard and args.format not in (None, 'text'):
         parser.error('--dashboard serves the HTML page; --format does not apply')
+    if args.dashboard and args.output is not None:
+        parser.error('--dashboard serves the HTML page; --output does not apply')
     if args.watch is not None and args.once:
         parser.error('--watch and --once are mutually exclusive')
     if args.watch is not None and args.format not in (None, 'text'):
@@ -1200,10 +1245,22 @@ def main():
     verbose = args.verbose or (cfg['verbose'] and not args.quiet)
     quiet = args.quiet or (cfg['quiet'] and not args.verbose)
     setup_logging(verbose=verbose, quiet=quiet)
+    # Publish the *effective* levels: downstream code (the --watch banner) has to
+    # honour a quiet setting that came from the config file too.
+    args.verbose = verbose
+    args.quiet = quiet
 
     # Resolved after logging is configured, so the warning is actually shown.
     if args.format is None:
         args.format = resolve_format(cfg['format'])
+    if args.watch is not None and args.format != 'text':
+        # The same combination on the command line is a usage error
+        # (_validate_args), but a config file arrives after that check; printing
+        # text frames without a word was the silent half of it.
+        logger.warning(
+            f'--watch prints the text format only; ignoring [monitor] format = {cfg["format"]!r}'
+        )
+        args.format = 'text'
 
     if args.dashboard:
         sys.exit(run_dashboard(args, cfg))
@@ -1246,9 +1303,9 @@ def main():
         psu.init()
 
         if args.fan_mode or args.fan_duty is not None:
-            sys.exit(run_fan_write(psu, args.fan_mode, args.fan_duty))
+            sys.exit(run_fan_write(psu, args.fan_mode, args.fan_duty, args.output))
         if args.show_log:
-            print(format_blackbox(psu.read_blackbox()))
+            emit(format_blackbox(psu.read_blackbox()), args.output)
             sys.exit(EXIT_OK)
         if args.ocp:
             sys.exit(run_ocp(psu, args))
