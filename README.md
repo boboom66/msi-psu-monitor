@@ -94,7 +94,8 @@ msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
   -O, --output     Write output to a file instead of stdout
       --serial     Select one of several PSUs by serial number
       --fan-mode   Write the fan control mode (41h) and save it (F1h)
-      --fan-duty   Custom fan duty in percent; implies --fan-mode customized
+      --fan-duty   Custom fan duty in percent; implies --fan-mode customized,
+                   and is refused together with --fan-mode auto
       --export     Export the daemon history as CSV
       --from       Export window: 30m, 2h, 7d, ... (required with --export)
       --columns    Export columns (default: all)

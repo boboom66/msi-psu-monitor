@@ -1,7 +1,11 @@
 """Tests for the local dashboard HTTP endpoints (no hardware, no network egress)."""
 
 import json
+import pathlib
 import re
+import select
+import subprocess
+import sys
 import threading
 import time
 from urllib.error import HTTPError
@@ -179,6 +183,37 @@ def test_head_of_export_keeps_the_download_headers(live_server):
     assert status == 200
     assert headers['Content-Type'] == 'text/csv; charset=utf-8'
     assert headers['Content-Disposition'] == 'attachment; filename="msi-psu.csv"'
+
+
+def test_serve_prints_the_url_before_it_blocks(tmp_path):
+    """Under systemd/journald stdout is a pipe: the URL must not sit in a buffer.
+
+    The documented way to find the port is that banner, and this process only
+    exits on Ctrl-C -- unflushed, the line is invisible for the whole run.
+    """
+    root = pathlib.Path(__file__).resolve().parents[1]
+    code = (
+        'import sys; from msi_psu_monitor import dashboard; '
+        f'sys.exit(dashboard.serve("127.0.0.1", 0, {str(tmp_path)!r}))'
+    )
+    proc = subprocess.Popen(
+        [sys.executable, '-c', code], cwd=root, stdout=subprocess.PIPE, text=True
+    )
+    try:
+        ready, _, _ = select.select([proc.stdout], [], [], 10)
+        assert ready, 'the dashboard URL stayed in the stdout buffer'
+        line = proc.stdout.readline()
+        assert line.startswith('msi-psu-monitor dashboard: http://127.0.0.1:')
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)
+
+
+def test_serve_reports_an_out_of_range_port(tmp_path, caplog):
+    """bind() raises OverflowError (not OSError) for a port outside 0-65535."""
+    code = dashboard.serve('127.0.0.1', 99999, tmp_path)
+    assert code == 1
+    assert any('cannot serve' in record.message for record in caplog.records)
 
 
 def test_serve_reports_a_port_that_is_already_taken(tmp_path, caplog):

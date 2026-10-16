@@ -122,6 +122,10 @@ def isolated_state(tmp_path, monkeypatch):
         ['--dashboard', '--show-log'],
         ['--dashboard', '--fan-mode', 'auto'],
         ['--dashboard', '-f', 'json'],
+        ['--dashboard', '--port', '99999'],
+        ['--dashboard', '--port', '-1'],
+        ['--port', '0'],  # valid, but only with --dashboard
+        ['--fan-mode', 'auto', '--fan-duty', '50'],
     ],
 )
 def test_conflicting_flags_are_rejected(argv):
@@ -393,6 +397,21 @@ def test_serial_scan_reports_devices_it_cannot_open(monkeypatch, capsys):
     assert 'Permission denied' in err
     assert 'could not open any MSI PSU device' in err
     assert 'Available: none' not in err
+
+
+def test_an_empty_columns_spec_is_not_silently_every_column(monkeypatch, capsys):
+    """`--columns "$COLS"` with COLS unset used to export all 11 columns."""
+    code, captured = run_main(
+        monkeypatch, capsys, StubPSU(), ['--export', '--from', '2h', '--columns', '']
+    )
+    assert code == EXIT_ERROR
+    assert 'at least one column' in captured.err
+
+
+def test_an_empty_from_spec_names_the_value(monkeypatch, capsys):
+    code, captured = run_main(monkeypatch, capsys, StubPSU(), ['--export', '--from', ''])
+    assert code == EXIT_ERROR
+    assert '--from requires a window' in captured.err
 
 
 def test_export_reports_an_unwritable_output(monkeypatch, capsys, tmp_path):

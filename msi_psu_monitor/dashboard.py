@@ -388,11 +388,17 @@ def serve(host=DEFAULT_HOST, port=DEFAULT_PORT, state_dir=None):
     """Serve the dashboard until interrupted; return the process exit code."""
     try:
         httpd = make_server(host, port, state_dir)
-    except OSError as exc:
-        # A second --dashboard, or a privileged port: report it, do not traceback.
+    except (OSError, OverflowError) as exc:
+        # A second --dashboard, a privileged port, or a port outside 0-65535
+        # (OverflowError, which is not an OSError): report it, do not traceback.
         logger.error(f'Error: cannot serve on {host}:{port}: {exc}')
         return 1
-    print(f'msi-psu-monitor dashboard: http://{host}:{httpd.server_port}/  (Ctrl-C to stop)')
+    # flush: under systemd (or `--dashboard > log`) stdout is a pipe, and this
+    # process never exits cleanly -- the URL would stay in the buffer forever.
+    print(
+        f'msi-psu-monitor dashboard: http://{host}:{httpd.server_port}/  (Ctrl-C to stop)',
+        flush=True,
+    )
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

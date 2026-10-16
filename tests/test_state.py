@@ -207,6 +207,8 @@ def test_parse_columns_order_dedup_and_all():
     assert stats.parse_columns('eff,12v,eff') == ['12v', 'eff']
     with pytest.raises(ValueError):
         stats.parse_columns('wattage')
+    with pytest.raises(ValueError):
+        stats.parse_columns('')  # an empty spec quietly meant "all columns"
 
 
 def test_build_export_marks_cpu_gpu_as_na(tmp_path):

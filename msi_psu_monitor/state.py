@@ -467,8 +467,11 @@ def parse_from(spec):
 
 
 def parse_columns(spec):
-    """Parse ``--columns`` into canonical order; ``all``/None selects everything."""
-    if spec is None or not spec.strip():
+    """Parse ``--columns`` into canonical order; ``None``/``all`` selects everything.
+
+    An empty-but-given spec raises instead of silently exporting every column.
+    """
+    if spec is None:
         return list(EXPORT_COLUMNS)
     selected = []
     for token in spec.split(','):

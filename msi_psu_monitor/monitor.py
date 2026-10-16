@@ -901,7 +901,9 @@ def _run_ocp_12v2x6(psu, product, args):
 
 def run_export(args, cfg):
     """Export a slice of the daemon history; returns the process exit code."""
-    if not args.from_spec:
+    if args.from_spec is None:
+        # An explicitly empty --from is reported by parse_from() below, so the
+        # message names the offending value instead of claiming it is missing.
         logger.error('Error: --export requires --from (e.g. --from 2h).')
         return EXIT_ERROR
     try:
@@ -1092,7 +1094,7 @@ def _validate_args(parser, args):
         )
     if args.export and args.watch is not None:
         parser.error('--export cannot be combined with --watch')
-    if (args.from_spec or args.columns) and not args.export:
+    if (args.from_spec is not None or args.columns is not None) and not args.export:
         parser.error('--from and --columns are only valid together with --export')
     # A non-positive or non-finite interval would busy-loop or raise inside
     # time.sleep() instead of failing here with a usage message.
@@ -1123,6 +1125,12 @@ def _validate_args(parser, args):
         parser.error(
             '--fan-mode/--fan-duty cannot be combined with --watch, --export or --show-log'
         )
+    if args.fan_mode == FAN_MODE_AUTO and args.fan_duty is not None:
+        parser.error('--fan-duty does not apply to --fan-mode auto (the PSU uses its own curve)')
+    if args.port is not None and not 0 <= args.port <= 65535:
+        # bind() raises OverflowError, which is not an OSError: it used to escape
+        # serve() as a traceback instead of a usage message.
+        parser.error('--port must be between 0 and 65535')
     if args.port is not None and not args.dashboard:
         parser.error('--port is only valid together with --dashboard')
 

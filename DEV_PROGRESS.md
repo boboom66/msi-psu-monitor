@@ -148,6 +148,18 @@
   （`--watch 0` 会变成忙循环），`--dashboard` 与 `--export`/`--watch`/`--show-log`/风扇写
   混用也静默「按第一种动作执行」。现前者 usage error（exit 2），后者明确拒绝；
   `--dashboard -f json` 同样拒绝（页面只出 HTML，配置里的 `format` 仍不冲突）。
+- **又一批「参数/输出不对劲却不出声」（本轮第二轮）**：
+  - `--port 99999`／`--port -1` 走 CLI 时没有范围校验（配置层钳了，CLI 没钳），
+    `bind()` 抛的是 **`OverflowError`（不是 `OSError`）**，`serve()` 只 catch `OSError`
+    → 一行 traceback 收场。现 CLI usage error，`serve()` 也同时 catch `OverflowError`。
+  - `--dashboard --port 0` 会绑到随机空闲端口，而横幅打印的是**真实**端口
+    （`httpd.server_port`）；但 `print` 默认块缓冲，`--dashboard > log` 或 systemd
+    （stdout 是管道）下这行 URL **永远不会出现**——它正是文档里找端口的唯一途径。
+    现 `flush=True`（并有测试用 `select` 断言横幅在进程阻塞前就可见）。
+  - `--columns ''`（`--columns "$COLS"` 而 `COLS` 未设）此前被当成「未指定」→ 静默导出
+    全部 11 列；现报错。`--from ''` 的报错也不再谎称「没给 --from」。
+  - `--fan-mode auto --fan-duty 50` 里 duty 被静默丢弃（auto 下 REV6 只发 Duty=0，
+    MSI 同样忽略）；现直接拒绝，免得用户以为 50% 生效了。
 - **daemon 打不开设备时的重试节奏（本轮）**：`_ensure_psu()` 的 except 分支设了
   `_next_discovery` 却**没有清掉 `device_path`**，下一 tick 直接跳过发现节流、每秒重开
   一次设备刷一行告警（`DISCOVERY_RETRY_S = 5` 形同虚设）。现清空路径，节流真正生效。
@@ -158,7 +170,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 348 passed
+uv run --group dev pytest -q                     → 356 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 32 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
