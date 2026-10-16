@@ -6,6 +6,7 @@ Files: /etc/msi-psu-monitor.conf, then ~/.config/msi-psu-monitor/config.ini.
 
 import configparser
 import logging
+import math
 import os
 
 logger = logging.getLogger('msi_psu.config')
@@ -53,7 +54,10 @@ def load_config(path=None):
     """
     cfg = dict(DEFAULTS)
     files = [path] if path else [f for f in CONFIG_FILES if os.path.exists(f)]
-    parser = configparser.ConfigParser()
+    # No interpolation: these are plain values, and the default BasicInterpolation
+    # turns a stray '%' (a path, a duty comment) into InterpolationSyntaxError at
+    # .get() time -- outside the except below, so it escaped as a traceback.
+    parser = configparser.ConfigParser(interpolation=None)
     try:
         read = parser.read(files)
     except configparser.Error as exc:
@@ -115,9 +119,13 @@ def load_config(path=None):
 
 def _as_float(raw, fallback):
     try:
-        return float(raw) if raw is not None else fallback
+        value = float(raw) if raw is not None else fallback
     except (TypeError, ValueError):
         return fallback
+    # nan/inf pass the "<= 0" range checks below and then break the daemon
+    # (time.sleep(nan) raises, and now >= now + nan is never true, so the
+    # prometheus file and the history are never written again).
+    return value if math.isfinite(value) else fallback
 
 
 def _as_int(raw, fallback):

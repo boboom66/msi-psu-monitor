@@ -6,6 +6,7 @@ import time
 from msi_psu_monitor import state as stats
 from msi_psu_monitor.config import DEFAULTS
 from msi_psu_monitor.daemon import RESCAN_AFTER_FAILURES, MonitorDaemon
+from msi_psu_monitor.protocol import DeviceBusyError
 
 
 class Clock:
@@ -341,3 +342,19 @@ def test_a_psu_that_answers_its_ident_only_is_a_read_failure(tmp_path, caplog):
     assert daemon.failures == 1
     assert any('0xE0 read failed' in record.message for record in caplog.records)
     assert daemon.samples == 0
+
+
+def test_an_unopenable_device_is_retried_on_the_discovery_throttle(tmp_path, caplog):
+    """Keeping device_path made every tick reopen (and re-warn) once a second."""
+
+    class Locked:
+        def open(self):
+            raise DeviceBusyError('PSU is already in use by another process')
+
+    daemon = make_daemon(tmp_path, Locked())
+    with caplog.at_level(logging.WARNING, logger='msi_psu.daemon'):
+        for _ in range(6):
+            assert daemon.tick() is True
+    assert len(daemon.created) == 1  # the other ticks waited for the throttle
+    warnings = [r.message for r in caplog.records if 'Cannot open' in r.message]
+    assert len(warnings) == 1

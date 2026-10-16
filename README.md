@@ -194,7 +194,9 @@ black box, so scripts can call it unconditionally).
 
 The `prometheus` format targets the
 [node_exporter textfile collector](https://github.com/prometheus/node_exporter#textfile-collector)
-and exports `msi_psu_info{product,vendor,fw,serial}`, rail voltages/currents,
+and exports `msi_psu_up` (`1` only when the sample carried sensor readings, so an
+ident-only or rejected read cannot look healthy), `msi_psu_error_info{reason}` while
+it is `0`, `msi_psu_info{product,vendor,fw,serial}`, rail voltages/currents,
 `msi_psu_rail_voltage{rail}`/`msi_psu_rail_current{rail}` plus
 `msi_psu_cpu_watts`/`msi_psu_gpu_watts` on the multi-rail MEG models,
 `msi_psu_pin_current{connector,pin}`, `msi_psu_power_total`, `msi_psu_power_avg`,

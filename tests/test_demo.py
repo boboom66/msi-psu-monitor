@@ -1,5 +1,6 @@
 """Tests for the MSI_PSU_DEMO synthetic device (no hardware, fully deterministic)."""
 
+import logging
 import time
 
 import pytest
@@ -155,14 +156,15 @@ def test_open_psu_uses_the_demo_device_only_when_enabled(monkeypatch):
 
 def test_resolve_device_honours_the_demo_serial(monkeypatch):
     monkeypatch.setenv('MSI_PSU_DEMO', '1')
-    path, available = monitor.resolve_device(None)
+    path, available, blocked = monitor.resolve_device(None)
     assert path == demo.DEVICE_PATH
     assert available == [demo.DEMO_SERIAL]
+    assert blocked == []
 
-    path, available = monitor.resolve_device(demo.DEMO_SERIAL)
+    path, _, _ = monitor.resolve_device(demo.DEMO_SERIAL)
     assert path == demo.DEVICE_PATH
 
-    path, available = monitor.resolve_device('SOMETHING-ELSE')
+    path, available, _ = monitor.resolve_device('SOMETHING-ELSE')
     assert path is None
     assert available == [demo.DEMO_SERIAL]
 
@@ -212,9 +214,17 @@ def test_every_supported_variant_can_be_emulated(monkeypatch, variant):
     assert psu.product == f'{MSIPSU.VARIANTS[variant]["name"]} (demo)'
 
 
-def test_unknown_model_falls_back_instead_of_failing(monkeypatch):
+def test_unknown_model_falls_back_instead_of_failing(monkeypatch, caplog):
+    """Falling back silently meant a typo could pass for the model under test."""
     monkeypatch.setenv(demo.MODEL_ENV, 'Ai9999X')
-    assert demo.model() == demo.DEFAULT_MODEL
+    with caplog.at_level(logging.WARNING, logger='msi_psu.demo'):
+        assert demo.model() == demo.DEFAULT_MODEL
+    assert any('Ignoring unknown' in record.message for record in caplog.records)
+
+
+def test_the_demo_knows_every_protocol_variant():
+    """A variant with no wattage would silently fall back to the TS default."""
+    assert set(demo.MODEL_WATTS) == set(MSIPSU.VARIANTS)
 
 
 def test_model_env_is_case_insensitive(monkeypatch):

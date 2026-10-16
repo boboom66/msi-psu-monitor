@@ -20,6 +20,7 @@ import argparse
 import csv
 import json
 import logging
+import math
 import os
 import sys
 import time
@@ -184,6 +185,17 @@ def _label(value):
 def format_prometheus(sensors):
     """Format sensor data for the node_exporter textfile collector."""
     lines = []
+    # "up" answers the first question a scraper asks: did this sample carry any
+    # reading at all? An ident-only reply used to export a file that looked
+    # healthy -- msi_psu_info 1 and no sensor metrics -- while stdout said failure.
+    readable = has_readings(sensors)
+    lines.append('# HELP msi_psu_up 1 when the last sample carried sensor readings')
+    lines.append('# TYPE msi_psu_up gauge')
+    lines.append(f'msi_psu_up {1 if readable else 0}')
+    if not readable:
+        lines.append('# HELP msi_psu_error_info Why the last sample carried no readings')
+        lines.append('# TYPE msi_psu_error_info gauge')
+        lines.append(f'msi_psu_error_info{{reason="{_label(_missing_payload(sensors))}"}} 1')
     lines.append('# HELP msi_psu_info MSI PSU information')
     lines.append('# TYPE msi_psu_info gauge')
     lines.append(
@@ -304,7 +316,6 @@ FORMATTERS = {'text': format_text, 'json': format_json, 'prometheus': format_pro
 
 # Display labels, in report order (the 7ZPU layout omits the 5V/3.3V rails).
 _VOLTAGE_LABELS = {'vout_12v': '+12V', 'vout_5v': '+5V', 'vout_3v3': '+3.3V'}
-_CURRENT_LABELS = {'iout_12v_total': '12V TOTAL', 'iout_5v': '5V', 'iout_3v3': '3.3V'}
 _CURRENT_LABELS = {'iout_12v_total': '12V TOTAL', 'iout_5v': '5V', 'iout_3v3': '3.3V'}
 _BLACKBOX_STATUS = {
     0: 'normal',
@@ -608,10 +619,11 @@ def has_readings(sensors):
 
 def _missing_payload(sensors):
     """Explain a payload-less sample, keeping the specific reason when there is one."""
-    short = sensors.get('payload_error')
-    if short:
-        return short
-    return 'no sensor payload in this sample (0xE0 read failed)'
+    return (
+        sensors.get('payload_error')
+        or sensors.get('error')
+        or 'no sensor payload in this sample (0xE0 read failed)'
+    )
 
 
 def _valid_sample(sensors):
@@ -647,32 +659,40 @@ def open_psu(path):
 
 
 def resolve_device(serial):
-    """Pick the hidraw path to use; returns ``(path, available_serials)``."""
+    """Pick the hidraw path to use; returns ``(path, available_serials, blocked)``.
+
+    ``blocked`` lists the devices that could not be opened at all (permission, or
+    held by the daemon). Reporting those as "no PSU with that serial" sends the
+    user looking for a device that is sitting right there.
+    """
     if demo.enabled():
         available = [demo.DEMO_SERIAL]
         if serial in (None, demo.DEMO_SERIAL):
-            return demo.DEVICE_PATH, available
-        return None, available
+            return demo.DEVICE_PATH, available, []
+        return None, available, []
     if serial is None:
-        return detect_device(), []
+        return detect_device(), [], []
     from msi_psu_monitor.protocol import detect_devices
 
     available = []
+    blocked = []
     for path in detect_devices():
         psu = None
         try:
             psu = MSIPSU(HIDDevice(path))
             psu.open()
             psu.init()
-        except (OSError, DeviceBusyError):
+        except (OSError, DeviceBusyError) as exc:
+            blocked.append(path)
+            logger.warning(f'Skipping {path}: {exc}')
             continue
         finally:
             if psu is not None:
                 psu.close()
         available.append(psu.serial)
         if psu.serial == serial:
-            return path, available
-    return None, available
+            return path, available, blocked
+    return None, available, blocked
 
 
 def _state_dir(cfg):
@@ -683,11 +703,16 @@ def _state_dir(cfg):
 
 
 def emit(output, output_path):
-    if output_path:
+    """Write ``output`` to stdout, or replace ``output_path`` atomically."""
+    if not output_path:
+        print(output)
+        return
+    if os.path.exists(output_path) and not os.path.isfile(output_path):
+        # A fifo or /dev/stdout cannot be replaced, only written into.
         with open(output_path, 'w') as handle:
             handle.write(output + '\n')
-    else:
-        print(output)
+        return
+    stats.atomic_write_text(output_path, output + '\n')
 
 
 def run_once(psu, args, cfg, monitor_state, engine):
@@ -847,8 +872,10 @@ def _emit_ocp_unsupported(psu, product, args):
     elif args.format == 'prometheus':
         emit(f'# {OCP_UNSUPPORTED}', args.output)
     else:
-        emit(f'MSI PSU: {product}' if product else 'MSI PSU', args.output)
-        emit(OCP_UNSUPPORTED, args.output)
+        header = f'MSI PSU: {product}' if product else 'MSI PSU'
+        # One emit: two calls truncated the same -O file, so the file kept only
+        # the second line while stdout showed both.
+        emit(f'{header}\n{OCP_UNSUPPORTED}', args.output)
     return EXIT_OK
 
 
@@ -885,11 +912,17 @@ def run_export(args, cfg):
         return EXIT_ERROR
 
     header, rows = stats.build_export(_state_dir(cfg), time.time() - window, columns)
-    if args.output:
+    if not args.output:
+        _write_csv(sys.stdout, header, rows)
+        return EXIT_OK
+    # The CSV is streamed, so it is written in place; a failed write is reported
+    # rather than left behind as a silently truncated file (or a traceback).
+    try:
         with open(args.output, 'w', newline='') as handle:
             _write_csv(handle, header, rows)
-    else:
-        _write_csv(sys.stdout, header, rows)
+    except OSError as exc:
+        logger.error(f'Error: cannot write {args.output}: {exc}')
+        return EXIT_ERROR
     return EXIT_OK
 
 
@@ -1061,6 +1094,25 @@ def _validate_args(parser, args):
         parser.error('--export cannot be combined with --watch')
     if (args.from_spec or args.columns) and not args.export:
         parser.error('--from and --columns are only valid together with --export')
+    # A non-positive or non-finite interval would busy-loop or raise inside
+    # time.sleep() instead of failing here with a usage message.
+    if args.watch is not None and not (math.isfinite(args.watch) and args.watch > 0):
+        parser.error('--watch must be a positive number of seconds')
+    if args.interval is not None and not (math.isfinite(args.interval) and args.interval > 0):
+        parser.error('--interval must be a positive number of seconds')
+    if args.dashboard and (
+        args.export
+        or args.show_log
+        or args.watch is not None
+        or args.fan_mode
+        or args.fan_duty is not None
+    ):
+        parser.error(
+            '--dashboard serves the local page only: it cannot be combined with '
+            '--export, --show-log, --watch or a fan write'
+        )
+    if args.dashboard and args.format not in (None, 'text'):
+        parser.error('--dashboard serves the HTML page; --format does not apply')
     if args.watch is not None and args.once:
         parser.error('--watch and --once are mutually exclusive')
     if args.watch is not None and args.format not in (None, 'text'):
@@ -1112,13 +1164,22 @@ def main():
     else:
         debounce = cfg['consecutive_required']
 
-    dev_path, available = resolve_device(args.serial)
+    dev_path, available, blocked = resolve_device(args.serial)
     if dev_path is None:
         if args.serial is not None:
-            logger.error(
-                f'Error: no PSU with serial {args.serial!r}. Available: '
-                f'{", ".join(available) if available else "none"}'
-            )
+            if available:
+                logger.error(
+                    f'Error: no PSU with serial {args.serial!r}. Available: {", ".join(available)}'
+                )
+            elif blocked:
+                # Every candidate device refused to open; "Available: none" would
+                # send the user hunting for a PSU that is plugged in right there.
+                logger.error(
+                    f'Error: could not open any MSI PSU device while looking for '
+                    f'serial {args.serial!r}. Run as root, or install the udev rule.'
+                )
+            else:
+                logger.error(f'Error: no PSU with serial {args.serial!r}. Available: none')
         else:
             logger.error('Error: MSI PSU not found. Is it connected via USB?')
         sys.exit(EXIT_ERROR)

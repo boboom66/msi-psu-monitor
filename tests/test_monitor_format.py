@@ -58,6 +58,32 @@ def test_json_shapes():
     assert out['uptime'] == 2700
 
 
+def test_prometheus_reports_up_for_a_sample_with_readings():
+    out = format_prometheus(full_sensors())
+    assert 'msi_psu_up 1' in out
+    assert 'msi_psu_error_info' not in out
+
+
+def test_prometheus_reports_down_for_a_rejected_read():
+    """An ident-only sample used to export msi_psu_info 1 and nothing else."""
+    out = format_prometheus({'product': 'MPG Ai1600TS', 'error': 'unsupported model'})
+    assert 'msi_psu_up 0' in out
+    assert 'msi_psu_error_info{reason="unsupported model"} 1' in out
+
+
+def test_prometheus_reports_down_for_a_short_payload():
+    sensors = {'product': 'MPG Ai1600TS', 'payload_error': 'got 10 of 44 bytes'}
+    out = format_prometheus(sensors)
+    assert 'msi_psu_up 0' in out
+    assert 'msi_psu_error_info{reason="got 10 of 44 bytes"} 1' in out
+
+
+def test_prometheus_down_without_a_reason_still_explains_itself():
+    out = format_prometheus({'product': 'MPG Ai1600TS', 'serial': 'SN1'})
+    assert 'msi_psu_up 0' in out
+    assert '0xE0 read failed' in out
+
+
 def test_prometheus_shapes():
     out = format_prometheus(full_sensors())
     assert 'msi_psu_info{product="MPG Ai1300TS",vendor="MSI",fw="1.0",serial="DEMO0001"} 1' in out

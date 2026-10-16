@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import signal
 import sys
 import time
@@ -82,7 +81,7 @@ class MonitorDaemon:
 
     def _discover(self):
         """Return the hidraw path to use, honouring the optional serial filter."""
-        path, _ = monitor.resolve_device(self.cfg.get('serial'))
+        path, _, _ = monitor.resolve_device(self.cfg.get('serial'))
         return path
 
     def _open_default(self, path):
@@ -107,6 +106,9 @@ class MonitorDaemon:
             psu.init()
         except (OSError, DeviceBusyError) as exc:
             logger.warning(f'Cannot open {self.device_path}: {exc}')
+            # Forget the path so the retry goes through the discovery throttle
+            # above: keeping it made the next tick reopen (and warn) every second.
+            self.device_path = None
             self._next_discovery = self.clock() + DISCOVERY_RETRY_S
             return None
         self.psu = psu
@@ -206,10 +208,7 @@ class MonitorDaemon:
         target = Path(output) if output else self.prom_path
         if target is None:
             return None
-        target.parent.mkdir(parents=True, exist_ok=True)
-        tmp = target.with_name(target.name + '.tmp')
-        tmp.write_text(monitor.format_prometheus(sensors) + '\n')
-        os.replace(tmp, target)
+        stats.atomic_write_text(target, monitor.format_prometheus(sensors) + '\n')
         return target
 
     def record_history(self, sensors):

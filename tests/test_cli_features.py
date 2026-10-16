@@ -112,6 +112,16 @@ def isolated_state(tmp_path, monkeypatch):
         ['--watch', '1', '--once'],
         ['--fan-duty', '50', '--watch', '1'],
         ['--show-log', '-f', 'json'],
+        ['--watch', '0'],
+        ['--watch', '-1'],
+        ['--watch', 'nan'],
+        ['--watch', '1', '-i', '0'],
+        ['--watch', '1', '-i', 'inf'],
+        ['--dashboard', '--export', '--from', '2h'],
+        ['--dashboard', '--watch', '1'],
+        ['--dashboard', '--show-log'],
+        ['--dashboard', '--fan-mode', 'auto'],
+        ['--dashboard', '-f', 'json'],
     ],
 )
 def test_conflicting_flags_are_rejected(argv):
@@ -341,3 +351,55 @@ def test_a_missing_config_file_exits_one(tmp_path, monkeypatch, capsys):
     )
     assert code == EXIT_ERROR
     assert 'nope.conf' in captured.err
+
+
+# ---- output honesty -----------------------------------------------------
+
+
+def test_a_failed_sample_does_not_look_healthy_in_prometheus(monkeypatch, capsys):
+    stub = StubPSU(sensors={'product': 'MPG Ai1600TS', 'payload_error': 'got 10 of 44 bytes'})
+    code, captured = run_main(monkeypatch, capsys, stub, ['-f', 'prometheus'])
+    assert code == EXIT_ERROR
+    assert 'msi_psu_up 0' in captured.out
+    assert 'msi_psu_error_info{reason="got 10 of 44 bytes"}' in captured.out
+
+
+def test_ocp_unsupported_keeps_both_lines_in_one_output_file(monkeypatch, capsys, tmp_path):
+    """Two emits truncated the same -O file, so the header line vanished."""
+    target = tmp_path / 'ocp.txt'
+    stub = StubPSU(sensors())  # no supports_ocp_config: the Ai1600T path
+    code, captured = run_main(monkeypatch, capsys, stub, ['--ocp', '-O', str(target)])
+    assert code == EXIT_OK
+    assert captured.out == ''
+    lines = target.read_text().splitlines()
+    assert lines[0] == 'MSI PSU: MPG Ai1600TS'
+    assert 'not available on this model' in lines[1]
+    assert not (tmp_path / 'ocp.txt.tmp').exists()  # the write stayed atomic
+
+
+def test_serial_scan_reports_devices_it_cannot_open(monkeypatch, capsys):
+    """Permission/busy errors were swallowed into "Available: none"."""
+    monkeypatch.setattr(protocol, 'detect_devices', lambda: ['/dev/hidraw3'])
+
+    def refuse(path):
+        raise PermissionError(13, 'Permission denied')
+
+    monkeypatch.setattr(monitor, 'HIDDevice', refuse)
+    monkeypatch.setattr('sys.argv', ['prog', '--serial', 'SN1'])
+    with pytest.raises(SystemExit) as exc:
+        monitor.main()
+    assert exc.value.code == EXIT_ERROR
+    err = capsys.readouterr().err
+    assert 'Permission denied' in err
+    assert 'could not open any MSI PSU device' in err
+    assert 'Available: none' not in err
+
+
+def test_export_reports_an_unwritable_output(monkeypatch, capsys, tmp_path):
+    stub = StubPSU(sensors())
+    target = tmp_path / 'missing' / 'out.csv'
+    code, captured = run_main(
+        monkeypatch, capsys, stub, ['--export', '--from', '2h', '-O', str(target)]
+    )
+    assert code == EXIT_ERROR
+    assert 'cannot write' in captured.err

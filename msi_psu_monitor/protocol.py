@@ -129,6 +129,21 @@ BULK_DATA_SIZE = 44  # bytes of real data (the rest of the frame is zero padding
 BULK_FRAME_SIZE = 62  # bytes returned by the device for a 0xE0 read
 
 
+def _is_truncated_ts_name(product):
+    """True for "MPG Ai1300T": an 11-byte read of the 12-byte TS model name.
+
+    MSI Center asks ``GET_MFR_MODEL`` for 12 bytes on the TS PIDs and 11 on the
+    MEGs (``CPSU.cs``), so a short read loses exactly the trailing "S" -- and the
+    generic ``Ai1300`` / ``Ai1600`` branches would then decode the frame with the
+    MEG payload layout, silently, because "MPG Ai1300T" still matches "Ai1300".
+    Refusing to guess is the only honest answer here.
+    """
+    name = (product or '').upper()
+    if 'MPG' not in name or name.rstrip().endswith('S'):
+        return False
+    return any(f'AI{model}T' in name for model in ('1300', '1600'))
+
+
 def lin11_to_int(v16, scale=1000, signed=False):
     """Convert SMBus LINEAR11 encoded value to integer.
 
@@ -423,6 +438,12 @@ class MSIPSU:
             if body[0] < 0x20 and 1 + body[0] <= len(body):
                 body = body[1 : 1 + body[0]]
             self.serial = body.rstrip(b"\x00").decode("ascii", errors="replace").strip()
+
+        # A name that lost its trailing "S" is a short read, not another model:
+        # decoded as a MEG it would yield wrong bytes with no error at all.
+        if _is_truncated_ts_name(self.product):
+            self.variant = None
+            return self.product
 
         # Detect variant from product string. Ai1300TS must be checked before
         # the generic Ai1300 match: it is 7ZPU (44-byte E0 layout), not ai1300p.

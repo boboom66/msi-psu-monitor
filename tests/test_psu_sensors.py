@@ -81,6 +81,34 @@ def test_ai1300ts_detected_as_7zpu_variant():
     assert psu.variant == 'mpg_ai1300ts'
 
 
+@pytest.mark.parametrize('name', ['MPG Ai1600T', 'MPG Ai1300T'])
+def test_a_truncated_ts_model_name_is_refused_instead_of_guessed(name):
+    """An 11-byte read of a 12-byte TS name would decode as a MEG, silently.
+
+    MSI Center asks GET_MFR_MODEL for 12 bytes on the TS PIDs and 11 on the MEGs
+    (``CPSU.cs``), so the trailing "S" is exactly what a short read loses -- and
+    the generic ``Ai1300``/``Ai1600`` branch still matches what is left.
+    """
+    psu = _psu_1300ts(commands={(0xFA, 0x51): (name + '\x00').encode()})
+    assert psu.variant is None
+    assert 'error' in psu.get_sensors()
+
+
+@pytest.mark.parametrize(
+    'name,variant', [('MPG Ai1600TS', 'mpg_ai1600ts'), ('MPG Ai1300TS', 'mpg_ai1300ts')]
+)
+def test_a_complete_ts_model_name_still_dispatches(name, variant):
+    psu = _psu_1300ts(commands={(0xFA, 0x51): (name + '\x00').encode()})
+    assert psu.variant == variant
+
+
+def test_a_meg_model_name_is_not_mistaken_for_a_truncated_ts_name():
+    """The real MEG Ai1600T ends in "T" too; only the MPG prefix marks a short read."""
+    psu = _psu_1600t()
+    assert psu.product == 'MEG Ai1600T'
+    assert psu.variant == 'meg_ai1600'
+
+
 def test_serial_strips_length_prefix():
     psu = _psu_1300ts()
     assert psu.serial == 'SN123456'

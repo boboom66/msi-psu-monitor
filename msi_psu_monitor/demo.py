@@ -21,12 +21,15 @@ short demo run produces visible curves instead of a flat line.
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 import time
 
 from msi_psu_monitor.alerts import ALERT_DESCRIPTIONS
 from msi_psu_monitor.protocol import ALERT_NAMES, MSIPSU
+
+logger = logging.getLogger('msi_psu.demo')
 
 DEVICE_PATH = 'demo:0'
 DEMO_SERIAL = 'DEMO00000001'
@@ -68,11 +71,19 @@ def _stuck_alert():
 def model():
     """Return the variant requested by ``MSI_PSU_DEMO_MODEL`` (default TS 1600).
 
-    An unknown name falls back to the default instead of failing, so a typo in
-    the environment cannot take the demo down.
+    An unknown name still falls back to the default -- a typo must not take the
+    demo down -- but it warns, because otherwise ``meg_ai1300p`` (not a variant
+    name) would quietly present itself as an MPG Ai1600TS and an acceptance run
+    against the wrong model would look like a pass.
     """
     name = os.environ.get(MODEL_ENV, '').strip().lower()
-    return name if name in MODEL_WATTS else DEFAULT_MODEL
+    if name and name not in MODEL_WATTS:
+        logger.warning(
+            f'Ignoring unknown {MODEL_ENV}={name!r}; using {DEFAULT_MODEL}. '
+            f'Known models: {", ".join(sorted(MODEL_WATTS))}'
+        )
+        return DEFAULT_MODEL
+    return name or DEFAULT_MODEL
 
 
 def product_name(variant):
@@ -197,7 +208,14 @@ class DemoPSU:
         return True
 
     def read_ocp_thresholds(self):
-        """Factory OCP configuration as shipped by MSI (CPSU.cs defaults)."""
+        """Factory OCP configuration as shipped by MSI (CPSU.cs defaults).
+
+        Only the 12V-2x6 models answer the 8-byte 0xC0 read; on the others the
+        same address means something else (or nothing), so the emulation must
+        report the same absence the hardware does.
+        """
+        if not self.supports_ocp_config:
+            return None
         return {
             'enabled': True,
             'point_a': 12.0,

@@ -125,3 +125,25 @@ def test_an_out_of_range_port_falls_back(tmp_path):
     assert load_config(str(conf))['port'] == DEFAULTS['port']
     conf = _write(tmp_path, '[daemon]\nport = 9000\n', name='ok.conf')
     assert load_config(str(conf))['port'] == 9000
+
+
+def test_a_percent_sign_in_a_value_is_literal(tmp_path):
+    """BasicInterpolation turned a stray '%' into a traceback at .get() time."""
+    conf = _write(tmp_path, '[monitor]\noutput = /tmp/100%.prom\n')
+    assert load_config(str(conf))['output'] == '/tmp/100%.prom'
+
+
+@pytest.mark.parametrize('token', ['nan', 'inf', '-inf'])
+def test_a_non_finite_interval_falls_back_to_the_default(tmp_path, token):
+    """nan slips past the "<= 0" guards, then time.sleep(nan) kills the daemon."""
+    conf = _write(
+        tmp_path,
+        f'[monitor]\ninterval = {token}\n'
+        f'[daemon]\nsample_interval = {token}\nprom_interval = {token}\n'
+        f'history_interval = {token}\n',
+    )
+    cfg = load_config(str(conf))
+    assert cfg['interval'] == DEFAULTS['interval']
+    assert cfg['sample_interval'] == DEFAULTS['sample_interval']
+    assert cfg['prom_interval'] == DEFAULTS['prom_interval']
+    assert cfg['history_interval'] == DEFAULTS['history_interval']
