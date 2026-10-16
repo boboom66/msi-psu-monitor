@@ -46,7 +46,8 @@ cp "$ROOT"/msi_psu_monitor/*.py "$LIBDIR/"
 cp "$ROOT/systemd/msi-psu-monitor.service" "$STAGE/lib/systemd/system/"
 cp "$ROOT/systemd/99-msi-psu.rules" "$STAGE/lib/udev/rules.d/"
 cp "$ROOT/README.md" "$ROOT/LICENSE" "$ROOT/docs/protocol.md" \
-   "$ROOT/docs/verify.md" "$ROOT/docs/msi-psu-monitor.conf.example" \
+   "$ROOT/docs/verify.md" "$ROOT/docs/requirements-traceability.md" \
+   "$ROOT/docs/msi-psu-monitor.conf.example" \
    "$STAGE/usr/share/doc/$PKG/"
 
 for entry in monitor daemon; do

@@ -291,7 +291,8 @@ dpkg-deb -c dist/msi-psu-monitor_1.0.0_all.deb | awk '{print $6}'
 
 应包含 `usr/bin/msi-psu-monitor`、`usr/bin/msi-psu-monitor-daemon`、
 `usr/lib/python3/dist-packages/msi_psu_monitor/*.py`、`lib/systemd/system/msi-psu-monitor.service`、
-`lib/udev/rules.d/99-msi-psu.rules`、`usr/share/doc/msi-psu-monitor/*`。
+`lib/udev/rules.d/99-msi-psu.rules`、`usr/share/doc/msi-psu-monitor/*`（README / LICENSE /
+`protocol.md` / `verify.md` / `requirements-traceability.md` / `msi-psu-monitor.conf.example`）。
 
 同时确认包根目录不是 0700（`mktemp` 会给 0700 而 `dpkg-deb` 原样收录，脚本已 `chmod 755` 修掉）：
 
