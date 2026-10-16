@@ -1,62 +1,124 @@
 # msi-psu-monitor
 
-Userspace monitoring tool for MSI power supplies with USB HID monitoring interface.
+Userspace monitoring tool for MSI power supplies with a USB HID monitoring interface.
 
-Supports **per-pin current monitoring** on the MPG Ai1600TS (GPU Safeguard+ feature)
-and standard voltage/current/power/temperature/fan readings on MEG Ai1600(T),
-MEG Ai1300P, and MEG Ai1000P models.
+Supports **per-pin current monitoring** on the MPG Ai1600TS / MPG Ai1300TS (GPU
+Safeguard+ feature) and standard voltage/current/power/temperature/fan readings on
+MEG Ai1600(T), MEG Ai1300P, and MEG Ai1000P models.
+
+Python standard library only — no third-party runtime dependencies.
+
+## Features
+
+- **One-shot, watch and machine-readable output** — text, JSON and Prometheus.
+- **Per-pin 12V-2x6 current** with a software mirror of the PSU's own OCP thresholds
+  (single pin > 12 A, spread > 5 A per connector).
+- **Alerting with exit codes** — hardware alert bits (E1h) plus the software mirror,
+  debounced, reported on stderr; `0` normal / `1` fault / `2` alert.
+- **Fan display and control** — read mode/duty/Zero Fan (41h/42h), write and save a
+  custom duty (41h + F1h) with read-back verification.
+- **Black-box dump** — the last 10 GPU Safeguard+ trip records (`--show-log`).
+- **Resident daemon** — 1 s alert evaluation, 30 s atomic Prometheus textfile,
+  60 s history line, rescan after 5 read failures (unplug/replug recovery).
+- **Cumulative statistics** — average power/efficiency and integrated energy (kWh)
+  persisted across restarts, daily buckets kept for 30 days.
+- **History export** — 9-column CSV over any `m/h/d` window, to a file or stdout.
+- **Local dashboard** — loopback-only charts (7 live curves + weekly energy) drawn
+  from the daemon history, with per-chart PNG/CSV export.
+- **No-hardware demo mode** — exercise the whole pipeline with `MSI_PSU_DEMO=1`.
 
 ## Supported Hardware
 
 | PSU Model | USB ID | 0xE0 Payload | Features |
-|-----------|--------|-------------|----------|
+|-----------|--------|--------------|----------|
 | MPG Ai1600TS | `0db0:808c` | 62 bytes | Per-pin current monitoring (GPU Safeguard+), combined 12V rail |
+| MPG Ai1300TS | `0db0:aa6f` | 62 bytes | Per-pin current monitoring (GPU Safeguard+), combined 12V rail |
 | MEG Ai1600(T) | `0db0:c9eb` | 20 bytes | Combined 12V rail, no per-pin monitoring |
 | MEG Ai1300P | `0db0:56d4` | 40 bytes | 6 per-rail 12V, multi-rail switching |
 | MEG Ai1000P | `0db0:e749` | 40 bytes | 6 per-rail 12V, multi-rail switching |
 
-## Quick Start
+The variant is chosen from the product string reported by the PSU, never from the USB
+PID, so a re-badged device with a known product name still parses correctly.
+
+## Install
 
 ```bash
-# Install
-pip install msi-psu-monitor
+# Debian/Ubuntu package (installs the CLI, the daemon, the udev rule and the unit)
+bash scripts/build_deb.sh
+sudo apt install ./dist/msi-psu-monitor_*_all.deb
 
-# Or install from source
+# Or from source
 git clone https://github.com/msi-psu-monitor/msi-psu-monitor
 cd msi-psu-monitor
 pip install -e .
 
-# Run (requires root for hidraw access)
+# Or a dev checkout with the test/lint toolchain
+uv sync --group dev && uv run --group dev pytest -q
+```
+
+## Quick start
+
+```bash
+# One-shot read (hidraw needs root, or the udev rule grants uaccess to your session)
 sudo msi-psu-monitor --once
+
+# No PSU at hand? Drive the whole pipeline with the synthetic device
+MSI_PSU_DEMO=1 msi-psu-monitor --once
+
+# Continuous text refresh
+sudo msi-psu-monitor --watch        # or --watch 1 for a 1s interval
+
+# Prometheus textfile for node_exporter
+sudo msi-psu-monitor -f prometheus -O /var/lib/node_exporter/msi-psu.prom
 ```
 
 ## Usage
 
 ```
-msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w] [-i INTERVAL] [-o] [-O OUTPUT]
+msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
+                [-O OUTPUT] [--serial SERIAL] [--fan-mode {auto,customized}]
+                [--fan-duty 0-100] [--export] [--from FROM_SPEC]
+                [--columns COLUMNS] [--dashboard] [--port PORT] [--show-log]
+                [--no-alerts] [--config CONFIG] [--verbose] [--quiet] [--version]
 
-Options:
-  -f, --format    Output format: text (default), json, or prometheus
-  -w, --watch     Continuous monitoring mode
-  -i, --interval  Polling interval in seconds (default: 2.0)
-  -o, --once      Read sensors once and exit
-  -O, --output    Write output to file instead of stdout
+  -f, --format     Output format: text (default), json, prometheus
+  -w, --watch      Watch mode; optional refresh seconds (default 2.0)
+  -i, --interval   Polling interval in seconds (legacy; pairs with --watch)
+  -o, --once       Read sensors once and exit (also the default)
+  -O, --output     Write output to a file instead of stdout
+      --serial     Select one of several PSUs by serial number
+      --fan-mode   Write the fan control mode (41h) and save it (F1h)
+      --fan-duty   Custom fan duty in percent; implies --fan-mode customized
+      --export     Export the daemon history as CSV
+      --from       Export window: 30m, 2h, 7d, ... (required with --export)
+      --columns    Export columns (default: all)
+      --dashboard  Serve local charts on 127.0.0.1
+      --port       Dashboard port (default 8899)
+      --show-log   Dump the PSU black-box alert records (C1h)
+      --no-alerts  Skip the E1h alert poll
+      --config     Explicit config file
 ```
+
+Exit codes: `0` normal, `1` program/argument fault, `2` alert active.
 
 ### Examples
 
 ```bash
-# One-shot text output
-sudo msi-psu-monitor --once
+# Machine-readable output for scripting
+sudo msi-psu-monitor -f json
 
-# JSON output for scripting
-sudo msi-psu-monitor --format json
+# Per-pin trip history (GPU Safeguard+ black box)
+sudo msi-psu-monitor --show-log
 
-# Prometheus output for node_exporter textfile collector
-sudo msi-psu-monitor --format prometheus --output /var/lib/node_exporter/msi-psu.prom
+# Fan control: set 75% and verify, then hand back to the PSU curve
+sudo msi-psu-monitor --fan-duty 75
+sudo msi-psu-monitor --fan-mode auto
 
-# Continuous monitoring
-sudo msi-psu-monitor --watch
+# Last two hours of temperature and fan as CSV
+sudo msi-psu-monitor --export --from 2h --columns temp,fan -O psu-2h.csv
+
+# Local charts (reads the daemon history, never touches the PSU)
+msi-psu-monitor --dashboard --port 8899
 ```
 
 ## Example Output
@@ -64,48 +126,69 @@ sudo msi-psu-monitor --watch
 ```
 MSI PSU: MPG Ai1600TS
   Vendor: MSI
-  FW: 49.48  Serial:
+  FW: 1.0  Serial: DEMO00000001
 
-  +12V    :   12.062 V
-  +5V     :    5.007 V
-  +3V3    :    3.304 V
-  12V TOTAL:   82.000 A
-  5V      :    8.187 A
-  3V3     :    3.375 A
+  +12V    :   12.092 V
+  +5V     :    5.047 V
+  +3.3V   :    3.310 V
+  12V TOTAL:    5.168 A
+  5V      :    1.800 A
+  3.3V    :    0.800 A
   Per-pin currents (12V-2x6 GPU Safeguard+):
-    Conn1 Pin1:    5.312 A    Conn1 Pin2:    5.187 A
-    Conn1 Pin3:    5.500 A    Conn1 Pin4:    5.312 A
-    Conn1 Pin5:    5.437 A    Conn1 Pin6:    5.687 A
-    Conn2 Pin1:    5.375 A    Conn2 Pin2:    5.500 A
-    Conn2 Pin3:    5.375 A    Conn2 Pin4:    5.312 A
-    Conn2 Pin5:    5.437 A    Conn2 Pin6:    5.437 A
-  POWER   :   1040.0 W
-  EFF     :    94.50 %
-  TEMP    :     51.0 °C
-  FAN     :      536 RPM
-  Uptime     : 3d 23:37:20
-  Total uptime: 9d 10:50:20
+    Conn1 Pin1:    0.431 A
+    ...
+    Conn2 Pin6:    0.435 A
+  12V-2x6 Status: Normal
+  POWER   :     67.9 W   (AVG 67.90 W)
+  EFF     :    88.00 %   (AVG 88.00 %)
+  TEMP    :     29.0 °C
+  FAN     :        0 RPM
+  Zero Fan: on    Mode: auto
+  Uptime     : 0d 00:00:00
+  Total uptime: 5d 04:00:00
+  Total energy: 0.0 kWh
 ```
 
-## Prometheus Integration
+## Prometheus integration
 
-The Prometheus output format is designed for use with the
-[node_exporter textfile collector](https://github.com/prometheus/node_exporter#textfile-collector).
+The `prometheus` format targets the
+[node_exporter textfile collector](https://github.com/prometheus/node_exporter#textfile-collector)
+and exports `msi_psu_info{product,vendor,fw,serial}`, per-rail voltages/currents,
+`msi_psu_pin_current{connector,pin}`, `msi_psu_power_total`, `msi_psu_power_avg`,
+`msi_psu_efficiency`, `msi_psu_efficiency_avg`, `msi_psu_temperature`,
+`msi_psu_fan_speed`, `msi_psu_zero_fan{state}`,
+`msi_psu_status_12v_2x6{status}`, `msi_psu_total_energy_kwh`,
+`msi_psu_alert{alert}` and the uptime counters.
 
-### Automatic polling via systemd timer
+The daemon replaces the file atomically (`.tmp` + rename), so scrapers never read a
+partial file:
 
 ```bash
-# Install service and timer
-sudo cp systemd/* /etc/systemd/system/
+sudo cp systemd/99-msi-psu.rules /etc/udev/rules.d/
+sudo cp systemd/msi-psu-monitor.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now msi-psu-monitor.timer
+sudo systemctl enable --now msi-psu-monitor
 
-# Verify
-systemctl status msi-psu-monitor.timer
+systemctl status msi-psu-monitor
+journalctl -u msi-psu-monitor -f          # ALERT lines land here
 ```
 
-This polls the PSU every 30 seconds and writes Prometheus metrics to
-`/var/lib/node_exporter/msi-psu.prom`.
+## Configuration
+
+Optional INI file, resolved as `/etc/msi-psu-monitor.conf` then
+`~/.config/msi-psu-monitor/config.ini`; CLI flags always win. See
+[`docs/msi-psu-monitor.conf.example`](docs/msi-psu-monitor.conf.example).
+
+State lives in `/var/lib/msi-psu-monitor` (created by the unit's
+`StateDirectory`), falling back to `$XDG_STATE_HOME/msi-psu-monitor`; override with
+`MSI_PSU_STATE_DIR`. It holds `state.json` (cumulative counters) and
+`daily-YYYYMMDD.log` (one CSV line per minute, 30-day retention).
+
+## Verifying without hardware
+
+See [`docs/verify.md`](docs/verify.md) for the full no-hardware checklist —
+quality gates, the `MSI_PSU_DEMO=1` demo mode, alert paths, the daemon + dashboard
+chain, `.deb` construction, and the list of items that still require a real PSU.
 
 ## Kernel Module
 
@@ -124,8 +207,8 @@ make -C /lib/modules/$(uname -r)/build M=$(pwd) modules
 
 ## Protocol
 
-See `docs/protocol.md` for full protocol documentation, including the 62-byte
-0xE0 bulk read layout and register map.
+See [`docs/protocol.md`](docs/protocol.md) for full protocol documentation, including
+the 62-byte `0xE0` bulk read layout and the register map.
 
 ## License
 

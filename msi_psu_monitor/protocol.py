@@ -712,6 +712,22 @@ class MSIPSU:
             return None
         return (data[0], data[1], data[2], bool(data[3]))
 
+    def read_fan_state(self):
+        """Read the fan mode (41h) plus the duty tuple (42h) in one call.
+
+        Returns:
+            {'mode': int|None, 'duty': int|None, 'zero_fan': bool|None};
+            missing halves stay None instead of failing the whole read.
+        """
+        state = {'mode': None, 'duty': None, 'zero_fan': None}
+        setting = self.read_fan_setting()
+        if setting is not None:
+            state['mode'], state['duty'] = setting
+        duty = self.read_fan_duty()
+        if duty is not None:
+            state['zero_fan'] = duty[3]
+        return state
+
     def set_fan_mode(self, mode, duty=0):
         """Write FAN_SETTING (41h) then SAVE_SETTING (F1h).
 

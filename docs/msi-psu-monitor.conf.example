@@ -1,0 +1,44 @@
+# /etc/msi-psu-monitor.conf - example configuration.
+#
+# Precedence: CLI flags > this file > built-in defaults.
+# The file is optional; without it every value below is already the default.
+# Copy it with:  sudo install -m 644 docs/msi-psu-monitor.conf.example \
+#                                /etc/msi-psu-monitor.conf
+
+[monitor]
+# Default output format: text | json | prometheus.
+format = text
+# Default polling interval for --watch, in seconds (--watch <n> overrides).
+interval = 2
+# Write output here instead of stdout (same as --output).
+#output = /var/lib/node_exporter/msi-psu.prom
+# Pick one PSU by serial number when several are attached (same as --serial).
+#serial = 0123456789AB
+# Diagnostics verbosity (same as --verbose / --quiet).
+verbose = no
+quiet = no
+# Skip the E1h alert poll entirely (same as --no-alerts).
+no_alerts = no
+
+[alerts]
+# Consecutive polls that must report the same alert before it is raised.
+# 2 keeps a single flaky 5-second average from paging; 1 makes it edge-only.
+consecutive_required = 2
+
+[daemon]
+# Directory for state.json and daily-YYYYMMDD.log.
+# Default: /var/lib/msi-psu-monitor (systemd StateDirectory), otherwise
+# $XDG_STATE_HOME/msi-psu-monitor. MSI_PSU_STATE_DIR overrides both.
+#state_dir = /var/lib/msi-psu-monitor
+# node_exporter textfile collector target. Unset disables the export.
+#prom_path = /var/lib/node_exporter/msi-psu.prom
+# Port for `msi-psu-monitor --dashboard` (loopback only).
+port = 8899
+# PSU polling cadence used for alert evaluation, in seconds.
+sample_interval = 1
+# How often the prometheus textfile is atomically replaced, in seconds.
+prom_interval = 30
+# How often a history line is appended and state.json is persisted, in seconds.
+history_interval = 60
+# Daily buckets and daily-*.log files older than this are pruned.
+retention_days = 30

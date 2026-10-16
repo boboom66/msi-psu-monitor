@@ -1,17 +1,32 @@
 [Unit]
-Description=MSI PSU Monitor - read sensors from MSI MPG Ai1600TS
+Description=MSI PSU Monitor daemon (GPU Safeguard+ per-pin current alerts)
 Documentation=https://github.com/msi-psu-monitor/msi-psu-monitor
+Documentation=file:/usr/share/doc/msi-psu-monitor/README.md
 After=local-fs.target
+StartLimitIntervalSec=0
 
 [Service]
-Type=oneshot
-ExecStart=/usr/local/bin/msi-psu-monitor --format prometheus --output /var/lib/node_exporter/msi-psu.prom
+Type=simple
+# /usr/bin/env keeps the unit working for both /usr/bin (package) and
+# /usr/local/bin (pip) installs of the console script.
+ExecStart=/usr/bin/env msi-psu-monitor-daemon --config /etc/msi-psu-monitor.conf
+Restart=always
+RestartSec=5
+# systemd creates /var/lib/msi-psu-monitor (state.json + daily-*.log).
+StateDirectory=msi-psu-monitor
 User=root
 Group=root
-# ProtectSystem=full
-# ProtectHome=yes
-# NoNewPrivileges=yes
-# PrivateDevices=no  # Needs access to /dev/hidraw*
+
+# The daemon holds /dev/hidraw* open for the whole runtime, so never set
+# PrivateDevices=yes here. ProtectSystem=full still makes /usr, /boot and /etc
+# read-only while leaving /var and /run writable for the state files.
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+# Alerts are written to stderr, which journald records:
+#   journalctl -u msi-psu-monitor -f
 
 [Install]
 WantedBy=multi-user.target

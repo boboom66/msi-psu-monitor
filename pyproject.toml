@@ -9,7 +9,7 @@ description = "Userspace monitoring tool for MSI MPG Ai1600TS PSU with GPU Safeg
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
-    {name = "MSI PSU Monitor Contributors", email = "contributors@msi-psu-monitor"}
+    {name = "MSI PSU Monitor Contributors", email = "contributors@example.com"}
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -31,6 +31,35 @@ BugTracker = "https://github.com/msi-psu-monitor/msi-psu-monitor/issues"
 
 [project.scripts]
 msi-psu-monitor = "msi_psu_monitor.monitor:main"
+msi-psu-monitor-daemon = "msi_psu_monitor.daemon:main"
 
 [tool.setuptools.packages.find]
 include = ["msi_psu_monitor*"]
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+# Baseline for legacy code: only pyflakes + pycodestyle errors fail CI.
+# Expand to ["E", "F", "BLE", "RUF"] during the planned refactor.
+select = ["E", "F"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+# Legacy files mix quote styles; a repo-wide format pass would churn the diff.
+# Formatting stays opt-in per file until the refactor lands.
+quote-style = "single"
+
+[tool.mypy]
+python_version = "3.10"
+# Relaxed baseline: legacy modules are untyped. Flip to strict=true after the
+# planned refactor adds annotations.
+strict = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

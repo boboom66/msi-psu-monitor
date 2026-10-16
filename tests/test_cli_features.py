@@ -1,0 +1,300 @@
+"""CLI tests for the new flags: export, fan write, serial select, status lines."""
+
+import csv
+import io
+import time
+
+import pytest
+
+from msi_psu_monitor import monitor
+from msi_psu_monitor import protocol
+from msi_psu_monitor import state as stats
+from msi_psu_monitor.monitor import EXIT_ALERT, EXIT_ERROR, EXIT_OK
+
+
+class StubHID:
+    def open(self):
+        return self
+
+    def close(self):
+        pass
+
+
+class StubPSU:
+    """Minimal PSU surface: sensors, alerts, fan read-back."""
+
+    def __init__(self, sensors=None, alerts=None, fan_mode=1, fan_duty=30, accept_write=True):
+        self._sensors = sensors if sensors is not None else {}
+        self._alerts = alerts
+        self.serial = self._sensors.get('serial', 'SN1')
+        self.product = self._sensors.get('product', 'MPG Ai1600TS')
+        self.fan_mode = fan_mode
+        self.fan_duty = fan_duty
+        self.accept_write = accept_write
+        self.writes = []
+        self.closed = False
+
+    def open(self):
+        return self
+
+    def close(self):
+        self.closed = True
+
+    def init(self):
+        return self.product
+
+    def get_sensors(self):
+        return dict(self._sensors)
+
+    def read_alert_status(self):
+        return self._alerts
+
+    def read_fan_state(self):
+        return {'mode': self.fan_mode, 'duty': self.fan_duty, 'zero_fan': True}
+
+    def read_fan_setting(self):
+        return (self.fan_mode, self.fan_duty)
+
+    def set_fan_mode(self, mode, duty=0):
+        self.writes.append((mode, duty))
+        if self.accept_write:
+            self.fan_mode, self.fan_duty = mode, duty
+        return True
+
+
+def sensors(**extra):
+    base = {
+        'product': 'MPG Ai1600TS',
+        'serial': 'SN1',
+        'vendor': 'MSI',
+        'fw_revision': '1.0',
+        'vout_12v': (12.1, 'V'),
+        'iout_12v_total': (50.0, 'A'),
+        'iout_pins': ([8.0] * 12, 'A'),
+        'power_total': (600.0, 'W'),
+        'efficiency': (94.0, '%'),
+        'temp': (56.0, 'C'),
+        'fan_rpm': (2050, 'RPM'),
+        'uptime': 2700,
+        'uptime_total': 446400,
+    }
+    base.update(extra)
+    return base
+
+
+def run_main(monkeypatch, capsys, stub, argv):
+    monkeypatch.setattr(monitor, 'detect_device', lambda: '/dev/hidraw9')
+    monkeypatch.setattr(monitor, 'HIDDevice', lambda path: StubHID())
+    monkeypatch.setattr(monitor, 'MSIPSU', lambda hid: stub)
+    monkeypatch.setattr('sys.argv', ['prog'] + argv)
+    with pytest.raises(SystemExit) as exc:
+        monitor.main()
+    return exc.value.code, capsys.readouterr()
+
+
+@pytest.fixture(autouse=True)
+def isolated_state(tmp_path, monkeypatch):
+    monkeypatch.setenv('MSI_PSU_STATE_DIR', str(tmp_path))
+    return tmp_path
+
+
+# ---- argument validation ------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'argv',
+    [
+        ['--watch', '1', '--export', '--from', '2h'],
+        ['--from', '2h'],
+        ['--columns', 'temp'],
+        ['--port', '9000'],
+        ['--watch', '1', '-f', 'json'],
+        ['--watch', '1', '--once'],
+        ['--fan-duty', '50', '--watch', '1'],
+        ['--show-log', '-f', 'json'],
+    ],
+)
+def test_conflicting_flags_are_rejected(argv):
+    parser = monitor.build_parser()
+    args = parser.parse_args(argv)
+    with pytest.raises(SystemExit) as exc:
+        monitor._validate_args(parser, args)
+    assert exc.value.code == 2
+
+
+def test_fan_mode_and_export_are_not_rejected():
+    parser = monitor.build_parser()
+    for argv in (['--fan-mode', 'auto'], ['--export', '--from', '2h'], ['--dashboard']):
+        args = parser.parse_args(argv)
+        monitor._validate_args(parser, args)  # must not raise
+
+
+# ---- export -------------------------------------------------------------
+
+
+def test_export_without_from_exits_one(monkeypatch, capsys):
+    monkeypatch.setattr('sys.argv', ['prog', '--export'])
+    with pytest.raises(SystemExit) as exc:
+        monitor.main()
+    assert exc.value.code == EXIT_ERROR
+    assert '--export requires --from' in capsys.readouterr().err
+
+
+def test_export_writes_history_csv(monkeypatch, capsys, tmp_path):
+    stats.append_history(tmp_path, sensors(), ts=time.time())
+    monkeypatch.setattr('sys.argv', ['prog', '--export', '--from', '2h', '--columns', 'temp,fan'])
+    with pytest.raises(SystemExit) as exc:
+        monitor.main()
+    out = capsys.readouterr().out
+    assert exc.value.code == EXIT_OK
+    rows = list(csv.reader(io.StringIO(out)))
+    assert rows[0] == ['time', 'temp', 'fan']
+    assert rows[1][1:] == ['56.0', '2050']
+
+
+def test_export_rejects_a_bad_window(monkeypatch, capsys):
+    monkeypatch.setattr('sys.argv', ['prog', '--export', '--from', 'soon'])
+    with pytest.raises(SystemExit) as exc:
+        monitor.main()
+    assert exc.value.code == EXIT_ERROR
+    assert 'invalid --from value' in capsys.readouterr().err
+
+
+# ---- fan control --------------------------------------------------------
+
+
+def test_fan_write_sets_and_verifies(monkeypatch, capsys):
+    stub = StubPSU(sensors())
+    code, out = run_main(
+        monkeypatch, capsys, stub, ['--fan-mode', 'customized', '--fan-duty', '80']
+    )
+    assert code == EXIT_OK
+    assert stub.writes == [(3, 80)]
+    assert out.out.strip() == 'Fan mode: customized   Duty: 80%'
+    assert stub.closed
+
+
+def test_fan_duty_implies_customized_mode(monkeypatch, capsys):
+    stub = StubPSU(sensors())
+    code, _ = run_main(monkeypatch, capsys, stub, ['--fan-duty', '55'])
+    assert code == EXIT_OK
+    assert stub.writes == [(3, 55)]
+
+
+def test_fan_auto_ignores_duty_and_reports_mode(monkeypatch, capsys):
+    stub = StubPSU(sensors())
+    code, out = run_main(monkeypatch, capsys, stub, ['--fan-mode', 'auto'])
+    assert code == EXIT_OK
+    assert stub.writes == [(1, 0)]
+    assert out.out.strip() == 'Fan mode: auto'
+
+
+def test_fan_write_reports_a_readback_mismatch(monkeypatch, capsys):
+    stub = StubPSU(sensors(), accept_write=False)
+    code, out = run_main(
+        monkeypatch, capsys, stub, ['--fan-mode', 'customized', '--fan-duty', '80']
+    )
+    assert code == EXIT_ERROR
+    assert 'read-back mismatch' in out.err
+    assert len(stub.writes) == 3  # three attempts before giving up
+
+
+# ---- device selection ---------------------------------------------------
+
+
+def test_unknown_serial_lists_available_devices(monkeypatch, capsys):
+    monkeypatch.setattr(protocol, 'detect_devices', lambda: ['/dev/hidraw9'])
+    monkeypatch.setattr(monitor, 'HIDDevice', lambda path: StubHID())
+    monkeypatch.setattr(monitor, 'MSIPSU', lambda hid: StubPSU(sensors()))
+    monkeypatch.setattr('sys.argv', ['prog', '--serial', 'NOPE'])
+    with pytest.raises(SystemExit) as exc:
+        monitor.main()
+    assert exc.value.code == EXIT_ERROR
+    assert 'Available: SN1' in capsys.readouterr().err
+
+
+def test_matching_serial_is_selected(monkeypatch, capsys):
+    monkeypatch.setattr(protocol, 'detect_devices', lambda: ['/dev/hidraw9'])
+    monkeypatch.setattr(monitor, 'HIDDevice', lambda path: StubHID())
+    stub = StubPSU(sensors(), alerts={'ocp_12v': False})
+    monkeypatch.setattr(monitor, 'MSIPSU', lambda hid: stub)
+    monkeypatch.setattr('sys.argv', ['prog', '--serial', 'SN1', '--once'])
+    with pytest.raises(SystemExit) as exc:
+        monitor.main()
+    assert exc.value.code == EXIT_OK
+    assert 'MPG Ai1600TS' in capsys.readouterr().out
+
+
+# ---- enriched output ----------------------------------------------------
+
+
+def test_text_includes_status_avg_fan_and_energy(monkeypatch, capsys):
+    stub = StubPSU(sensors(), alerts={'ocp_12v': False})
+    code, out = run_main(monkeypatch, capsys, stub, ['--once'])
+    assert code == EXIT_OK
+    assert 'Serial: SN1' in out.out
+    assert '12V-2x6 Status: Normal' in out.out
+    assert '(AVG 600.00 W)' in out.out
+    assert 'Zero Fan: on    Mode: auto' in out.out
+    assert 'Uptime     : 0d 00:45:00' in out.out
+    assert 'Total energy: 0.0 kWh' in out.out
+
+
+def test_json_exposes_avg_and_status(monkeypatch, capsys):
+    import json
+
+    stub = StubPSU(sensors(), alerts={'ocp_12v': False})
+    _, captured = run_main(monkeypatch, capsys, stub, ['--once', '-f', 'json'])
+    payload = json.loads(captured.out)
+    assert payload['status'] == 'Normal'
+    assert payload['power_avg'] == {'value': 600.0, 'unit': 'W'}
+    assert payload['zero_fan'] is True
+    assert payload['total_energy']['unit'] == 'kWh'
+
+
+def test_prometheus_exposes_the_new_metrics(monkeypatch, capsys):
+    stub = StubPSU(sensors(), alerts={'ocp_12v': False})
+    _, captured = run_main(monkeypatch, capsys, stub, ['--once', '-f', 'prometheus'])
+    out = captured.out
+    assert 'msi_psu_power_avg {} 600.0' in out
+    assert 'msi_psu_efficiency_avg {} 94.0' in out
+    assert 'msi_psu_status_12v_2x6{status="Normal"} 1' in out
+    assert 'msi_psu_zero_fan{state="on"} 1' in out
+    assert 'msi_psu_total_energy_kwh {}' in out
+    assert 'serial="SN1"' in out
+    assert 'msi_psu_alert{alert="ocp_12v"}' not in out  # inactive bit is not exported
+
+
+def test_prometheus_exports_an_active_alert(monkeypatch, capsys):
+    stub = StubPSU(sensors(), alerts={'fan': True})
+    code, out = run_main(monkeypatch, capsys, stub, ['--once', '-f', 'prometheus'])
+    assert code == EXIT_ALERT
+    assert 'msi_psu_alert{alert="fan"} 1' in out.out
+
+
+def test_no_alerts_flag_skips_the_status_line(monkeypatch, capsys):
+    stub = StubPSU(sensors(), alerts={'ocp_12v': True})
+    code, out = run_main(monkeypatch, capsys, stub, ['--once', '--no-alerts'])
+    assert code == EXIT_OK
+    assert '12V-2x6 Status' not in out.out
+
+
+def test_show_log_dumps_blackbox_without_touching_stats(monkeypatch, capsys, tmp_path):
+    records = [
+        {
+            'info_id': 3,
+            'pin_set': 1,
+            'status': 1,
+            'run_time': 100,
+            'total_time': 200000,
+            'pins_1_6': [13.5] * 6,
+            'total_count': 2,
+        }
+    ]
+    stub = StubPSU(sensors(), alerts={'ocp_12v': False})
+    stub.read_blackbox = lambda max_records=10: records
+    code, out = run_main(monkeypatch, capsys, stub, ['--show-log'])
+    assert code == EXIT_OK
+    assert 'single-pin OCP (>12A)' in out.out
+    assert '0d 00:01:40' in out.out
+    assert not stats.state_path(tmp_path).exists()

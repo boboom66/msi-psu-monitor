@@ -1,8 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-# msi-psu-monitor Install Script
-# Installs the Python package, systemd service, and optional kernel module
+# msi-psu-monitor install script (source checkout).
+#
+# Installs the Python package, the udev rule and the systemd daemon unit.
+# Prefer `scripts/build_deb.sh` + `apt install ./dist/*.deb` on Debian/Ubuntu:
+# this script is the fallback for running straight from a checkout.
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -19,51 +22,70 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-# Detect PSU
-HIDRAW_DEV=$(ls /dev/hidraw* 2>/dev/null | while read dev; do
-    udevadm info --query=all --name="$dev" 2>/dev/null | grep -q 'ID_MODEL_ID=808c' && echo "$dev" && break
-done || true)
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
-if [[ -z "$HIDRAW_DEV" ]]; then
-    warn "No MPG Ai1600TS PSU detected. Install will proceed but the tool won't work until the PSU is connected."
-    warn "Expected USB ID: 0db0:808c"
-else
-    info "Detected PSU at $HIDRAW_DEV"
+# Detect PSU (all supported USB IDs, not just the Ai1600TS)
+if command -v udevadm >/dev/null; then
+    for dev in /dev/hidraw*; do
+        [[ -e "$dev" ]] || continue
+        props=$(udevadm info --query=all --name="$dev" 2>/dev/null || true)
+        for pid in 808c aa6f 56d4 e749 c9eb; do
+            if grep -qi "ID_MODEL_ID=$pid" <<<"$props"; then
+                info "Detected PSU at $dev (USB ID 0db0:$pid)"
+                detected=1
+            fi
+        done
+    done
 fi
 
-# Install Python package
-info "Installing Python package..."
-cd "$(dirname "$0")/.."
-pip install -e . 2>&1 | sed 's/^/  /'
-
-# Verify CLI works
-if command -v msi-psu-monitor &>/dev/null; then
-    info "CLI tool installed: $(which msi-psu-monitor)"
-else
-    warn "CLI tool not found in PATH after install"
+if [[ -z "${detected:-}" ]]; then
+    warn "No supported MSI PSU detected. Install will proceed, but the tool"
+    warn "cannot read anything until the PSU is connected."
+    warn "Expected USB IDs: 0db0:{808c, aa6f, 56d4, e749, c9eb}"
 fi
 
-# Install systemd service and timer
-info "Installing systemd service and timer..."
-cp systemd/msi-psu-monitor.service /etc/systemd/system/
-cp systemd/msi-psu-monitor.timer /etc/systemd/system/
-systemctl daemon-reload
+# Install the Python package (stdlib-only runtime, no dependencies to resolve)
+info "Installing the Python package..."
+python3 -m pip install --break-system-packages "$ROOT" 2>/dev/null \
+    || python3 -m pip install "$ROOT"
 
-# Create node_exporter directory if it doesn't exist
+for tool in msi-psu-monitor msi-psu-monitor-daemon; do
+    if command -v "$tool" >/dev/null; then
+        info "Installed CLI tool: $(command -v "$tool")"
+    else
+        warn "$tool not found in PATH after install"
+    fi
+done
+
+# udev: let a logged-in session use the PSU without root (uaccess)
+info "Installing the udev rule..."
+install -m 644 "$ROOT/systemd/99-msi-psu.rules" /etc/udev/rules.d/
+udevadm control --reload-rules
+udevadm trigger --subsystem-match=hidraw
+
+# systemd: one resident daemon (there is no timer any more)
+info "Installing the systemd unit..."
+install -m 644 "$ROOT/systemd/msi-psu-monitor.service" /etc/systemd/system/
+rm -f /etc/systemd/system/msi-psu-monitor.timer   # legacy timer installs
 mkdir -p /var/lib/node_exporter
-
-# Enable and start timer
-systemctl enable --now msi-psu-monitor.timer 2>&1 | sed 's/^/  /'
+systemctl daemon-reload
+systemctl enable --now msi-psu-monitor.service
 
 info "Installation complete!"
 echo ""
-echo "  Test the tool:  sudo msi-psu-monitor --once"
-echo "  Watch mode:     sudo msi-psu-monitor --watch"
-echo "  Prometheus:     sudo msi-psu-monitor --format prometheus --output /var/lib/node_exporter/msi-psu.prom"
-echo "  Timer status:   systemctl status msi-psu-monitor.timer"
+echo "  Read once:      sudo msi-psu-monitor --once"
+echo "  Watch mode:     sudo msi-psu-monitor --watch 1"
+echo "  No PSU at hand: MSI_PSU_DEMO=1 msi-psu-monitor --once"
+echo "  Dashboard:      msi-psu-monitor --dashboard"
+echo "  Alerts log:     journalctl -u msi-psu-monitor -f"
+echo "  Service state:  systemctl status msi-psu-monitor"
+echo "  Configuration:  install -m 644 $ROOT/docs/msi-psu-monitor.conf.example /etc/msi-psu-monitor.conf"
 echo ""
-echo "  Kernel module (optional):"
-echo "    See kernel/ directory for the MPG Ai1600TS patch."
-echo "    Build when Proxmox 7.0 kernel headers become available:"
+echo "  No-hardware verification checklist: $ROOT/docs/verify.md"
+echo "  Preferred install on Debian/Ubuntu:  bash $ROOT/scripts/build_deb.sh"
+echo ""
+echo "  Kernel module (optional, out-of-tree):"
+echo "    Jack Doan's msi-psu driver covers the MEG models; kernel/ carries the"
+echo "    MPG Ai1600TS patch. Build once Proxmox 7.0 kernel headers exist:"
 echo "      cd kernel && patch -p1 < msi-psu-ai1600ts.patch"
 echo "      make -C /lib/modules/\$(uname -r)/build M=\$(pwd) modules"

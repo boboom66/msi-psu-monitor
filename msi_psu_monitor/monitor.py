@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 """MSI PSU Monitor - CLI tool for reading sensors from MSI PSUs via USB HID.
 
-Supports MSI MPG Ai1600TS (with GPU Safeguard+ per-pin current monitoring),
-MEG Ai1600(T), MEG Ai1300P, and MEG Ai1000P power supplies.
+Supports MSI MPG Ai1600TS / MPG Ai1300TS (GPU Safeguard+ per-pin current
+monitoring), MEG Ai1600(T), MEG Ai1300P and MEG Ai1000P power supplies.
 
 Usage:
-    msi-psu-monitor --once          # One-shot sensor read
-    msi-psu-monitor --watch         # Continuous monitoring
-    msi-psu-monitor --format json   # JSON output
-    msi-psu-monitor --format prometheus --output /path/file.prom  # Prometheus output
+    msi-psu-monitor --once                    # one-shot sensor read (default)
+    msi-psu-monitor --watch 1                 # refresh every second
+    msi-psu-monitor --format json             # machine-readable output
+    msi-psu-monitor -f prometheus -O /var/lib/node_exporter/msi-psu.prom
+    msi-psu-monitor --show-log                # GPU Safeguard+ black box
+    msi-psu-monitor --fan-mode customized --fan-duty 80
+    msi-psu-monitor --export --from 2h --columns temp,fan,eff -O psu.csv
+    msi-psu-monitor --dashboard               # local charts in a browser
 """
 
 import argparse
+import csv
 import json
 import logging
 import os
@@ -19,13 +24,25 @@ import sys
 import time
 
 from msi_psu_monitor import __version__
-from msi_psu_monitor.alerts import AlertEngine, format_alert_line
+from msi_psu_monitor import demo
+from msi_psu_monitor import state as stats
+from msi_psu_monitor.alerts import AlertEngine, evaluate_pin_alerts, format_alert_line
 from msi_psu_monitor.config import load_config
-from msi_psu_monitor.protocol import MSIPSU, HIDDevice, detect_device
+from msi_psu_monitor.protocol import MSIPSU, DeviceBusyError, HIDDevice, detect_device
 
 EXIT_OK = 0
-EXIT_ALERT = 2
 EXIT_ERROR = 1
+EXIT_ALERT = 2
+
+FAN_MODE_AUTO = 'auto'
+FAN_MODE_CUSTOMIZED = 'customized'
+_FAN_MODE_TO_BYTE = {FAN_MODE_AUTO: 1, FAN_MODE_CUSTOMIZED: 3}
+_FAN_BYTE_TO_MODE = {1: FAN_MODE_AUTO, 3: FAN_MODE_CUSTOMIZED}
+
+STATUS_NORMAL = 'Normal'
+STATUS_UNKNOWN = 'Unknown'
+
+STREAM_FORMATS = ('text', 'json', 'prometheus')
 
 logger = logging.getLogger('msi_psu')
 
@@ -40,6 +57,33 @@ def setup_logging(verbose=False, quiet=False):
     logger.setLevel(level)
 
 
+# ---- output formatters --------------------------------------------------
+
+
+def _format_duration(total_seconds):
+    total_seconds = int(total_seconds)
+    days, rem = divmod(total_seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, seconds = divmod(rem, 60)
+    return f'{days}d {hours:02d}:{minutes:02d}:{seconds:02d}'
+
+
+def _value(reading):
+    """Unwrap a ``(value, unit)`` reading (or pass a scalar through)."""
+    if isinstance(reading, tuple):
+        return reading[0]
+    return reading
+
+
+def _reading_line(label, value, unit, digits, avg_reading=None, avg_digits=None):
+    line = f'  {label:8s}: {value:8.{digits}f} {unit}'
+    avg = _value(avg_reading)
+    if avg is not None:
+        avg_digits = digits if avg_digits is None else avg_digits
+        line += f'   (AVG {avg:.{avg_digits}f} {unit})'
+    return line
+
+
 def format_text(sensors):
     """Format sensor data as human-readable text."""
     lines = []
@@ -52,47 +96,53 @@ def format_text(sensors):
         lines.append(f'  ERROR   : {sensors["error"]}')
         return '\n'.join(lines)
 
-    for key in ['vout_12v', 'vout_5v', 'vout_3v3']:
+    for key, label in _VOLTAGE_LABELS.items():
         if key in sensors:
-            v, unit = sensors[key]
-            label = key.replace('vout_', '+').replace('_', '.').upper()
-            lines.append(f'  {label:8s}: {v:8.3f} {unit}')
+            value, unit = sensors[key]
+            lines.append(f'  {label:8s}: {value:8.3f} {unit}')
 
-    for key in ['iout_12v_total', 'iout_5v', 'iout_3v3']:
+    for key, label in _CURRENT_LABELS.items():
         if key in sensors:
-            v, unit = sensors[key]
-            label = key.replace('iout_', '').replace('_', ' ').upper()
-            lines.append(f'  {label:8s}: {v:8.3f} {unit}')
+            value, unit = sensors[key]
+            lines.append(f'  {label:8s}: {value:8.3f} {unit}')
 
     if 'iout_pins' in sensors:
         pins, unit = sensors['iout_pins']
         lines.append('  Per-pin currents (12V-2x6 GPU Safeguard+):')
-        for i, pin_val in enumerate(pins):
-            conn = 1 if i < 6 else 2
-            pin = i % 6 + 1
-            lines.append(f'    Conn{conn} Pin{pin}: {pin_val:8.3f} {unit}')
+        for index, pin_value in enumerate(pins):
+            conn = 1 if index < 6 else 2
+            pin = index % 6 + 1
+            lines.append(f'    Conn{conn} Pin{pin}: {pin_value:8.3f} {unit}')
+
+    if 'status' in sensors:
+        lines.append(f'  12V-2x6 Status: {sensors["status"]}')
 
     if 'power_total' in sensors:
-        v, unit = sensors['power_total']
-        lines.append(f'  POWER   : {v:8.1f} {unit}')
+        value, unit = sensors['power_total']
+        lines.append(_reading_line('POWER', value, unit, 1, sensors.get('power_avg'), 2))
     if 'efficiency' in sensors:
-        v, unit = sensors['efficiency']
-        lines.append(f'  EFF     : {v:8.2f} {unit}')
+        value, unit = sensors['efficiency']
+        lines.append(_reading_line('EFF', value, unit, 2, sensors.get('efficiency_avg'), 2))
     if 'temp' in sensors:
-        v, unit = sensors['temp']
-        lines.append(f'  TEMP    : {v:8.1f} {unit}')
+        value, unit = sensors['temp']
+        lines.append(f'  TEMP    : {value:8.1f} {unit}')
     if 'fan_rpm' in sensors:
-        v, unit = sensors['fan_rpm']
-        lines.append(f'  FAN     : {v:8.0f} {unit}')
+        value, unit = sensors['fan_rpm']
+        lines.append(f'  FAN     : {value:8.0f} {unit}')
+
+    if 'zero_fan' in sensors or 'fan_mode' in sensors:
+        zero_fan = sensors.get('zero_fan')
+        zero = 'unknown' if zero_fan is None else ('on' if zero_fan else 'off')
+        mode = sensors.get('fan_mode') or 'unknown'
+        lines.append(f'  Zero Fan: {zero:3s}   Mode: {mode}')
 
     for key in ['uptime', 'uptime_total']:
         if key in sensors:
-            secs = sensors[key]
-            days = secs // 86400
-            hours = (secs % 86400) // 3600
-            mins = (secs % 3600) // 60
             label = 'Uptime' if key == 'uptime' else 'Total uptime'
-            lines.append(f'  {label:11s}: {days}d {hours:02d}:{mins:02d}:{secs % 60:02d}')
+            lines.append(f'  {label:11s}: {_format_duration(sensors[key])}')
+
+    if 'total_energy' in sensors:
+        lines.append(f'  Total energy: {_value(sensors["total_energy"]):.1f} kWh')
 
     return '\n'.join(lines)
 
@@ -100,79 +150,105 @@ def format_text(sensors):
 def format_json(sensors):
     """Format sensor data as JSON."""
     out = {}
-    for k, v in sensors.items():
-        if isinstance(v, tuple):
-            out[k] = {'value': v[0], 'unit': v[1]}
+    for key, value in sensors.items():
+        if isinstance(value, tuple):
+            out[key] = {'value': value[0], 'unit': value[1]}
         else:
-            out[k] = v
+            out[key] = value
     return json.dumps(out, indent=2)
 
 
+def _label(value):
+    """Escape a Prometheus label value."""
+    return str(value).replace('\\', '\\\\').replace('"', '\\"').replace('\n', ' ')
+
+
 def format_prometheus(sensors):
-    """Format sensor data for Prometheus node_exporter textfile collector."""
+    """Format sensor data for the node_exporter textfile collector."""
     lines = []
     lines.append('# HELP msi_psu_info MSI PSU information')
     lines.append('# TYPE msi_psu_info gauge')
     lines.append(
-        f'msi_psu_info{{product="{sensors.get("product", "")}",'
-        f'vendor="{sensors.get("vendor", "")}",'
-        f'fw="{sensors.get("fw_revision", "")}"}} 1'
+        f'msi_psu_info{{product="{_label(sensors.get("product", ""))}",'
+        f'vendor="{_label(sensors.get("vendor", ""))}",'
+        f'fw="{_label(sensors.get("fw_revision", ""))}",'
+        f'serial="{_label(sensors.get("serial", ""))}"}} 1'
     )
 
     prefix = 'msi_psu'
     for key in ['vout_12v', 'vout_5v', 'vout_3v3']:
         if key in sensors:
-            v, unit = sensors[key]
+            value, _ = sensors[key]
             name = key.replace('vout_', 'voltage_')
             lines.append(f'# HELP {prefix}_{name} {name} in volts')
             lines.append(f'# TYPE {prefix}_{name} gauge')
-            lines.append(f'{prefix}_{name}{{rail="{key}"}} {v}')
+            lines.append(f'{prefix}_{name}{{rail="{key}"}} {value}')
 
     for key in ['iout_12v_total', 'iout_5v', 'iout_3v3']:
         if key in sensors:
-            v, unit = sensors[key]
+            value, _ = sensors[key]
             name = key.replace('iout_', 'current_')
             lines.append(f'# HELP {prefix}_{name} {name} in amps')
             lines.append(f'# TYPE {prefix}_{name} gauge')
-            lines.append(f'{prefix}_{name}{{rail="{key}"}} {v}')
+            lines.append(f'{prefix}_{name}{{rail="{key}"}} {value}')
 
     if 'iout_pins' in sensors:
-        pins, unit = sensors['iout_pins']
-        for i, pin_val in enumerate(pins):
-            conn = 1 if i < 6 else 2
-            pin = i % 6 + 1
-            lines.append('# HELP msi_psu_pin_current Per-pin current on 12V-2x6 connector in amps')
-            lines.append('# TYPE msi_psu_pin_current gauge')
-            lines.append(f'msi_psu_pin_current{{connector="{conn}",pin="{pin}"}} {pin_val}')
+        pins, _ = sensors['iout_pins']
+        lines.append('# HELP msi_psu_pin_current Per-pin current on 12V-2x6 connector in amps')
+        lines.append('# TYPE msi_psu_pin_current gauge')
+        for index, pin_value in enumerate(pins):
+            conn = 1 if index < 6 else 2
+            pin = index % 6 + 1
+            lines.append(f'msi_psu_pin_current{{connector="{conn}",pin="{pin}"}} {pin_value}')
 
     if 'power_total' in sensors:
-        v, unit = sensors['power_total']
+        value, _ = sensors['power_total']
         lines.append('# HELP msi_psu_power_total Total output power in watts')
         lines.append('# TYPE msi_psu_power_total gauge')
-        lines.append(f'msi_psu_power_total {{}} {v}')
-
+        lines.append(f'msi_psu_power_total {{}} {value}')
+    if 'power_avg' in sensors:
+        lines.append('# HELP msi_psu_power_avg Cumulative mean output power in watts')
+        lines.append('# TYPE msi_psu_power_avg gauge')
+        lines.append(f'msi_psu_power_avg {{}} {_value(sensors["power_avg"])}')
     if 'efficiency' in sensors:
-        v, unit = sensors['efficiency']
+        value, _ = sensors['efficiency']
         lines.append('# HELP msi_psu_efficiency Efficiency in percent')
         lines.append('# TYPE msi_psu_efficiency gauge')
-        lines.append(f'msi_psu_efficiency {{}} {v}')
-
+        lines.append(f'msi_psu_efficiency {{}} {value}')
+    if 'efficiency_avg' in sensors:
+        lines.append('# HELP msi_psu_efficiency_avg Cumulative mean efficiency in percent')
+        lines.append('# TYPE msi_psu_efficiency_avg gauge')
+        lines.append(f'msi_psu_efficiency_avg {{}} {_value(sensors["efficiency_avg"])}')
     if 'temp' in sensors:
-        v, unit = sensors['temp']
+        value, _ = sensors['temp']
         lines.append('# HELP msi_psu_temperature Temperature in celsius')
         lines.append('# TYPE msi_psu_temperature gauge')
-        lines.append(f'msi_psu_temperature {{}} {v}')
-
+        lines.append(f'msi_psu_temperature {{}} {value}')
     if 'fan_rpm' in sensors:
-        v, unit = sensors['fan_rpm']
+        value, _ = sensors['fan_rpm']
         lines.append('# HELP msi_psu_fan_speed Fan speed in RPM')
         lines.append('# TYPE msi_psu_fan_speed gauge')
-        lines.append(f'msi_psu_fan_speed {{}} {v}')
+        lines.append(f'msi_psu_fan_speed {{}} {value}')
+    if 'zero_fan' in sensors:
+        state = 'on' if sensors['zero_fan'] else 'off'
+        lines.append('# HELP msi_psu_zero_fan Zero Fan mode state (1 for the active state)')
+        lines.append('# TYPE msi_psu_zero_fan gauge')
+        lines.append(f'msi_psu_zero_fan{{state="{state}"}} 1')
+    if 'status' in sensors:
+        lines.append('# HELP msi_psu_status_12v_2x6 12V-2x6 status label (1 for the active label)')
+        lines.append('# TYPE msi_psu_status_12v_2x6 gauge')
+        lines.append(f'msi_psu_status_12v_2x6{{status="{_label(sensors["status"])}"}} 1')
+    if 'total_energy' in sensors:
+        lines.append('# HELP msi_psu_total_energy_kwh Cumulative energy drawn in kWh')
+        lines.append('# TYPE msi_psu_total_energy_kwh counter')
+        lines.append(f'msi_psu_total_energy_kwh {{}} {_value(sensors["total_energy"])}')
 
-    for alert_name in sensors.get('alerts', []):
-        lines.append('# HELP msi_psu_alert Active PSU alert (E1h bit set)')
+    alerts = sensors.get('alerts')
+    if alerts:
+        lines.append('# HELP msi_psu_alert Active PSU alert (E1h bit or per-pin mirror)')
         lines.append('# TYPE msi_psu_alert gauge')
-        lines.append(f'msi_psu_alert{{alert="{alert_name}"}} 1')
+        for alert_name in alerts:
+            lines.append(f'msi_psu_alert{{alert="{_label(alert_name)}"}} 1')
 
     for key in ['uptime', 'uptime_total']:
         if key in sensors:
@@ -183,74 +259,390 @@ def format_prometheus(sensors):
     return '\n'.join(lines)
 
 
+FORMATTERS = {'text': format_text, 'json': format_json, 'prometheus': format_prometheus}
+
+# Display labels, in report order (the 7ZPU layout omits the 5V/3.3V rails).
+_VOLTAGE_LABELS = {'vout_12v': '+12V', 'vout_5v': '+5V', 'vout_3v3': '+3.3V'}
+_CURRENT_LABELS = {'iout_12v_total': '12V TOTAL', 'iout_5v': '5V', 'iout_3v3': '3.3V'}
+
+_BLACKBOX_STATUS = {
+    0: 'normal',
+    1: 'single-pin OCP (>12A)',
+    2: 'pin difference (>5A)',
+    3: 'instant OCP (>18A)',
+}
+
+
 def format_blackbox(records):
-    """Format C1h black-box records as human-readable text."""
+    """Format C1h black-box records as human-readable text (newest first)."""
     if not records:
         return 'No black-box alert records stored.'
-    lines = ['Black-box alert records (newest first):']
-    for rec in records:
+    lines = ['GPU Safeguard+ alert log (black box, last 10, newest first)', '']
+    for record in records:
+        status = _BLACKBOX_STATUS.get(record.get('status'), f'status {record.get("status")}')
         lines.append(
-            f'  #{rec["info_id"]} set={rec["pin_set"]} status={rec["status"]} '
-            f'run_time={rec["run_time"]}s total={rec["total_time"]}s '
-            f'count={rec["total_count"]} pins={rec["pins_1_6"]}'
+            f'#{record["info_id"]}  Conn{record.get("pin_set")}   {status}   '
+            f'uptime {_format_duration(record.get("run_time", 0))} / '
+            f'total {_format_duration(record.get("total_time", 0))}   '
+            f'total count: {record.get("total_count")}'
         )
+        pins = record.get('pins_1_6') or []
+        if pins:
+            rendered = '  '.join(f'{pin:.1f}' for pin in pins)
+            lines.append(f'    Pin currents (A): {rendered}')
+        lines.append('')
+    while lines and lines[-1] == '':
+        lines.pop()
     return '\n'.join(lines)
 
 
-def check_alerts(psu, engine):
-    """Poll E1h once, feed the engine, print newly fired alerts.
+# ---- sensor enrichment --------------------------------------------------
 
-    Returns the list of newly fired Alert objects (possibly empty).
-    A PSU that does not answer E1h is treated as no-data, never as OK.
+
+def read_fan_fields(psu):
+    """Return fan_mode/zero_fan (and duty) fields, or {} when unsupported."""
+    reader = getattr(psu, 'read_fan_state', None)
+    if reader is None:
+        return {}
+    try:
+        fan = reader()
+    except Exception:  # pragma: no cover - defensive against odd devices
+        return {}
+    fields = {}
+    if fan.get('mode') is not None:
+        fields['fan_mode'] = _FAN_BYTE_TO_MODE.get(fan['mode'], f'mode{fan["mode"]}')
+    if fan.get('zero_fan') is not None:
+        fields['zero_fan'] = bool(fan['zero_fan'])
+    if fan.get('duty') is not None:
+        fields['fan_duty'] = fan['duty']
+    return fields
+
+
+def collect_alerts(psu, engine, sensors):
+    """Merge E1h hardware bits with the software per-pin mirror.
+
+    Returns ``(fired, active_names, have_data)``. A PSU that answers neither
+    source yields ``have_data=False`` so callers never read that as "all OK".
     """
-    status = psu.read_alert_status()
-    if status is None:
-        return []
-    fired = engine.update(status)
+    active = {}
+    have_data = False
+    hardware = psu.read_alert_status()
+    if hardware:
+        active.update({name: bool(value) for name, value in hardware.items()})
+        have_data = True
+
+    pins = sensors.get('iout_pins')
+    software = evaluate_pin_alerts(pins[0] if isinstance(pins, tuple) else pins)
+    if software:
+        have_data = True
+        for name, value in software.items():
+            active[name] = active.get(name, False) or value
+
+    if not have_data:
+        return [], [], False
+
+    fired = engine.update(active)
     for alert in fired:
         logger.warning(format_alert_line(alert))
-    return fired
+    return fired, engine.active_alerts, True
 
 
-def main():
+def status_from(active_names, have_data):
+    """Render the ``12V-2x6 Status`` label."""
+    if active_names:
+        return ', '.join(active_names)
+    return STATUS_NORMAL if have_data else STATUS_UNKNOWN
+
+
+def _valid_sample(sensors):
+    """Return (watts, efficiency) when both readings are usable, else None."""
+    power = _value(sensors.get('power_total'))
+    efficiency = _value(sensors.get('efficiency'))
+    if not power or not efficiency:
+        return None
+    return float(power), float(efficiency)
+
+
+def apply_stats(sensors, monitor_state):
+    """Fold the sample into the cumulative stats and expose the derived values."""
+    if monitor_state is None:
+        return
+    monitor_state.note_identity(sensors)
+    sample = _valid_sample(sensors)
+    if sample is not None:
+        monitor_state.update(*sample)
+    sensors['power_avg'] = (round(monitor_state.power_avg, 2), 'W')
+    sensors['efficiency_avg'] = (round(monitor_state.efficiency_avg, 2), '%')
+    sensors['total_energy'] = (round(monitor_state.total_energy_kwh, 3), 'kWh')
+
+
+# ---- device selection ---------------------------------------------------
+
+
+def open_psu(path):
+    """Open the PSU on ``path`` (the synthetic demo device in MSI_PSU_DEMO mode)."""
+    if demo.enabled():
+        return demo.DemoPSU()
+    return MSIPSU(HIDDevice(path))
+
+
+def resolve_device(serial):
+    """Pick the hidraw path to use; returns ``(path, available_serials)``."""
+    if demo.enabled():
+        available = [demo.DEMO_SERIAL]
+        if serial in (None, demo.DEMO_SERIAL):
+            return demo.DEVICE_PATH, available
+        return None, available
+    if serial is None:
+        return detect_device(), []
+    from msi_psu_monitor.protocol import detect_devices
+
+    available = []
+    for path in detect_devices():
+        psu = None
+        try:
+            psu = MSIPSU(HIDDevice(path))
+            psu.open()
+            psu.init()
+        except (OSError, DeviceBusyError):
+            continue
+        finally:
+            if psu is not None:
+                psu.close()
+        available.append(psu.serial)
+        if psu.serial == serial:
+            return path, available
+    return None, available
+
+
+def _state_dir(cfg):
+    return str(cfg.get('state_dir') or stats.default_state_dir())
+
+
+# ---- modes --------------------------------------------------------------
+
+
+def emit(output, output_path):
+    if output_path:
+        with open(output_path, 'w') as handle:
+            handle.write(output + '\n')
+    else:
+        print(output)
+
+
+def run_once(psu, args, cfg, monitor_state, engine):
+    """One-shot read; returns the process exit code."""
+    sensors = psu.get_sensors()
+    if 'error' in sensors:
+        logger.error(f'Error: {sensors["error"]}')
+        emit(FORMATTERS[args.format](sensors), args.output)
+        return EXIT_ERROR
+
+    sensors.update(read_fan_fields(psu))
+    if not args.no_alerts:
+        _, active, have_data = collect_alerts(psu, engine, sensors)
+        sensors['alerts'] = active
+        sensors['status'] = status_from(active, have_data)
+    apply_stats(sensors, monitor_state)
+    if monitor_state is not None:
+        monitor_state.prune()
+        monitor_state.save(stats.state_path(_state_dir(cfg)))
+
+    emit(FORMATTERS[args.format](sensors), args.output)
+    return EXIT_ALERT if sensors.get('alerts') else EXIT_OK
+
+
+def run_watch(psu, args, cfg, monitor_state, engine):
+    """Continuous text refresh; returns the process exit code."""
+    interval = args.interval if args.interval is not None else args.watch
+    last_save = 0.0
+    try:
+        while True:
+            sensors = psu.get_sensors()
+            if 'error' in sensors:
+                logger.error(f'Error: {sensors["error"]}')
+                return EXIT_ERROR
+            sensors.update(read_fan_fields(psu))
+            if not args.no_alerts:
+                _, active, have_data = collect_alerts(psu, engine, sensors)
+                sensors['alerts'] = active
+                sensors['status'] = status_from(active, have_data)
+            apply_stats(sensors, monitor_state)
+
+            now = time.time()
+            if monitor_state is not None and now - last_save >= 30.0:
+                monitor_state.prune()
+                monitor_state.save(stats.state_path(_state_dir(cfg)))
+                last_save = now
+
+            # Clear only on a terminal: pipes keep a complete, parseable stream.
+            if sys.stdout.isatty():
+                os.system('clear' if sys.platform == 'linux' else 'cls')
+            # flush so `msi-psu-monitor --watch | tee` still sees each frame.
+            print(format_text(sensors), flush=True)
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        return EXIT_OK
+    finally:
+        if monitor_state is not None:
+            monitor_state.save(stats.state_path(_state_dir(cfg)))
+
+
+def run_fan_write(psu, mode, duty):
+    """Write the fan setting (41h) + save (F1h), then verify by read-back."""
+    if mode is None:
+        mode = FAN_MODE_CUSTOMIZED if duty is not None else FAN_MODE_AUTO
+    if mode == FAN_MODE_AUTO:
+        duty = 0
+    elif duty is None:
+        current = psu.read_fan_setting()
+        duty = current[1] if current else 0
+
+    target_mode = _FAN_MODE_TO_BYTE[mode]
+    for _ in range(3):
+        if not psu.set_fan_mode(target_mode, duty):
+            continue
+        setting = psu.read_fan_setting()
+        if setting and setting[0] == target_mode and (mode == FAN_MODE_AUTO or setting[1] == duty):
+            duty_text = '' if mode == FAN_MODE_AUTO else f'   Duty: {duty}%'
+            print(f'Fan mode: {mode}{duty_text}')
+            return EXIT_OK
+    logger.error('Error: the PSU did not accept the fan setting (read-back mismatch).')
+    return EXIT_ERROR
+
+
+def run_export(args, cfg):
+    """Export a slice of the daemon history; returns the process exit code."""
+    if not args.from_spec:
+        logger.error('Error: --export requires --from (e.g. --from 2h).')
+        return EXIT_ERROR
+    try:
+        window = stats.parse_from(args.from_spec)
+        columns = stats.parse_columns(args.columns)
+    except ValueError as exc:
+        logger.error(f'Error: {exc}')
+        return EXIT_ERROR
+
+    header, rows = stats.build_export(_state_dir(cfg), time.time() - window, columns)
+    if args.output:
+        with open(args.output, 'w', newline='') as handle:
+            _write_csv(handle, header, rows)
+    else:
+        _write_csv(sys.stdout, header, rows)
+    return EXIT_OK
+
+
+def _write_csv(stream, header, rows):
+    writer = csv.writer(stream)
+    writer.writerow(header)
+    writer.writerows(rows)
+
+
+def run_dashboard(args, cfg):
+    """Start the local chart server (blocks until interrupted)."""
+    from msi_psu_monitor import dashboard
+
+    return dashboard.serve(host='127.0.0.1', port=args.port, state_dir=_state_dir(cfg))
+
+
+# ---- argument parsing ---------------------------------------------------
+
+
+def build_parser():
     parser = argparse.ArgumentParser(
         description='MSI PSU Monitor - read sensors from MSI PSUs via USB HID',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     parser.add_argument(
-        '--format',
         '-f',
-        choices=['text', 'json', 'prometheus'],
+        '--format',
+        choices=list(STREAM_FORMATS),
         default=None,
         help='Output format (default: text)',
     )
     parser.add_argument(
-        '--watch',
         '-w',
-        action='store_true',
-        help='Watch mode: continuously read and display sensors',
+        '--watch',
+        nargs='?',
+        const=2.0,
+        default=None,
+        type=float,
+        help='Watch mode; optional refresh seconds (default 2.0)',
     )
     parser.add_argument(
-        '--interval',
         '-i',
+        '--interval',
         type=float,
         default=None,
-        help='Polling interval in seconds (default: 2.0)',
+        help='Polling interval in seconds (legacy; pairs with --watch)',
     )
-    parser.add_argument('--once', '-o', action='store_true', help='Read sensors once and exit')
+    parser.add_argument('-o', '--once', action='store_true', help='Read sensors once and exit')
     parser.add_argument(
-        '--output', '-O', type=str, default=None, help='Write output to file instead of stdout'
+        '-O',
+        '--output',
+        type=str,
+        default=None,
+        help='Write output to file instead of stdout',
+    )
+    parser.add_argument(
+        '--serial',
+        type=str,
+        default=None,
+        help='Select one of several PSUs by serial number (default: first)',
+    )
+    parser.add_argument(
+        '--fan-mode',
+        choices=[FAN_MODE_AUTO, FAN_MODE_CUSTOMIZED],
+        default=None,
+        help='Write the fan control mode (41h) and save it (F1h)',
+    )
+    parser.add_argument(
+        '--fan-duty',
+        type=int,
+        choices=range(0, 101),
+        default=None,
+        metavar='0-100',
+        help='Custom fan duty in percent (implies --fan-mode customized)',
+    )
+    parser.add_argument(
+        '--export',
+        action='store_true',
+        help='Export the daemon history as CSV',
+    )
+    parser.add_argument(
+        '--from',
+        dest='from_spec',
+        type=str,
+        default=None,
+        help='Export window, e.g. 30m, 2h, 7d (required with --export)',
+    )
+    parser.add_argument(
+        '--columns',
+        type=str,
+        default=None,
+        help='Export columns: all,cpu,gpu,12v,5v,3v3,temp,fan,eff (default: all)',
+    )
+    parser.add_argument(
+        '--dashboard',
+        action='store_true',
+        help='Serve local charts on 127.0.0.1',
+    )
+    parser.add_argument(
+        '--port',
+        type=int,
+        default=None,
+        help='Dashboard port (default: 8899)',
+    )
+    parser.add_argument(
+        '--show-log',
+        action='store_true',
+        help='Dump PSU black-box alert records (C1h)',
     )
     parser.add_argument(
         '--no-alerts',
         action='store_true',
         help='Skip the E1h alert poll (default: alerts are checked)',
-    )
-    parser.add_argument(
-        '--show-log',
-        action='store_true',
-        help='Dump PSU black-box alert records (C1h) and exit',
     )
     parser.add_argument(
         '--config',
@@ -263,89 +655,105 @@ def main():
     )
     parser.add_argument('--quiet', '-q', action='store_true', help='Errors only on stderr')
     parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
+    return parser
+
+
+def _validate_args(parser, args):
+    """Reject conflicting flag combinations before touching the device."""
+    if args.show_log and (
+        args.watch is not None or args.export or args.format not in (None, 'text')
+    ):
+        parser.error('--show-log cannot be combined with --watch, --export or --format')
+    if args.export and args.watch is not None:
+        parser.error('--export cannot be combined with --watch')
+    if (args.from_spec or args.columns) and not args.export:
+        parser.error('--from and --columns are only valid together with --export')
+    if args.watch is not None and args.once:
+        parser.error('--watch and --once are mutually exclusive')
+    if args.watch is not None and args.format not in (None, 'text'):
+        parser.error('--watch only supports the text format')
+    if (args.fan_mode or args.fan_duty is not None) and (
+        args.show_log or args.export or args.watch is not None
+    ):
+        parser.error(
+            '--fan-mode/--fan-duty cannot be combined with --watch, --export or --show-log'
+        )
+    if args.port is not None and not args.dashboard:
+        parser.error('--port is only valid together with --dashboard')
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
+    _validate_args(parser, args)
 
     cfg = load_config(args.config)
-    if args.interval is None:
-        args.interval = cfg['interval']
     if args.format is None:
         args.format = cfg['format']
     if args.output is None:
         args.output = cfg['output']
+    if args.port is None:
+        args.port = cfg['port']
+    if args.serial is None:
+        args.serial = cfg['serial']
     if not args.no_alerts:
         args.no_alerts = cfg['no_alerts']
+
     verbose = args.verbose or (cfg['verbose'] and not args.quiet)
     quiet = args.quiet or (cfg['quiet'] and not args.verbose)
     setup_logging(verbose=verbose, quiet=quiet)
-    if args.once or not args.watch:
+
+    if args.dashboard:
+        sys.exit(run_dashboard(args, cfg))
+    if args.export:
+        sys.exit(run_export(args, cfg))
+
+    if args.once or args.watch is None:
         debounce = 1
     else:
         debounce = cfg['consecutive_required']
 
-    dev_path = detect_device()
+    dev_path, available = resolve_device(args.serial)
     if dev_path is None:
-        logger.error('Error: MSI PSU not found. Is it connected via USB?')
+        if args.serial is not None:
+            logger.error(
+                f'Error: no PSU with serial {args.serial!r}. Available: '
+                f'{", ".join(available) if available else "none"}'
+            )
+        else:
+            logger.error('Error: MSI PSU not found. Is it connected via USB?')
         sys.exit(EXIT_ERROR)
+
+    state_dir = _state_dir(cfg)
+    monitor_state = stats.MonitorState.load(stats.state_path(state_dir))
+    engine = AlertEngine(consecutive_required=debounce)
 
     psu = None
     try:
-        psu = MSIPSU(HIDDevice(dev_path))
+        psu = open_psu(dev_path)
         psu.open()
         psu.init()
 
+        if args.fan_mode or args.fan_duty is not None:
+            sys.exit(run_fan_write(psu, args.fan_mode, args.fan_duty))
         if args.show_log:
             print(format_blackbox(psu.read_blackbox()))
             sys.exit(EXIT_OK)
-
-        if args.once or not args.watch:
-            sensors = psu.get_sensors()
-            exit_code = EXIT_OK
-            if 'error' in sensors:
-                logger.error(f'Error: {sensors["error"]}')
-                exit_code = EXIT_ERROR
-            elif not args.no_alerts:
-                fired = check_alerts(psu, AlertEngine(consecutive_required=debounce))
-                if fired:
-                    sensors['alerts'] = [alert.name for alert in fired]
-                    exit_code = EXIT_ALERT
-            if args.format == 'text':
-                output = format_text(sensors)
-            elif args.format == 'json':
-                output = format_json(sensors)
-            else:
-                output = format_prometheus(sensors)
-
-            if args.output:
-                with open(args.output, 'w') as f:
-                    f.write(output + '\n')
-            else:
-                print(output)
-            sys.exit(exit_code)
-
-        # Watch mode: edge-triggered engine, alerts print once when raised.
-        engine = AlertEngine(consecutive_required=debounce)
-        try:
-            while True:
-                sensors = psu.get_sensors()
-                if 'error' in sensors:
-                    logger.error(f'Error: {sensors["error"]}')
-                    sys.exit(EXIT_ERROR)
-                if not args.no_alerts:
-                    check_alerts(psu, engine)
-                os.system('clear' if sys.platform == 'linux' else 'cls')
-                print(format_text(sensors))
-                time.sleep(args.interval)
-        except KeyboardInterrupt:
-            pass
-
+        if args.watch is not None:
+            sys.exit(run_watch(psu, args, cfg, monitor_state, engine))
+        sys.exit(run_once(psu, args, cfg, monitor_state, engine))
+    except DeviceBusyError:
+        logger.error('Error: the PSU is busy (the daemon or another run holds it).')
+        sys.exit(EXIT_ERROR)
     except PermissionError:
         logger.error('Error: Permission denied. Run as root.')
         sys.exit(EXIT_ERROR)
-    except Exception as e:
-        logger.error(f'Error: {e}')
-        import traceback
+    except Exception as exc:
+        logger.error(f'Error: {exc}')
+        if verbose:
+            import traceback
 
-        traceback.print_exc()
+            traceback.print_exc()
         sys.exit(EXIT_ERROR)
     finally:
         if psu is not None:
@@ -354,5 +762,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-

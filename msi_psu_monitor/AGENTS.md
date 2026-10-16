@@ -1,13 +1,29 @@
 # PACKAGE INSTRUCTIONS — msi_psu_monitor/
 
-Stdlib-only package (`os/glob/struct/select/time/argparse/json/sys`). Never add
-third-party runtime imports.
+Stdlib-only package (`os/glob/struct/select/time/argparse/json/sys/csv/fcntl/signal/
+math/logging/http.server/dataclasses/pathlib/datetime`). Never add third-party
+runtime imports.
+
+## Module map
+
+| Module | Role |
+|--------|------|
+| `protocol.py` | HID framing, register map, variant dispatch, `MSIPSU.get_sensors()`, fan/alert/black-box reads, `HIDDevice` + `flock` |
+| `monitor.py` | CLI: argument validation, three formatters, exit codes, fan write, `--export`, `--show-log`, device selection, `open_psu()` |
+| `state.py` | `MonitorState` (avg + energy integral), `state.json` atomic persistence, `daily-*.log` history, `--from`/`--columns`/`build_export` |
+| `daemon.py` | Resident sample loop: 1 s alerts, 30 s atomic prometheus, 60 s history, rescan after 5 failures |
+| `dashboard.py` | Loopback-only `http.server` reading the history files; charts are hand-drawn `<canvas>` JS |
+| `alerts.py` | `AlertEngine` (edge-triggered + consecutive debounce), severities, per-pin OCP/imbalance mirror |
+| `config.py` | INI config, precedence CLI > file > `DEFAULTS` |
+| `demo.py` | `MSI_PSU_DEMO=1` synthetic PSU; the only synthetic source in the package |
 
 ## Protocol (normative: docs/protocol.md)
 
 - HID framing: 64-byte reports (`CMD_BUFFER_SIZE`), 250ms timeout
   (`CMD_TIMEOUT_MS`), 2-byte echo header stripped, NAK (`0xFE`) → `None`.
-- Registers: `0x10-0x13` ident, `0x20-0x42` sensors, `0xC0/0xD0/0xD1/0xE0` control.
+- Registers: `0x10-0x13` ident, `0x20-0x42` sensors, `0x41` fan setting,
+  `0x42` fan duty, `0xC0` OCP config, `0xC1` alert log, `0xD0/0xD1` control,
+  `0xE0` bulk read, `0xE1` alert status, `0xF1` save settings.
 - LINEAR11 call pattern (keep exactly):
   `lin11_to_int(struct.unpack('<H', data[o:o+2])[0], scale, signed) / scale`,
   rounded at the call site: V/A 3dp, W 1dp, % 2dp, RPM int.
@@ -19,19 +35,41 @@ third-party runtime imports.
 - Sensors dict: ident keys are plain strings; readings are `(value, unit)` tuples;
   formatters branch on `isinstance(v, tuple)`.
 
+## Invariants added with the daemon/state work
+
+- **Exit codes**: `EXIT_OK=0`, `EXIT_ERROR=1`, `EXIT_ALERT=2`. Alerts print
+  `ALERT [severity] name: description` on **stderr**; stdout stays machine-parseable.
+- **Every write is atomic**: `path.with_name(name + '.tmp')` + `os.replace()` for
+  `state.json` and the prometheus textfile. Never write the target in place.
+- **Energy integral is frozen**: `wh += watts * dt / 3600`, and gaps longer than
+  `MAX_SAMPLE_GAP_S` (300 s) advance the clock without integrating.
+- **`collect_alerts()` returns `have_data`**; a PSU that answers neither E1h nor the
+  pin mirror must render as `Unknown`, never as `Normal`.
+- **The demo must stay opt-in**: `demo.enabled()` reads `MSI_PSU_DEMO`; nothing may
+  import synthetic data on the production path.
+- **`--watch` is text-only** and flushes each frame (pipes must see every sample).
+- History CSV columns are frozen (`HISTORY_COLUMNS`); `--export` renames some and
+  maps `cpu`/`gpu` to `N/A` because the 7ZPU single-rail layout cannot split them.
+
 ## Anti-patterns
 
 - Do NOT add pip runtime dependencies.
 - Do NOT touch `BULK_*` for non-TS variants.
 - Do NOT harden `systemd/*.service` with `PrivateDevices` (needs `/dev/hidraw*`).
+- Do NOT let the dashboard touch hidraw — it is read-only over `daily-*.log`.
 - `--once or not watch` means the default run is one-shot; keep it.
 
-## Verification (local only, no CI in this repo; no `[tool.ruff|mypy|pytest]` section in `pyproject.toml`)
+## Verification (no hardware required)
 
 ```bash
-python -m pytest tests/ -q                # needs pytest installed; lin11 vectors + 3 formatters, no hardware
-ruff check msi_psu_monitor/ tests/        # 6 pre-existing violations; no repo gate
+uv run --group dev pytest -q              # 145 tests: lin11 vectors, formatters, state, daemon, dashboard, demo
+uv run --group dev ruff check .           # must be clean
+uv run --group dev mypy msi_psu_monitor/  # must be clean
 ```
 
-`ruff format` must NOT be enforced repo-wide: legacy files mix quote styles and a
-format pass would create a large churn diff.
+`ruff format` must NOT be enforced repo-wide: `protocol.py`, `__init__.py`,
+`__main__.py` and `tests/test_monitor.py` mix quote styles and a full format pass
+would create a churn diff. Format only the files you touched.
+
+Full no-hardware walkthrough (demo mode, daemon + dashboard chain, `.deb`):
+`docs/verify.md`.

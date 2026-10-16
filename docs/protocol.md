@@ -41,7 +41,20 @@ by the register data. Most registers return 2 bytes (uint16, little-endian).
 Send: `[0x50, <register>, <data_bytes...>, 0x00, ...]`
 Response: `[0x50, <register>, <data_bytes...>, 0x00, ...]`
 
-Writes to a single register. The response echoes the written data on success.
+Writes to a single register. The response echoes the written data on success; a
+reply whose first payload byte is `0xFC` (ACK) means accepted, `0xFE` (NAK) means
+the device refused the value.
+
+Implemented writes (frozen scope: fan control only; `0xC0` OCP writes are a later
+batch):
+
+| What | Command | Notes |
+|------|---------|-------|
+| Fan setting | `[0x50, 0x41, <mode>, 0x00, <duty>]` | `mode` 1 = auto (duty ignored), 3 = manual; `duty` 0-100, the PSU clamps out-of-range values |
+| Persist settings | `[0x50, 0xF1, 0x00]` | Sent right after the fan write; without it the setting is lost on power-off |
+
+`msi-psu-monitor --fan-mode/--fan-duty` does write → read-back verify (up to 3
+attempts) → report `EXIT_ERROR` on a mismatch.
 
 ### NAK (0xFE)
 
@@ -74,6 +87,7 @@ If a command is not supported or an error occurs, the response starts with:
 | ALERT_LOG | 0xC1 | 26B×10 | GPU Safeguard+ 黑盒（`--show-log` 来源，最近 10 条新→旧；待真机复核） |
 | UPTIME | 0xD0 | 4 bytes | Session uptime (seconds) |
 | TOTAL_UPTIME | 0xD1 | 4 bytes | Total lifetime uptime (seconds) |
+| SAVE_SETTING | 0xF1 | 1 byte | Persist the preceding `0x50` write to NVRAM (`[0x50, 0xF1, 0x00]`) |
 | READ_EVERYTHING | 0xE0 | varies | Bulk read of all sensor values |
 
 ## Bulk Read (0xE0)

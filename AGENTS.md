@@ -1,34 +1,76 @@
 # msi-psu-monitor
 
-Userspace Python CLI (stdlib only) reading MSI PSUs via USB HID hidraw.
-Protocol rules live in `msi_psu_monitor/AGENTS.md` (auto-loaded via `opencode.json`); `docs/protocol.md` is normative for 0xE0 bulk layouts only (see divergence note below).
+Userspace Python CLI + daemon (stdlib only) reading MSI PSUs via USB HID hidraw.
+Protocol rules live in `msi_psu_monitor/AGENTS.md` (auto-loaded via `opencode.json`);
+`docs/protocol.md` is normative for the register map and 0xE0 bulk layouts.
 
 ## Commands
 
 ```bash
-pip install -e .                                    # py>=3.10, setuptools, zero dependencies
-python -m pytest tests/ -q                          # no hardware needed; install pytest first (not vendored)
-python -m pytest tests/test_protocol_lin11.py -q    # single file
-sudo msi-psu-monitor --once                         # one-shot; hidraw needs root (PermissionError otherwise)
-sudo msi-psu-monitor --watch                        # continuous, default 2s poll
+uv sync --group dev                                  # py>=3.10, dev toolchain (pytest/ruff/mypy), zero runtime deps
+uv run --group dev pytest -q                         # 145 tests, no hardware needed
+uv run --group dev pytest -q tests/test_state.py     # single file
+uv run --group dev ruff check .                      # must be clean
+uv run --group dev mypy msi_psu_monitor/             # must be clean
+MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --once      # full pipeline, no PSU attached
+sudo msi-psu-monitor --once                          # one-shot; hidraw needs root (or the udev uaccess rule)
+sudo msi-psu-monitor --watch 1                       # continuous, 1s poll
 sudo msi-psu-monitor -f prometheus -O /var/lib/node_exporter/msi-psu.prom
-sudo ./scripts/install.sh                           # package + systemd timer
+msi-psu-monitor --dashboard --port 8899              # loopback charts over the daemon history
+bash scripts/build_deb.sh                            # .deb into dist/
+sudo ./scripts/install.sh                            # package + systemd daemon unit
 ```
 
-No CI, no lint/typecheck gate, no `[tool.ruff|mypy|pytest]` section in `pyproject.toml`.
+`docs/verify.md` is the full no-hardware checklist — use it instead of improvising.
+CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12.
 
 ## Gotchas (agent would miss these)
 
-- **Stdlib only**: `os/glob/struct/select/time/argparse/json/sys`. Never add a runtime dependency (`pyproject.toml` has zero `dependencies`).
-- **Variant dispatch is by product-string substring, order matters**: `Ai1600TS` → mpg before the `Ai1600` → meg wildcard, then `Ai1300`/`Ai1000` (`protocol.py:MSIPSU.init`). Never dispatch by USB PID; `PSU_PRODUCT_IDS` (4 PIDs) and the variant map are maintained separately.
-- **`BULK_*` offsets are Ai1600TS-only** (62B payload: 44B data + 18B zero pad, bail if bulk `<44B`). meg_ai1600 (20B) and ai1000p/ai1300p (40B) use inline slices in `get_sensors()` — do not "unify" them onto `BULK_*`.
-- **Sensors dict shape**: ident keys (`vendor/product/fw_revision/serial`) are plain strings; readings are `(value, unit)` tuples. Formatters branch on `isinstance(v, tuple)` — keep that contract.
-- **LINEAR11 call pattern, keep exactly**: `lin11_to_int(struct.unpack('<H', data[o:o+2])[0], scale, signed) / scale`, rounded at call site (V/A 3dp, W 1dp, % 2dp, RPM int). `signed=False` only for fan RPM. Scales: V/A ×1000, W ×1e6, EFF ×100, TEMP ×1000.
-- **HID framing**: always 64B reports, 250ms timeout, drain-before-write, strip 2-byte echo header, NAK (`0xFE`) → `None`.
-- **Default run is one-shot**: `if args.once or not args.watch` — do not require `--once`. `--watch` clears the screen and is text-format only (no JSON streaming).
-- **`docs/protocol.md` has diverged from code**: the working tree adds unimplemented rows (0xE1 alert status, 0xC1 alert log, 8-byte 0xC0 multirail block, fan-duty tuple, ASCII revision, length-prefixed serial). None of this exists in `protocol.py`/`monitor.py` — code is truth; do not implement from those rows without hardware to verify.
-- **`scripts/install.sh` only probes `ID_MODEL_ID=808c`** (Ai1600TS). The other 3 PIDs work at runtime via `PSU_PRODUCT_IDS` — detection miss in the script is not a missing-device bug.
-- **`systemd/*.service` hardening**: the commented-out sandbox lines are intentional. Do not add `PrivateDevices` — the service needs `/dev/hidraw*`. Service is `Type=oneshot`, timer is `OnCalendar=*:*:0/30`.
-- **Line endings**: `.gitattributes` enforces LF; CRLF breaks `install.sh`.
-- **`kernel/` patch is out-of-tree** (Proxmox 7.0 headers unavailable) — never build it here; the userspace tool is the supported path.
-- **Lint state**: `ruff check` currently reports 6 pre-existing violations (F541, RUF059, BLE001, I001, RUF012). Do not claim clean, bulk-fix, or run `ruff format` repo-wide (mixed quote styles → churn diff).
+- **Stdlib only**: never add a runtime dependency (`pyproject.toml` has zero
+  `dependencies`), including for the dashboard and the demo mode.
+- **Variant dispatch is by product-string substring, order matters**: `Ai1600TS` → mpg
+  before the `Ai1600` → meg wildcard, then `Ai1300`/`Ai1000` (`protocol.py:MSIPSU.init`).
+  Never dispatch by USB PID; `PSU_PRODUCT_IDS` (5 PIDs) and the variant map are
+  maintained separately.
+- **`BULK_*` offsets are Ai1600TS-only** (62B payload: 44B data + 18B zero pad, bail if
+  bulk `<44B`). meg_ai1600 (20B) and ai1000p/ai1300p (40B) use inline slices in
+  `get_sensors()` — do not "unify" them onto `BULK_*`.
+- **Sensors dict shape**: ident keys (`vendor/product/fw_revision/serial`) are plain
+  strings; readings are `(value, unit)` tuples. Formatters branch on
+  `isinstance(v, tuple)` — keep that contract.
+- **LINEAR11 call pattern, keep exactly**:
+  `lin11_to_int(struct.unpack('<H', data[o:o+2])[0], scale, signed) / scale`, rounded at
+  the call site (V/A 3dp, W 1dp, % 2dp, RPM int). `signed=False` only for fan RPM.
+  Scales: V/A ×1000, W ×1e6, EFF ×100, TEMP ×1000.
+- **HID framing**: always 64B reports, 250ms timeout, drain-before-write, strip 2-byte
+  echo header, NAK (`0xFE`) → `None`.
+- **Default run is one-shot**: `if args.once or args.watch is None` — do not require
+  `--once`. `--watch` is text-format only (no JSON streaming) and flushes every frame.
+- **Exit codes are load-bearing**: `0` normal / `1` program or argument fault / `2`
+  alert active. Alerts go to stderr as `ALERT [severity] name: description`; the
+  frozen tests in `tests/test_monitor_format.py` and `tests/test_cli_alerts.py` lock
+  the exact output strings — update them deliberately, never to make a failure pass.
+- **Alerts are edge-triggered with a consecutive-poll debounce** (`consecutive_required`,
+  default 2). `collect_alerts()` also returns `have_data`: with no E1h answer and no pin
+  mirror the status must read `Unknown`, never `Normal`.
+- **`docs/protocol.md` now matches the code** for 0xE1 (alert status), 0xC1 (alert log),
+  0x41/0x42 (fan), 0xC0 (OCP) and 0xF1 (save). Treat the code as truth where they differ
+  again, but do not describe implemented registers as "unimplemented".
+- **Persistent state**: `state.json` + `daily-YYYYMMDD.log` in
+  `/var/lib/msi-psu-monitor` (systemd `StateDirectory`), XDG fallback, `MSI_PSU_STATE_DIR`
+  override. Both writes are atomic (`.tmp` + `os.replace`); keep it that way.
+- **`MSI_PSU_DEMO=1` is the only synthetic data path** (`demo.py`). It must stay opt-in;
+  never let demo values reach a real read.
+- **`systemd/msi-psu-monitor.service` is `Type=simple`/`Restart=always`** running the
+  daemon. The old `msi-psu-monitor.timer` was deleted (D-02: one daemon, not a timer).
+  The commented sandbox lines are intentional — do not add `PrivateDevices`, the daemon
+  holds `/dev/hidraw*` open for its whole runtime.
+- **`scripts/install.sh` only probes `ID_MODEL_ID=808c`** (Ai1600TS). The other 4 PIDs
+  work at runtime via `PSU_PRODUCT_IDS` — a detection miss in the script is not a
+  missing-device bug.
+- **Line endings**: `.gitattributes` enforces LF; CRLF breaks the shell scripts.
+- **`kernel/` patch is out-of-tree** (Proxmox 7.0 headers unavailable) — never build it
+  here; the userspace tool is the supported path.
+- **`ruff format` must not run repo-wide**: `protocol.py`, `__init__.py`, `__main__.py`
+  and `tests/test_monitor.py` mix quote styles, so a full pass creates a churn diff.
+  Format only the files you touched (`uv run --group dev ruff format <files>`).

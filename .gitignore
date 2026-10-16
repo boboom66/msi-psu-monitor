@@ -36,7 +36,16 @@ modules.order
 # Test artifacts
 __pycache__/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 *.pyc
+
+# Runtime state (daemon writes it under /var/lib or XDG)
+state.json
+daily-*.log
+*.prom
 
 # Local agent/tooling state (never committed)
 .opencode/

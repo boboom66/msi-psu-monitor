@@ -20,6 +20,15 @@ ALERT_DESCRIPTIONS = {
 for _pin in range(1, 13):
     ALERT_DESCRIPTIONS[f'ocp_pin{_pin}'] = f'12+4 pin {_pin} over-current'
 
+# Software mirror of the PSU's own 12V-2x6 thresholds (REV6 C0h factory
+# defaults, frozen 2026-10-16): one pin over 12 A, or a spread wider than
+# 5 A between the pins of the same connector, counts as an alert even
+# before the PSU's own (5 s averaged, 20 s debounced) trip fires.
+PIN_OCP_THRESHOLD_A = 12.0
+PIN_IMBALANCE_THRESHOLD_A = 5.0
+IMBALANCE_ALERT = 'pin_imbalance'
+ALERT_DESCRIPTIONS[IMBALANCE_ALERT] = '12V-2x6 pin current difference (>5A)'
+
 
 def severity_of(name):
     """Return the severity level for an alert name."""
@@ -89,3 +98,28 @@ class AlertEngine:
     def active_alerts(self):
         """Names of alerts currently in fired state."""
         return sorted(self._fired)
+
+
+def evaluate_pin_alerts(pins):
+    """Map per-pin currents (A) to ``name -> bool``, mirroring C0h thresholds.
+
+    Imbalance is evaluated per 6-pin connector when all 12 pins are present,
+    because each 12V-2x6 connector is protected independently.
+    """
+    if not pins:
+        return {}
+    try:
+        values = [float(value) for value in pins]
+    except (TypeError, ValueError):
+        return {}
+    active = {
+        f'ocp_pin{index}': value >= PIN_OCP_THRESHOLD_A
+        for index, value in enumerate(values, start=1)
+    }
+    groups = [values[0:6], values[6:12]] if len(values) == 12 else [values]
+    spread = 0.0
+    for group in groups:
+        if group:
+            spread = max(spread, max(group) - min(group))
+    active[IMBALANCE_ALERT] = spread > PIN_IMBALANCE_THRESHOLD_A
+    return active
