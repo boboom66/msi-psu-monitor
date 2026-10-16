@@ -287,6 +287,9 @@ bash scripts/smoke.sh                            → 53 项全过（三种格式
 - `tests/test_pid_consistency.py`：五处 USB PID 列表 + README 载荷大小必须与解析器一致。
 - `tests/test_stdlib_only.py`：`python -I` 子进程导入全部模块，第三方依赖混入即失败。
 - `ast.parse(feature_version=(3, 10))`：全部 `.py` 通过 3.10 语法校验（本机只有 3.12/3.13）。
+- **3.12 矩阵真跑过**（本轮补）：用 `uv venv --python 3.12` 建了个裸 3.12 环境（离线装 pytest），
+  把工作树复制一份、不带 `.venv`、也不装本包，直接跑 `python3 -m pytest`（**414 通过**）与
+  `bash scripts/smoke.sh`（**53 项全过**）。3.10 本机无解释器也无网络装，只能靠三重静态把关。
 - CI 含 3.10 / 3.12 双矩阵 + `ruff check` + `ruff format --check` + `mypy` + `pytest`
   + **构建 `.deb`**。
 
@@ -307,6 +310,15 @@ bash scripts/smoke.sh                            → 53 项全过（三种格式
   代码把 62B 载荷填进 `msipsu_all_ai1600ts`（**即便编译过也只会报未初始化的针脚电流**——
   正是本项目最忌讳的「没测到的健康」）。现三处如实标注为草稿 + 列出致命点，不再指示用户 build。
   要做完需要：钉版的上游 `msi-psu.c`、目标内核头文件、真机 62B 回读验证——三者仓库内都没有。
+
+### 测试自身的环境依赖（本轮抓到）
+
+- `tests/test_stdlib_only.py` 给子进程传了 `PYTHONPATH=<repo>` 却同时带 `-I`——`-I` 会
+  **忽略** `PYTHONPATH`，而且自 3.11 起连 cwd 也不再进 `sys.path`。它之所以一直绿，只是因为
+  `.venv` 里装了本包（editable）。换个裸 3.12 环境一跑就 `ModuleNotFoundError`：**这条测试
+  测的是「环境里装了什么」，不是「工作树能不能只靠标准库 import」**。现改为在子进程里显式
+  `sys.path.insert(0, <repo>)`，并把注释里那句「`-I` 忽略 site-packages」改对（那是 `-S`；
+  `.deb` 本来就装进 site-packages，真正把关的是 `foreign` 泄漏集合）。
 
 ### 文档不实（本轮又抓到一处）
 

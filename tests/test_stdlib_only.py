@@ -43,15 +43,21 @@ if foreign:
 
 def test_shipped_modules_import_without_third_party_packages():
     root = pathlib.Path(__file__).resolve().parents[1]
+    # -I ignores PYTHONPATH and, since 3.11, keeps the cwd off sys.path, so the
+    # checkout is injected in the child: this must test the tree, not whatever
+    # happens to be pip-installed in the environment running pytest.
+    probe = f'import sys; sys.path.insert(0, {str(root)!r})' + PROBE
     result = subprocess.run(
-        [sys.executable, '-I', '-c', PROBE],
+        [sys.executable, '-I', '-c', probe],
         cwd=root,
         capture_output=True,
         text=True,
-        env={'PYTHONPATH': str(root), 'PATH': '/usr/bin:/bin'},
+        env={'PATH': '/usr/bin:/bin'},
     )
-    # -I ignores site-packages, which is exactly the environment a `.deb`
-    # install runs in: python3 + our modules, nothing else.
+    # -I is not what proves the promise (-S would be needed to hide
+    # site-packages, and the .deb does install into site-packages anyway): the
+    # leak check is. Anything our modules import from outside the stdlib lands
+    # in `foreign`, so a new runtime dependency cannot slip in unnoticed.
     assert result.returncode == 0, result.stdout + result.stderr
 
 

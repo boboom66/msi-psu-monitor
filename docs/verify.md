@@ -1,7 +1,11 @@
 # 无硬件自检手册
 
 > 没有真机也能验证 CLI、告警、daemon、历史落盘、prometheus 与 dashboard 全链路。
-> 下面每条命令都已在 `/usr/bin/python3` 3.12 + `uv` 环境下实跑通过。
+> 下面每条命令都已在 `.venv`（Python 3.13.15）实跑通过；测试套件与 `smoke.sh` 另在
+> `/usr/bin/python3` 3.12.3 的**裸环境**复核过（把工作树复制一份、不带 `.venv`、也没装本包，
+> 直接 `python3 -m pytest` / `bash scripts/smoke.sh`）。**3.10 本机跑不了**：只有三重静态把关——
+> ruff `target-version = "py310"`、mypy `python_version = "3.10"`（按 3.10 typeshed 分析）、
+> smoke 里对每个 `.py` 的 `ast.parse(feature_version=(3, 10))`。
 > 需要真机的部分集中在最后一节，交付样机后再做。
 
 ## 0. 环境
