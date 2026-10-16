@@ -27,6 +27,8 @@ Python standard library only — no third-party runtime dependencies.
 - **History export** — 9-column CSV over any `m/h/d` window, to a file or stdout.
 - **Local dashboard** — loopback-only charts (7 live curves + weekly energy) drawn
   from the daemon history, with per-chart PNG/CSV export.
+- **Fan profile restore** — the daemon re-asserts a configured fan mode/duty every time
+  it (re)opens the PSU, so a custom curve survives AC loss (`[fan]` in the config file).
 - **No-hardware demo mode** — exercise the whole pipeline with `MSI_PSU_DEMO=1`, including every supported model via `MSI_PSU_DEMO_MODEL` (`ai1300p`, `meg_ai1600`, ...).
 
 ## Supported Hardware
@@ -222,6 +224,16 @@ journalctl -u msi-psu-monitor -f          # ALERT lines land here
 Optional INI file, resolved as `/etc/msi-psu-monitor.conf` then
 `~/.config/msi-psu-monitor/config.ini`; CLI flags always win. See
 [`docs/msi-psu-monitor.conf.example`](docs/msi-psu-monitor.conf.example).
+
+The optional `[fan]` section re-applies a fan profile on every daemon (re)open — the
+way MSI Center re-asserts its profile when it takes the device over. It is off unless
+`mode` is set, so a stock install never writes to the PSU:
+
+```ini
+[fan]
+mode = customized   ; auto | customized
+duty = 60           ; 0-100, ignored by the PSU in auto mode
+```
 
 State lives in `/var/lib/msi-psu-monitor` (created by the unit's
 `StateDirectory`), falling back to `$XDG_STATE_HOME/msi-psu-monitor`; override with

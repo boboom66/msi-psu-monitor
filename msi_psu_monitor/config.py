@@ -5,7 +5,14 @@ Files: /etc/msi-psu-monitor.conf, then ~/.config/msi-psu-monitor/config.ini.
 """
 
 import configparser
+import logging
 import os
+
+logger = logging.getLogger('msi_psu.config')
+
+# Kept as literal strings so config.py stays importable on its own; monitor.py
+# owns the byte mapping (1 = auto, 3 = customized).
+FAN_MODES = ('auto', 'customized')
 
 CONFIG_FILES = (
     '/etc/msi-psu-monitor.conf',
@@ -28,6 +35,8 @@ DEFAULTS = {
     'prom_interval': 30.0,
     'history_interval': 60.0,
     'retention_days': 30,
+    'fan_mode': None,
+    'fan_duty': None,
 }
 
 
@@ -72,6 +81,20 @@ def load_config(path=None):
         cfg['history_interval'] = DEFAULTS['history_interval']
     if cfg['retention_days'] < 1:
         cfg['retention_days'] = DEFAULTS['retention_days']
+
+    # [fan] is opt-in: an absent mode means "never touch the fan", so a stock
+    # install cannot surprise the user by overriding the PSU's own curve.
+    fan = parser['fan'] if parser.has_section('fan') else {}
+    mode = (fan.get('mode') or '').strip().lower()
+    if mode in FAN_MODES:
+        cfg['fan_mode'] = mode
+        cfg['fan_duty'] = _as_int(fan.get('duty'), DEFAULTS['fan_duty'])
+        if cfg['fan_mode'] == 'auto' or cfg['fan_duty'] is None:
+            cfg['fan_duty'] = None  # auto is a mode, not a duty
+        else:
+            cfg['fan_duty'] = min(100, max(0, cfg['fan_duty']))
+    elif mode:
+        logger.warning(f'Ignoring unknown [fan] mode {mode!r} (use auto or customized).')
     return cfg
 
 

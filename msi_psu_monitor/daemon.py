@@ -59,6 +59,8 @@ class MonitorDaemon:
         self.prom_interval = float(cfg.get('prom_interval') or 30.0)
         self.history_interval = float(cfg.get('history_interval') or 60.0)
         self.retention_days = int(cfg.get('retention_days') or stats.RETENTION_DAYS)
+        self.fan_mode = cfg.get('fan_mode') or None
+        self.fan_duty = cfg.get('fan_duty')
         self.psu_factory = psu_factory or self._open_default
         self.select_device = select_device or self._discover
         self.clock = clock
@@ -109,7 +111,35 @@ class MonitorDaemon:
             return None
         self.psu = psu
         logger.info(f'Opened {self.device_path}: {getattr(psu, "product", "unknown")}')
+        self.restore_fan_profile(psu)
         return psu
+
+    def restore_fan_profile(self, psu=None):
+        """Re-apply the configured fan profile after (re)opening the PSU.
+
+        The PSU keeps 41h across a suspend but not across AC loss, and MSI Center
+        re-asserts its profile whenever it takes the device over again -- this is
+        that behaviour. Opt-in through ``[fan] mode`` in the config file; with no
+        mode configured the daemon never writes to the PSU.
+
+        A refusal is logged, never fatal: monitoring must survive a PSU that
+        rejects the write (an older firmware, or a fan already at that setting).
+        """
+        psu = psu or self.psu
+        if psu is None or self.fan_mode is None:
+            return False
+        try:
+            applied = monitor.apply_fan_setting(psu, self.fan_mode, self.fan_duty)
+        except Exception as exc:  # pragma: no cover - defensive against odd devices
+            logger.warning(f'Fan profile restore failed: {exc}')
+            return False
+        if applied is None:
+            logger.warning('The PSU refused the configured fan profile; leaving it as is.')
+            return False
+        mode, duty = applied
+        detail = f'{mode}' + ('' if duty is None else f' duty {duty}%')
+        logger.info(f'Restored the configured fan profile: {detail}')
+        return True
 
     def _drop_psu(self):
         if self.psu is None:

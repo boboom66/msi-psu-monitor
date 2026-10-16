@@ -71,6 +71,9 @@ runtime imports.
   of `git checkout` when a formatter run slips in.
 - Do NOT gate `0xC0` on payload length: `supports_ocp_config` (8 bytes, MPG TS) and
   `supports_multirail_ocp` (1 byte, MEG P) are complementary variant checks.
+- Fan writes go through `monitor.apply_fan_setting(psu, mode, duty)` — one place for the
+  41h write + F1h save + read-back verify, shared by `--fan-mode` and the daemon's
+  `[fan]` restore. Never add a second write path.
 - The demo's model table lives in `demo.MODEL_WATTS`; a new variant must be added
   there too, or `MSI_PSU_DEMO_MODEL` cannot reach it.
 - Do NOT harden `systemd/*.service` with `PrivateDevices` (needs `/dev/hidraw*`).

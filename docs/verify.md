@@ -27,7 +27,7 @@ uv run --group dev ruff check .
 uv run --group dev mypy msi_psu_monitor/
 ```
 
-三条全绿即通过。当前基线：**227 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
+三条全绿即通过。当前基线：**241 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
 
 > `ruff format --check` **不要全仓跑**：`protocol.py`/`__init__.py`/`__main__.py`/`tests/test_monitor.py`
 > 等历史文件混用引号风格，全仓 format 会产生大量无意义 diff。只对本次改动的文件跑。
@@ -81,6 +81,37 @@ MSI_PSU_DEMO_MODEL=meg_ai1600 .venv/bin/msi-psu-monitor --ocp; echo "exit=$?"
 
 ```bash
 .venv/bin/msi-psu-monitor --fan-duty 75 && .venv/bin/msi-psu-monitor --fan-mode auto
+```
+
+### 2.0.1 风扇配置按 Profile 恢复（daemon）
+
+`[fan] mode` 一旦配置，daemon 每次**打开/重连** PSU 都会重发 41h + F1h 并读回校验
+（MSI Center 接管设备时同样会重新下发 Profile；PSU 的 41h 能熬过休眠但熬不过断电）。
+不配置 `mode` 则永不写电源。
+
+```bash
+cat > /tmp/fan.conf <<'EOF'
+[daemon]
+state_dir = /tmp/psu-fan
+
+[fan]
+mode = customized
+duty = 55
+EOF
+MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor-daemon --config /tmp/fan.conf --iterations 2 2>&1 | grep -i fan
+```
+
+预期：`Restored the configured fan profile: customized duty 55%`
+（该行只在读回值与写入值一致时才出现；电源拒写则打 warning 而不中断监控）。
+
+> demo 的风扇状态是**进程内**的，所以不要用另起一个 CLI 进程去读回；
+> demo 下的读回校验就是上面那行日志。真机上可用
+> `msi-psu-monitor --once`（daemon 未占用设备时）看到 `Mode: customized`。
+
+```bash
+# 单进程内直接验证写入 + 读回
+MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --fan-mode customized --fan-duty 55   # expect: Fan mode: customized   Duty: 55%
+MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --fan-mode auto                       # expect: Fan mode: auto
 ```
 
 ### 2.1 OCP 阈值检视（`--ocp`，只读）

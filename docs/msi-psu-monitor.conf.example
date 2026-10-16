@@ -42,3 +42,15 @@ prom_interval = 30
 history_interval = 60
 # Daily buckets and daily-*.log files older than this are pruned.
 retention_days = 30
+
+[fan]
+# Re-assert a fan profile every time the daemon (re)opens the PSU, the way MSI
+# Center does when it takes the device over. The PSU keeps 41h across a suspend
+# but not across AC loss, so this is what makes a custom curve survive a power
+# cut. Leave `mode` commented out and the daemon never writes to the PSU.
+#
+#   auto        - hand the fan back to the PSU's own curve
+#   customized  - hold a fixed duty
+#
+#mode = customized
+#duty = 60

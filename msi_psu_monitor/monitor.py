@@ -721,10 +721,23 @@ def run_watch(psu, args, cfg, monitor_state, engine):
             monitor_state.save(stats.state_path(_state_dir(cfg)))
 
 
-def run_fan_write(psu, mode, duty):
-    """Write the fan setting (41h) + save (F1h), then verify by read-back."""
-    if mode is None:
-        mode = FAN_MODE_CUSTOMIZED if duty is not None else FAN_MODE_AUTO
+def apply_fan_setting(psu, mode, duty=None):
+    """Write the fan setting (41h) + save (F1h) and verify it by read-back.
+
+    Shared by ``--fan-mode``/``--fan-duty`` and by the daemon's profile restore,
+    so both paths send byte-for-byte the same sequence. Retries three times,
+    matching the patience MSI Center shows before it reports a failure.
+
+    Args:
+        psu: An opened PSU.
+        mode: 'auto'/'customized', or None to infer 'customized' from a duty.
+        duty: 0-100 for 'customized'; None keeps whatever the PSU reports.
+
+    Returns:
+        ``(mode, duty)`` as actually applied, or None when the PSU refused
+        (write NAK or a read-back that disagrees with what was sent).
+    """
+    mode = mode or (FAN_MODE_CUSTOMIZED if duty is not None else FAN_MODE_AUTO)
     if mode == FAN_MODE_AUTO:
         duty = 0
     elif duty is None:
@@ -737,11 +750,20 @@ def run_fan_write(psu, mode, duty):
             continue
         setting = psu.read_fan_setting()
         if setting and setting[0] == target_mode and (mode == FAN_MODE_AUTO or setting[1] == duty):
-            duty_text = '' if mode == FAN_MODE_AUTO else f'   Duty: {duty}%'
-            print(f'Fan mode: {mode}{duty_text}')
-            return EXIT_OK
-    logger.error('Error: the PSU did not accept the fan setting (read-back mismatch).')
-    return EXIT_ERROR
+            return (mode, duty)
+    return None
+
+
+def run_fan_write(psu, mode, duty):
+    """Apply the fan setting and describe the result on stdout."""
+    applied = apply_fan_setting(psu, mode, duty)
+    if applied is None:
+        logger.error('Error: the PSU did not accept the fan setting (read-back mismatch).')
+        return EXIT_ERROR
+    mode, duty = applied
+    duty_text = '' if mode == FAN_MODE_AUTO else f'   Duty: {duty}%'
+    print(f'Fan mode: {mode}{duty_text}')
+    return EXIT_OK
 
 
 def run_ocp(psu, args):

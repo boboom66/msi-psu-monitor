@@ -203,3 +203,93 @@ def test_state_survives_a_restart(tmp_path):
 
     reborn = make_daemon(tmp_path, StubPSU(clean_sensors(), alerts={'ocp_12v': False}))
     assert reborn.state.count == first
+
+
+# ---- fan profile restore ([fan] mode) -----------------------------------
+
+
+class FanPSU(StubPSU):
+    """StubPSU that records fan writes and can refuse them."""
+
+    MODE_BYTES = {1: 3, 3: 3}  # auto=1, customized=3; matches protocol.py
+
+    def __init__(self, accept=True, **kwargs):
+        super().__init__(**kwargs)
+        self.accept = accept
+        self.writes = []
+        self.saved = 0
+        self.mode = 1
+        self.duty = 0
+
+    def set_fan_mode(self, mode, duty=0):
+        self.writes.append((mode, duty))
+        if not self.accept:
+            return False
+        self.mode, self.duty = mode, duty
+        self.saved += 1
+        return True
+
+    def read_fan_setting(self):
+        return (self.mode, self.duty)
+
+
+def test_no_fan_section_means_the_daemon_never_writes(tmp_path):
+    """Opt-in only: a stock install must not touch the PSU's own curve."""
+    psu = FanPSU(sensors=clean_sensors())
+    daemon = make_daemon(tmp_path, psu)
+    daemon.sample()
+    assert psu.writes == []
+    assert psu.saved == 0
+
+
+def test_fan_profile_is_restored_when_the_psu_is_opened(tmp_path):
+    psu = FanPSU(sensors=clean_sensors())
+    daemon = make_daemon(tmp_path, psu, fan_mode='customized', fan_duty=60)
+    daemon.sample()
+    assert psu.writes == [(3, 60)]
+    assert psu.saved == 1  # F1h rode along with the 41h write
+
+
+def test_fan_auto_profile_is_restored_without_a_duty(tmp_path):
+    psu = FanPSU(sensors=clean_sensors())
+    daemon = make_daemon(tmp_path, psu, fan_mode='auto')
+    daemon.sample()
+    assert psu.writes == [(1, 0)]
+
+
+def test_fan_profile_is_restored_again_after_a_rescan(tmp_path, caplog):
+    """Reconnect is the case that matters: AC loss drops the saved setting."""
+    psu = FanPSU(sensors=clean_sensors())
+    daemon = make_daemon(tmp_path, psu, fan_mode='customized', fan_duty=30)
+    daemon.sample()
+    daemon._rediscover()
+    daemon.sample()
+    assert psu.writes == [(3, 30), (3, 30)]
+
+
+def test_a_refused_fan_profile_is_logged_but_not_fatal(tmp_path, caplog):
+    psu = FanPSU(accept=False, sensors=clean_sensors())
+    daemon = make_daemon(tmp_path, psu, fan_mode='customized', fan_duty=60)
+    with caplog.at_level(logging.WARNING, logger='msi_psu.daemon'):
+        sample = daemon.sample()
+    assert sample is not None  # monitoring keeps running
+    assert len(psu.writes) == 3  # three attempts, like MSI Center
+    assert psu.saved == 0
+    assert 'refused the configured fan profile' in caplog.text
+
+
+def test_a_failing_fan_write_does_not_break_the_open(tmp_path):
+    class Exploding(FanPSU):
+        def set_fan_mode(self, mode, duty=0):
+            raise OSError('device vanished')
+
+    daemon = make_daemon(
+        tmp_path, Exploding(sensors=clean_sensors()), fan_mode='customized', fan_duty=60
+    )
+    assert daemon.sample() is not None
+    assert daemon.psu is not None
+
+
+def test_restore_fan_profile_is_a_noop_before_the_psu_is_open(tmp_path):
+    daemon = make_daemon(tmp_path, FanPSU(sensors=clean_sensors()), fan_mode='customized')
+    assert daemon.restore_fan_profile() is False
