@@ -47,6 +47,7 @@ uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 30 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
 bash scripts/build_deb.sh                        → dist/msi-psu-monitor_1.0.0_all.deb
+bash scripts/smoke.sh                            → 36 项全过（三种格式/告警/黑盒/OCP/风扇/daemon/dashboard）
 ```
 
 护栏（机器强制，不靠人记）：

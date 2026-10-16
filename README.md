@@ -243,6 +243,14 @@ State lives in `/var/lib/msi-psu-monitor` (created by the unit's
 
 ## Verifying without hardware
 
+One command runs the whole chain on the synthetic PSU (all three formats, the alert
+exit code, the black box, OCP, a fan write, the daemon → Prometheus + history path and
+the dashboard HTTP endpoints):
+
+```bash
+bash scripts/smoke.sh
+```
+
 See [`docs/verify.md`](docs/verify.md) for the full no-hardware checklist —
 quality gates, the `MSI_PSU_DEMO=1` demo mode, alert paths, the daemon + dashboard
 chain, `.deb` construction, and the list of items that still require a real PSU.

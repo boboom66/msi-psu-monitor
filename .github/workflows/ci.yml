@@ -31,5 +31,9 @@ jobs:
         run: uv run --group dev mypy msi_psu_monitor/
       - name: Pytest
         run: uv run --group dev pytest -q
+      # End-to-end on the synthetic PSU: CLI formats, alert exit 2, black box,
+      # OCP, fan write, daemon -> prometheus + history, dashboard HTTP.
+      - name: Smoke test (no hardware)
+        run: bash scripts/smoke.sh
       - name: Build the .deb
         run: bash scripts/build_deb.sh

@@ -64,6 +64,16 @@ uv run --group dev ruff format --check .
 3. 每个测试文件都必须在某处文档里被提到；
 4. README 的 Usage 参数清单必须与 `build_parser()` 完全一致（少写/多写都失败）。
 
+一条命令跑完整条无硬件链路（三种格式 / 告警 exit 2 / 黑盒 / OCP / 风扇写 /
+daemon→prometheus+历史 / dashboard HTTP / 3.10 语法），失败即非零退出：
+
+```bash
+bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
+```
+
+它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
+CI 里两者都会跑。
+
 三条全绿即通过。当前基线：**257 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
 
 > `ruff format --check` **不要全仓跑**：`protocol.py`/`__init__.py`/`__main__.py`/`tests/test_monitor.py`
