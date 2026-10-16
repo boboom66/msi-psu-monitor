@@ -4,6 +4,7 @@ import json
 import pathlib
 import re
 import select
+import socket
 import subprocess
 import sys
 import threading
@@ -143,12 +144,88 @@ def test_unknown_route_is_404(live_server):
     assert exc.value.code == 404
 
 
-def test_server_binds_loopback_only(tmp_path):
+def test_the_default_host_is_loopback(tmp_path):
+    """The loopback promise lives in run_dashboard/DEFAULT_HOST, not in the bind.
+
+    The old version of this test asserted the host it had just passed in, so it
+    would have passed with ``0.0.0.0`` too -- the README's "loopback only" claim
+    had no test that could fail.
+    """
+    from msi_psu_monitor import monitor
+
+    assert dashboard.DEFAULT_HOST == '127.0.0.1'
+    seen = {}
+
+    def fake_serve(host=None, port=None, state_dir=None):
+        seen.update(host=host, port=port)
+        return 0
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(dashboard, 'serve', fake_serve)
+        monitor.run_dashboard(monitor.build_parser().parse_args(['--dashboard']), {})
+    assert seen['host'] == '127.0.0.1'
+
+
+def test_a_bracket_mangled_request_target_is_a_400(tmp_path):
+    """`GET http://[/x HTTP/1.1` makes urlparse raise; it must not drop the socket."""
     httpd = dashboard.make_server('127.0.0.1', 0, tmp_path)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
     try:
-        assert httpd.server_address[0] == '127.0.0.1'
+        sock = socket.create_connection(('127.0.0.1', httpd.server_port), timeout=5)
+        sock.sendall(b'GET http://[/x HTTP/1.1\r\nHost: x\r\n\r\n')
+        reply = sock.recv(200)
+        sock.close()
     finally:
+        httpd.shutdown()
         httpd.server_close()
+        thread.join(timeout=5)
+    assert b'400' in reply.split(b'\r\n')[0]
+
+
+def test_an_unreadable_state_dir_is_a_503_not_zero_data(tmp_path):
+    """0 samples / 0.000 kWh / 200 is what a daemon that never ran looks like too."""
+    monitor_state = stats.MonitorState(product='MPG Ai1600TS')
+    monitor_state.update(600.0, 94.0, ts=time.time())
+    monitor_state.save(stats.state_path(tmp_path))
+    httpd = dashboard.make_server('127.0.0.1', 0, tmp_path)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    base = f'http://127.0.0.1:{httpd.server_port}'
+    try:
+        assert _get(base + '/api/state')[0] == 200
+        tmp_path.chmod(0o000)
+        for route in ('/api/state', '/api/history', '/api/export'):
+            with pytest.raises(HTTPError) as exc:
+                _get(base + route)
+            assert exc.value.code == 503
+            assert b'not readable' in exc.value.read()
+        assert _get(base + '/')[0] == 200  # the page itself still loads
+    finally:
+        tmp_path.chmod(0o700)
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=5)
+
+
+def test_a_missing_state_dir_says_so_instead_of_zero(tmp_path):
+    httpd = dashboard.make_server('127.0.0.1', 0, tmp_path / 'never-created')
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with pytest.raises(HTTPError) as exc:
+            _get(f'http://127.0.0.1:{httpd.server_port}/api/history')
+        assert exc.value.code == 503
+        assert b'no state directory' in exc.value.read()
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=5)
+
+
+def test_the_page_reports_why_a_poll_failed():
+    """The fetch helper must surface the server's reason, not just the status."""
+    assert 'await response.text()' in dashboard.PAGE
 
 
 def _head(url):

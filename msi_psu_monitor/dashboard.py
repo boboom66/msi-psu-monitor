@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -207,8 +208,13 @@ function drawWeekly() {
 
 let daily = {};
 
-function okJson(response) {
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+async function okJson(response) {
+  if (!response.ok) {
+    // The reason is in the text body (503: unreadable state dir, 400: bad
+    // window); "HTTP 503" alone tells the operator nothing actionable.
+    const detail = await response.text().catch(() => '');
+    throw new Error(`HTTP ${response.status}${detail ? ': ' + detail.trim() : ''}`);
+  }
   return response.json();
 }
 
@@ -269,6 +275,22 @@ def render_page():
     for name, value in PAGE_SUBSTITUTIONS.items():
         page = page.replace(name, value)
     return page
+
+
+def _state_dir_problem(state_dir):
+    """Return why the state directory cannot be read, or ``None`` when it is fine.
+
+    Without this, an unreadable directory answers exactly like a daemon that
+    never ran: ``count: 0``, ``power_avg: 0.0``, ``total_energy_kwh: 0.0``, HTTP
+    200. The distinction matters -- one means "nothing was recorded", the other
+    means "the numbers on screen are not the numbers on disk".
+    """
+    path = Path(state_dir)
+    if not path.is_dir():
+        return f'no state directory at {path} (has the daemon run yet?)'
+    if not os.access(path, os.R_OK | os.X_OK):
+        return f'{path} is not readable by this user'
+    return None
 
 
 def _history_payload(state_dir, from_spec):
@@ -340,11 +362,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
         Split out from ``do_GET`` so HEAD can reuse it verbatim and cannot drift
         into answering 200 for a route that GET would 404.
         """
-        route = urlparse(self.path).path
         try:
+            # Inside the try on purpose: a request target with an unbalanced
+            # bracket ("GET http://[/x HTTP/1.1" is a legal request line) makes
+            # urlparse raise ValueError("Invalid IPv6 URL"), which used to escape
+            # do_GET entirely -- the client saw a dropped connection and a
+            # traceback instead of a 400.
+            route = urlparse(self.path).path
             if route in ('/', '/index.html'):
                 page = render_page()
                 return 200, page, 'text/html; charset=utf-8', ()
+            if route.startswith('/api/'):
+                problem = _state_dir_problem(self.state_dir)
+                if problem is not None:
+                    # An unreadable directory yields the same "0 samples / 0.000
+                    # kWh / 200" as a daemon that never ran, and the operator has
+                    # no way to tell the two apart. The CLI can: it fails loudly.
+                    return 503, f'{problem}\n', 'text/plain; charset=utf-8', ()
             if route == '/api/history':
                 payload = _history_payload(self.state_dir, self._from_spec())
                 return 200, json.dumps(payload), 'application/json', ()

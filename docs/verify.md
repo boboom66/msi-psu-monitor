@@ -79,7 +79,7 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。当前基线：**396 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
+三条全绿即通过。当前基线：**400 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
 
 > `ruff format --check` **不要全仓跑**：`protocol.py`/`__init__.py`/`__main__.py`/`tests/test_monitor.py`
 > 等历史文件混用引号风格，全仓 format 会产生大量无意义 diff。只对本次改动的文件跑。
@@ -258,8 +258,16 @@ curl -s 'http://127.0.0.1:8899/api/history?from=2h' | head -c 200
 curl -s 'http://127.0.0.1:8899/api/export?from=2h&columns=temp,fan' | head -2
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8899/nope            # 404
 curl -s -o /dev/null -w '%{http_code}\n' 'http://127.0.0.1:8899/api/history?from=fortnight'  # 400
+curl -s -o /dev/null -w '%{http_code}\n' 'http://127.0.0.1:8899/api/history?from=all'          # 200
+chmod 000 /tmp/psu-demo && curl -s -w ' [%{http_code}]\n' http://127.0.0.1:8899/api/state     # 503 + 原因，不是 0 数据
+chmod 700 /tmp/psu-demo
+python3 -c "import socket;s=socket.create_connection(('127.0.0.1',8899));s.sendall(b'GET http://[/x HTTP/1.1\r\nHost: x\r\n\r\n');print(s.recv(80))"  # 400，不是断连
 kill %1
 ```
+
+读不到 state 目錄時 `/api/*` 回 503 並附原因（頁面本身照樣 200，頁內 JS 會把原因
+顯示成 `Data may be stale (…)`）：**「daemon 從沒跑過」與「我讀不到 daemon 的檔案」
+不能長得一樣**。
 
 浏览器打开 `http://127.0.0.1:8899/` 可看到 7 条曲线 + Weekly 柱状图；每张卡片
 自带 PNG / CSV 导出按钮。只读 `daily-*.log` 与 `state.json`，不碰 hidraw。

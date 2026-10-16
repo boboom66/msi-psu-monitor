@@ -164,6 +164,20 @@
     也没有一行提示——需求里 `-O` 的定义是「存成文件，不打屏」。现按需求实现：追加到文件
     （行缓冲，`tail -f` 能实时看到）、stdout 保持干净、启动时在 stderr 说明一句，
     路径写不了就 exit 1。smoke 增两条检查（文件有内容 / stdout 为空）。
+- **看板不再把「读不到」装成「没有数据」（本轮）**：
+  - `/api/*` 在 state 目录读不了时回 **503 + 原因**（页面本身仍 200，页内 JS 把原因
+    显示成 `Data may be stale (HTTP 503: … is not readable by this user)`）。修前它与
+    「daemon 从没跑过」完全一样：`count: 0`、`avg 0.00 W`、`total 0.000 kWh`、HTTP 200。
+  - `urlparse` 挪进 `_route` 的 try 里：请求行 `GET http://[/x HTTP/1.1`（合法请求行）
+    会让它抛 `ValueError: Invalid IPv6 URL`，而它在 try **外面**，于是异常直接穿出
+    `do_GET`——客户端拿到的是断连（连状态行都没有）+ 服务端一条 traceback，而不是 400。
+  - 页内 `okJson` 非 2xx 时把响应正文读出来一起报（原来只有 `HTTP 503` 四个字，
+    操作员看不出该干什么）。
+  - 顺带修掉一个**测不出问题的测试**：`test_server_binds_loopback_only` 断言的正是它
+    自己刚传进去的 host（换成 `0.0.0.0` 也照过），README 的「loopback only」因此没有
+    任何能失败的测试覆盖。现改为断言 `dashboard.DEFAULT_HOST` 与 `run_dashboard` 真的
+    传了 loopback。
+
 - **坏文件不再伪造成数据或崩掉（本轮，复核子代理挑出，P1×3）**：
   - `state.json` 不是 UTF-8（编辑器存成 UTF-16/Latin-1、或坏一个字节）时 `read_text()`
     抛的是 `UnicodeDecodeError`——**是 `ValueError` 不是 `OSError`**，`except OSError`
@@ -232,7 +246,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 396 passed
+uv run --group dev pytest -q                     → 400 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 32 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
