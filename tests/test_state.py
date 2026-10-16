@@ -156,7 +156,7 @@ def test_append_history_writes_a_header_once(tmp_path):
     lines = path.read_text().splitlines()
     assert lines[0] == ','.join(stats.HISTORY_COLUMNS)
     assert len(lines) == 3
-    expected = datetime.fromtimestamp(1700000000.0).strftime('%Y-%m-%dT%H:%M:%S')
+    expected = datetime.fromtimestamp(1700000000.0).astimezone().isoformat(timespec='seconds')
     assert lines[1].startswith(expected)
     columns = dict(zip(lines[0].split(','), lines[1].split(',')))
     assert columns['eff'] == '94.00'
@@ -359,3 +359,124 @@ def test_state_dir_honours_the_systemd_state_directory(monkeypatch, tmp_path):
     monkeypatch.delenv('MSI_PSU_STATE_DIR', raising=False)
     monkeypatch.setenv('STATE_DIRECTORY', f'{tmp_path / "srv"}:/run/other')
     assert stats.default_state_dir() == tmp_path / 'srv'
+
+
+def test_load_survives_a_state_file_that_is_not_utf8(tmp_path, caplog):
+    """A UTF-16/latin-1 state.json must not be a traceback, and must not be silent.
+
+    ``read_text`` raises UnicodeDecodeError -- a ValueError, not an OSError -- so
+    the old ``except OSError`` let it escape ``load``: a traceback at daemon
+    startup, i.e. a 5 s crash loop under ``Restart=always``.
+    """
+    path = stats.state_path(tmp_path)
+    path.write_bytes(b'{"version":1,"product":"\xff\xfe"}')
+    with caplog.at_level('WARNING'):
+        monitor_state = stats.MonitorState.load(path)
+    assert monitor_state.count == 0
+    assert 'Cannot read the state file' in caplog.text
+
+
+def test_load_says_so_when_it_ignores_a_state_file(tmp_path, caplog):
+    """Zeroed totals that look measured are the thing this module promises not to do."""
+    path = stats.state_path(tmp_path)
+    path.write_text(json.dumps({'version': 99, 'count': 5, 'energy_wh': 12.0}))
+    with caplog.at_level('WARNING'):
+        monitor_state = stats.MonitorState.load(path)
+    assert monitor_state.count == 0
+    assert 'format version 99' in caplog.text
+
+
+def test_load_of_a_missing_file_is_not_a_warning(tmp_path, caplog):
+    """The first run has no state file: that is normal, not a problem to report."""
+    with caplog.at_level('WARNING'):
+        assert stats.MonitorState.load(stats.state_path(tmp_path)).count == 0
+    assert caplog.text == ''
+
+
+def test_iter_history_reads_columns_positionally_without_a_header(tmp_path):
+    """A headerless day file used to read as empty: DictReader ate the first row.
+
+    With no header, DictReader adopts the first *data* row as its fieldnames, so
+    every row looks like it has no ``time`` and the whole day is invisible to
+    --export and to the dashboard, with nothing logged.
+    """
+    path = stats.history_path(tmp_path, date(2026, 2, 9))
+    path.write_text('2026-02-09T10:00:00,12.100,5.040,3.320,50.000,56.0,2050,600.0,94.00,\n')
+    rows = list(stats.iter_history(tmp_path))
+    assert [row['time'] for row in rows] == ['2026-02-09T10:00:00']
+    assert rows[0]['12v'] == '12.100'
+    assert rows[0]['temp'] == '56.0'
+
+
+def test_iter_history_reads_columns_positionally_with_a_renamed_header(tmp_path):
+    """A hand-renamed or BOM'd header must not cost the whole day either."""
+    path = stats.history_path(tmp_path, date(2026, 2, 9))
+    path.write_text(
+        'timestamp,volts,amps\n'
+        '2026-02-09T10:00:00,12.100,5.040,3.320,50.000,56.0,2050,600.0,94.00,\n'
+    )
+    rows = list(stats.iter_history(tmp_path))
+    assert len(rows) == 1
+    assert rows[0]['12v'] == '12.100'
+
+
+def test_iter_history_warns_about_a_non_canonical_header(tmp_path, caplog):
+    path = stats.history_path(tmp_path, date(2026, 2, 9))
+    path.write_text('\ufeff' + ','.join(stats.HISTORY_COLUMNS) + '\n')
+    with caplog.at_level('WARNING'):
+        assert list(stats.iter_history(tmp_path)) == []
+    assert 'no canonical header' in caplog.text
+
+
+def test_iter_history_ignores_something_that_is_not_a_regular_file(tmp_path, caplog):
+    """The glob matches a FIFO or /dev/zero; reading one never returns."""
+    import os
+
+    os.symlink('/dev/zero', tmp_path / 'daily-20240101.log')
+    with caplog.at_level('WARNING'):
+        assert list(stats.iter_history(tmp_path)) == []
+    assert 'not a regular file' in caplog.text
+
+
+def test_append_history_does_not_glue_a_row_onto_a_torn_one(tmp_path, caplog):
+    """A partial flush (ENOSPC, power cut) must not shift the columns of the next row."""
+    path = stats.history_path(tmp_path, date(2026, 2, 9))
+    path.write_text(
+        ','.join(stats.HISTORY_COLUMNS) + '\n'
+        '2026-02-09T09:00:00,12.100,5.040,3.320,50.000,56.0,2050,600.0,94.00,24.0,96.0\n'
+        '2026-02-09T10:00:00,12.100,5.0'
+    )
+    with caplog.at_level('WARNING'):
+        stats.append_history(tmp_path, sensors(), ts=datetime(2026, 2, 9, 10, 1).timestamp())
+    lines = path.read_text().splitlines()
+    assert lines[-1].startswith('2026-02-09T10:01:00')  # this row is intact
+    assert ',12.100,5.040,' in lines[-1]  # and its columns are not shifted
+    assert lines[-2] == '2026-02-09T10:00:00,12.100,5.0'  # the torn row stays its own line
+    assert 'the last line was incomplete' in caplog.text
+    assert len(list(stats.iter_history(tmp_path))) == 3
+
+
+def test_history_timestamps_are_absolute_instants(tmp_path):
+    """A naive local stamp cannot say which of the two 02:30s it means.
+
+    On a fall-back night ``datetime.fromisoformat('...T02:30:00')`` resolves to
+    the *first* 02:30, so a row written at the second one was read an hour too
+    old and silently fell out of a ``--from 90m`` window. The offset is written
+    from now on; older naive rows keep working (and keep that ambiguity).
+    """
+    stamp = datetime(2026, 10, 25, 2, 30, tzinfo=datetime.now().astimezone().tzinfo).timestamp()
+    stats.append_history(tmp_path, sensors(), ts=stamp)
+    row = next(stats.iter_history(tmp_path))
+    written = datetime.fromisoformat(row['time'])
+    assert written.utcoffset() is not None
+    assert abs(written.timestamp() - stamp) < 0.5
+
+
+def test_old_naive_history_rows_still_read(tmp_path):
+    """The format change must not orphan the rows already on disk."""
+    path = stats.history_path(tmp_path, date(2026, 2, 9))
+    path.write_text(
+        ','.join(stats.HISTORY_COLUMNS)
+        + '\n2026-02-09T10:00:00,12.100,5.040,3.320,50.000,56.0,2050,600.0,94.00,24.0,96.0\n'
+    )
+    assert stats.build_export(tmp_path, None, ['12v'])[1] == [['2026-02-09T10:00:00', '12.100']]

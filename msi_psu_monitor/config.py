@@ -53,6 +53,11 @@ def load_config(path=None):
         path: Explicit config file (--config), or None to search defaults.
     """
     cfg = dict(DEFAULTS)
+    if path is not None and not str(path).strip():
+        # `--config ""` (a $CONF that was never set) used to mean "search the
+        # default paths", i.e. silently run on defaults instead of on the file
+        # the user named -- the same silent no-op as `-O ""` and `--from ""`.
+        raise ConfigError('config file path is empty')
     files = [path] if path else [f for f in CONFIG_FILES if os.path.exists(f)]
     # No interpolation: these are plain values, and the default BasicInterpolation
     # turns a stray '%' (a path, a duty comment) into InterpolationSyntaxError at
@@ -60,8 +65,11 @@ def load_config(path=None):
     parser = configparser.ConfigParser(interpolation=None)
     try:
         read = parser.read(files)
-    except configparser.Error as exc:
+    except (configparser.Error, UnicodeDecodeError) as exc:
         # A malformed file would otherwise escape as a traceback from main().
+        # UnicodeDecodeError (a Latin-1 or UTF-16 file a Windows editor saved,
+        # or one bad byte) is not a configparser.Error and comes out of
+        # ConfigParser.read(), which only catches OSError around the open().
         raise ConfigError(f'invalid config file: {exc}') from exc
     if path and not read:
         # Silently falling back to the defaults would leave the user staring at

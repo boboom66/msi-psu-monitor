@@ -133,6 +133,8 @@ def isolated_state(tmp_path, monkeypatch):
         ['--once', '-O', ''],  # an unset $OUT is not "no -O"
         ['--watch', '1', '-O', ''],
         ['--export', '--from', '2h', '-O', ''],
+        ['--config', ''],  # an unset $CONF is not "no --config"
+        ['--config', '', '--once'],
     ],
 )
 def test_conflicting_flags_are_rejected(argv):

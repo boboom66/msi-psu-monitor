@@ -164,6 +164,30 @@
     也没有一行提示——需求里 `-O` 的定义是「存成文件，不打屏」。现按需求实现：追加到文件
     （行缓冲，`tail -f` 能实时看到）、stdout 保持干净、启动时在 stderr 说明一句，
     路径写不了就 exit 1。smoke 增两条检查（文件有内容 / stdout 为空）。
+- **坏文件不再伪造成数据或崩掉（本轮，复核子代理挑出，P1×3）**：
+  - `state.json` 不是 UTF-8（编辑器存成 UTF-16/Latin-1、或坏一个字节）时 `read_text()`
+    抛的是 `UnicodeDecodeError`——**是 `ValueError` 不是 `OSError`**，`except OSError`
+    接不住，`load()` 直接炸：daemon 在 `Restart=always` 下变成 5 s 崩溃循环，CLI 甩
+    traceback。同一个文件里另外三条读取路径都catch了它，只有这条漏了。现改为
+    `except (OSError, UnicodeDecodeError)`；且**每次丢数据都要出声**（读不了 / 不是 JSON /
+    版本号不对各打一条 warning），缺失文件（首次运行）保持安静。
+  - `daily-*.log` 没有表头（旧版本写的、或表头写一半崩了）、表头被手工改名、或带
+    UTF-8 BOM 时，`DictReader` 会把**第一条数据行当成列名**：于是每一行的 `time` 都是
+    `None`，**整个文件静默读成空**，一整天在 `--export` 和看板上消失且毫无提示。现按
+    位置读列（列序就是 `HISTORY_COLUMNS`），并说明一句；首行能解析成时间戳就当数据
+    （不丢第一行），否则当表头跳过。
+  - `--config` 指向的文件不是 UTF-8 时同样漏成 traceback（`ConfigParser.read` 只在
+    `open()` 外面接 `OSError`）→ 现包成 `ConfigError`。
+  - `--config ""`（`$CONF` 没设）与 `-O ""`/`--from ""` 同一类静默 no-op（悄悄改用默认
+    搜索路径、跑在默认值上）→ 现 usage error + `load_config('')` 报 `ConfigError`。
+  - 历史文件的**撕裂末行**：上一次 flush 被打断（ENOSPC、断电）后残留半行，下一条
+    样本会被粘在它后面；合并后的行**仍以可解析的时间戳开头**，于是被当成真数据导出，
+    撕裂点之后的每一列都错位、当次样本也丢了。现追加前先确认末尾是换行，不是就先补
+    一个（把残行留作自己的一行，读时按时间戳不合法跳过）。
+  - 历史 `time` 列改为**带时差的绝对时刻**（`…T02:30:00+08:00`）：naive 本地时间表达
+    不了夏令时回拨那一小时，回拨夜的第二个 02:30 会按第一个解析，于是被 `--from 90m`
+    当成「太旧」丢掉。老的无时差行照旧能读。
+
 - **两条指标检查本来永远查不出问题（本轮，复核子代理挑出）**：smoke 用子的 `case *"$2"*`
   子串匹配去查 `msi_psu_up 1` / `msi_psu_ocp_available 1`，而这两个指标上方的
   `# HELP msi_psu_up 1 when the last sample carried sensor readings` /
@@ -208,7 +232,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 381 passed
+uv run --group dev pytest -q                     → 396 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 32 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues

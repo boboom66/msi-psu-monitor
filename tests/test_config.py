@@ -118,6 +118,26 @@ def test_a_malformed_config_file_is_reported_not_raised(tmp_path):
         load_config(str(conf))
 
 
+def test_a_config_file_that_is_not_utf8_is_reported_not_raised(tmp_path):
+    """ConfigParser.read only catches OSError around the open().
+
+    A Latin-1/UTF-16 file (or one bad byte) makes the decode raise
+    UnicodeDecodeError, which is not a configparser.Error: it used to escape as a
+    20-line traceback from every CLI run and from the daemon's systemd start.
+    """
+    conf = tmp_path / 'latin1.conf'
+    conf.write_bytes(b'[monitor]\noutput = /tmp/\xff\n')
+    with pytest.raises(ConfigError):
+        load_config(str(conf))
+
+
+@pytest.mark.parametrize('value', ['', '   '])
+def test_an_empty_config_path_is_reported(tmp_path, value):
+    """`--config "$CONF"` with CONF unset must not silently use the defaults."""
+    with pytest.raises(ConfigError):
+        load_config(value)
+
+
 def test_an_out_of_range_port_falls_back(tmp_path):
     conf = _write(tmp_path, '[daemon]\nport = 99999\n')
     assert load_config(str(conf))['port'] == DEFAULTS['port']

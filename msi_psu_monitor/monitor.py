@@ -1174,6 +1174,10 @@ def _validate_args(parser, args):
         # `--columns "$COLS"` with COLS unset was the same silent no-op: the flag
         # was accepted and the output went to stdout instead of the named file.
         parser.error('--output requires a path')
+    if args.config is not None and not args.config:
+        # Same class: `--config "$CONF"` with CONF unset silently searched the
+        # default paths and ran on the built-in defaults.
+        parser.error('--config requires a path')
     if (args.from_spec is not None or args.columns is not None) and not args.export:
         parser.error('--from and --columns are only valid together with --export')
     # A non-positive or non-finite interval would busy-loop or raise inside

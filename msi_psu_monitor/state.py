@@ -271,15 +271,35 @@ class MonitorState:
 
     @classmethod
     def load(cls, path):
-        """Load state from ``path``; a missing, unreadable or corrupt file yields empty state."""
+        """Load state from ``path``; a missing, unreadable or corrupt file yields empty state.
+
+        "Unreadable" includes bytes that are not valid UTF-8 in the locale
+        encoding: ``read_text`` raises ``UnicodeDecodeError`` (a ``ValueError``,
+        not an ``OSError``), which used to escape ``load`` entirely -- a
+        traceback at daemon startup, i.e. a permanent 5 s crash loop under
+        ``Restart=always``, on a file the module invites users to edit.
+
+        Every branch that loses data says so: something is wrong with the file,
+        and quietly showing zeros as if they were measured totals would hide it.
+        """
         try:
             raw = Path(path).read_text()
-        except OSError:
+        except FileNotFoundError:
+            # The normal first-run case: no state yet, nothing to warn about.
+            return cls()
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning(f'Cannot read the state file {path}: {exc}')
             return cls()
         try:
             data = json.loads(raw)
-        except ValueError:
+        except ValueError as exc:
+            logger.warning(f'Ignoring the state file {path}: {exc}')
             return cls()
+        if not isinstance(data, dict) or data.get('version') != STATE_VERSION:
+            version = data.get('version') if isinstance(data, dict) else None
+            logger.warning(
+                f'Ignoring the state file {path}: format version {version!r} is not {STATE_VERSION}'
+            )
         return cls.from_dict(data)
 
     def save(self, path):
@@ -290,6 +310,11 @@ class MonitorState:
 # ---- history (daily-*.log) ---------------------------------------------
 
 
+def _is_canonical_header(line):
+    """Return whether ``line`` is exactly the column header this module writes."""
+    return line.rstrip('\r\n') == ','.join(HISTORY_COLUMNS)
+
+
 def _has_canonical_header(path):
     """Return whether ``path`` already starts with the exact column header."""
     try:
@@ -297,7 +322,7 @@ def _has_canonical_header(path):
             first = handle.readline()
     except (OSError, UnicodeDecodeError):
         return False
-    return first.rstrip('\r\n') == ','.join(HISTORY_COLUMNS)
+    return _is_canonical_header(first)
 
 
 def _repair_history_header(path):
@@ -334,6 +359,20 @@ def _ensure_history_header(path):
     return _repair_history_header(path)
 
 
+def _last_byte(path):
+    """Return the last byte of ``path``; ``b''`` when missing or empty, ``None`` if unreadable."""
+    try:
+        with path.open('rb') as handle:
+            if handle.seek(0, os.SEEK_END) == 0:
+                return b''
+            handle.seek(-1, os.SEEK_END)
+            return handle.read(1)
+    except FileNotFoundError:
+        return b''
+    except OSError:
+        return None
+
+
 def append_history(state_dir, sensors, ts=None):
     """Append one CSV sample line to today's history file; return its path."""
     ts = time.time() if ts is None else float(ts)
@@ -344,6 +383,16 @@ def append_history(state_dir, sensors, ts=None):
     # a day file left empty, or truncated mid-header, by a crash would otherwise
     # be read back by DictReader with that fragment as its column names.
     has_header = _ensure_history_header(path)
+    # None = the last byte could not be read: leave the file alone rather than
+    # guess and risk inserting a blank line into a healthy one.
+    if _last_byte(path) not in (b'', b'\n', None):
+        # A torn last row -- flush interrupted by ENOSPC, or a power cut -- must
+        # not be glued to this row: the merged line still starts with a parseable
+        # timestamp, so it would be exported as real data with every column after
+        # the tear shifted, and this sample would be lost inside it.
+        with path.open('a', newline='') as handle:
+            handle.write('\n')
+        logger.warning(f'{path.name}: the last line was incomplete; it is kept as its own row.')
     with path.open('a', newline='') as handle:
         writer = csv.writer(handle)
         if not has_header:
@@ -388,7 +437,10 @@ def _history_row(sensors, ts):
     gpu_w = '' if watts is None else f'{watts[1]:.1f}'
 
     return (
-        datetime.fromtimestamp(ts).strftime('%Y-%m-%dT%H:%M:%S'),
+        # An absolute instant, offset included: a naive local timestamp cannot
+        # express the DST fold, so the second 02:30 of a fall-back night was read
+        # back as the first one and a --from window dropped that row as too old.
+        datetime.fromtimestamp(ts).astimezone().isoformat(timespec='seconds'),
         fmt('vout_12v', 3),
         fmt('vout_5v', 3),
         fmt('vout_3v3', 3),
@@ -408,11 +460,42 @@ def iter_history(state_dir, since_ts=None):
     A row this module never wrote (binary junk, a half-written line) and a file
     that cannot be decoded are skipped: one damaged day must not be able to hide
     the other days, and it must not surface as a traceback either.
+
+    The column header is not trusted to be present: a file that starts with data
+    (an older version, a crash before the header write), a header renamed by hand
+    or one with a UTF-8 BOM would make ``DictReader`` adopt the first row as the
+    column names -- every row then looks like it has no ``time`` and the whole day
+    silently yields nothing. The columns are positional, so they are read
+    positionally whenever the header is not the canonical one.
     """
     for path in sorted(Path(state_dir).glob(f'{HISTORY_PREFIX}*{HISTORY_SUFFIX}')):
+        if not path.is_file():
+            # The glob matches a directory, a FIFO or a symlink to /dev/zero too;
+            # reading one of those never returns (an unbounded read until
+            # MemoryError), which would wedge the thread that serves the page.
+            logger.warning(f'Skipping {path.name}: not a regular file.')
+            continue
         try:
             with path.open(newline='') as handle:
-                for row in csv.DictReader(handle):
+                first = handle.readline()
+                if not first:
+                    continue  # an empty day file: nothing to read, nothing wrong
+                if _is_canonical_header(first):
+                    skip_first = True
+                else:
+                    logger.warning(
+                        f'{path.name}: no canonical header; reading the columns by position.'
+                    )
+                    # A first line that parses as a timestamp is a data row (the
+                    # header was never written, or was lost); anything else is a
+                    # header this module did not write, or a fragment of one.
+                    skip_first = _parse_timestamp(first.split(',', 1)[0]) is None
+                handle.seek(0)
+                rows = csv.reader(handle)
+                if skip_first:
+                    next(rows, None)
+                for values in rows:
+                    row = dict(zip(HISTORY_COLUMNS, values))
                     stamp = _parse_timestamp(row.get('time'))
                     if stamp is None:
                         continue
