@@ -48,7 +48,7 @@ uv run --group dev ruff format --check .
 | `tests/test_cli_alerts.py` | CLI 告警路径与退出码 2 |
 | `tests/test_cli_features.py` | `--watch`/`-O`/`--serial`/`--show-log`/`--fan-*`/`--export`/互斥校验 |
 | `tests/test_ocp.py` | 0xC0 阈值 / 0xC1 状态 / 单多轨标志的三格式输出与机型门 |
-| `tests/test_daemon.py` | 采样节拍、原子写、重扫、历史、风扇 Profile 恢复；`OSError`（拔插）计入重扫而非崩主循环；只答 ident 的样本判为读失败 |
+| `tests/test_daemon.py` | 采样节拍、原子写、重扫、历史、风扇 Profile 恢复；`OSError`（拔插）计入重扫而非崩主循环；只答 ident 的样本判为读失败；OCP 块：TS 机型导出阈值 + 每周期刷新状态、MEG 机型一次 C0/C1 都不读、换机后不继承旧阈值 |
 | `tests/test_dashboard.py` | HTTP 端点、历史/状态载荷、CSV 导出、HEAD 与错误码一致；端口被占时一行错误 + exit 1 |
 | `tests/test_demo.py` | 合成电源、5 机型切换、告警位注入 |
 | `tests/test_schema.py` | JSON / prometheus 输出结构契约 |
@@ -70,7 +70,7 @@ uv run --group dev ruff format --check .
    ——该常量同时会被脚本自己核对，检查项被误删时脚本也会失败。
 
 一条命令跑完整条无硬件链路（三种格式 / 告警 exit 2 及按机型鉴名 / 黑盒 / OCP /
-风扇写 / daemon→prometheus+历史 / dashboard HTTP / 3.10 语法），共 49 项，失败即非零退出：
+风扇写 / daemon→prometheus+历史 / dashboard HTTP / 3.10 语法），共 51 项，失败即非零退出：
 
 ```bash
 bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
@@ -79,7 +79,7 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。当前基线：**358 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
+三条全绿即通过。当前基线：**365 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
 
 > `ruff format --check` **不要全仓跑**：`protocol.py`/`__init__.py`/`__main__.py`/`tests/test_monitor.py`
 > 等历史文件混用引号风格，全仓 format 会产生大量无意义 diff。只对本次改动的文件跑。
@@ -125,6 +125,8 @@ MSI_PSU_DEMO_MODEL=meg_ai1600 .venv/bin/msi-psu-monitor --ocp; echo "exit=$?"
 
 ```bash
 .venv/bin/msi-psu-monitor -f prometheus | grep -E 'msi_psu_up|power_avg|status_12v_2x6|zero_fan|total_energy|serial='
+# daemon 的 textfile 里也要有 OCP 块（TS 机型 1 + 阈值；MEG 机型只有 available 0）
+grep -E 'msi_psu_ocp_available|msi_psu_ocp_pin_point_a' /var/lib/node_exporter/textfile/msi-psu.prom
 ```
 
 ```bash

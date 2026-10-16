@@ -164,6 +164,16 @@
     也没有一行提示——需求里 `-O` 的定义是「存成文件，不打屏」。现按需求实现：追加到文件
     （行缓冲，`tail -f` 能实时看到）、stdout 保持干净、启动时在 stderr 说明一句，
     路径写不了就 exit 1。smoke 增两条检查（文件有内容 / stdout 为空）。
+- **daemon 的 prometheus 现在也带 OCP 块（本轮）**：`--ocp` 只读展示此前只有 CLI 有，daemon
+  的 textfile 里没有任何 OCP 指标——Grafana 上看不到单针阈值，也没法按它告警。现在 daemon
+  在每次写 prom 时（默认 30 s）读一次 C0h/C1h 并附上 `msi_psu_ocp_*`。两个「不许骗人」的
+  细节：**C1h 是 5 s 滚动平均**，所以不能整个会话只读一次（那是把 stale 电流当实时导出去）；
+  **MEG 机型 0xC1 是 26 字节黑盒**，所以按机型门控、一次都不读，改为导出
+  `msi_psu_ocp_available 0`——「不支持」和「exporter 坏了」在面板上必须能分开。换机（重扫）
+  时清空缓存，不拿上一台的阈值糊弄。MEG P 系（0xC0 的另一种含义）则导出
+  `msi_psu_multirail_ocp`（1 = 逐轨保护）。四类机型在真 daemon 上逐个复验过：
+  MPG TS 出阈值+状态、MEG Ai1600T 只有 `available 0`、MEG P 出 multirail、两者都不出多余指标。
+
 - **daemon 打不开设备时的重试节奏（本轮）**：`_ensure_psu()` 的 except 分支设了
   `_next_discovery` 却**没有清掉 `device_path`**，下一 tick 直接跳过发现节流、每秒重开
   一次设备刷一行告警（`DISCOVERY_RETRY_S = 5` 形同虚设）。现清空路径，节流真正生效。
@@ -174,12 +184,12 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 358 passed
+uv run --group dev pytest -q                     → 365 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 32 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
 bash scripts/build_deb.sh                        → dist/msi-psu-monitor_1.0.0_all.deb
-bash scripts/smoke.sh                            → 49 项全过（三种格式/告警按机型/黑盒/OCP/风扇/daemon/dashboard）
+bash scripts/smoke.sh                            → 51 项全过（三种格式/告警按机型/黑盒/OCP/风扇/daemon/dashboard）
 ```
 
 护栏（机器强制，不靠人记）：

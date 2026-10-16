@@ -34,7 +34,7 @@ PASS=0
 FAIL=0
 # Keep in sync with the count quoted in docs/verify.md: a check that quietly
 # disappears from this script is a gap nobody notices.
-EXPECTED_TOTAL=49
+EXPECTED_TOTAL=51
 
 ok()   { PASS=$((PASS + 1)); printf '\033[0;32m  ok\033[0m   %s\n' "$1"; }
 bad()  { FAIL=$((FAIL + 1)); printf '\033[0;31m  FAIL\033[0m %s\n' "$1"; [ $# -gt 1 ] && printf '       %s\n' "$2"; }
@@ -161,6 +161,8 @@ PROM=$(cat "$WORK/psu.prom" 2>/dev/null)
 assert_contains "prom 有机型标签" 'msi_psu_info{product="MPG Ai1600TS' "$PROM"
 assert_contains "prom 有 up 指标" 'msi_psu_up 1' "$PROM"
 assert_contains "prom 有状态指标" 'msi_psu_status_12v_2x6{status="Normal"}' "$PROM"
+assert_contains "prom 有 OCP 块" 'msi_psu_ocp_available 1' "$PROM"
+assert_contains "prom 有 OCP 阈值" 'msi_psu_ocp_pin_point_a{} 12.0' "$PROM"
 [ -f "$MSI_PSU_STATE_DIR/state.json" ] && ok "state.json 落盘" || bad "state.json 落盘"
 HIST=$(cat "$MSI_PSU_STATE_DIR"/daily-*.log 2>/dev/null | head -1)
 case "$HIST" in

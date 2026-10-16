@@ -11,7 +11,7 @@ runtime imports.
 | `protocol.py` | HID framing, register map, variant dispatch, `MSIPSU.get_sensors()`, fan/alert/black-box/OCP reads, `HIDDevice` + `flock` |
 | `monitor.py` | CLI: argument validation, three sensor formatters + three `--ocp` formatters, exit codes, fan write, `--export`, `--show-log`, `--ocp`, device selection, `open_psu()` |
 | `state.py` | `MonitorState` (avg + energy integral), `state.json` atomic persistence, `daily-*.log` history, `--from`/`--columns`/`build_export` |
-| `daemon.py` | Resident sample loop: 1 s alerts, 30 s atomic prometheus, 60 s history, rescan after 5 failures |
+| `daemon.py` | Resident sample loop: 1 s alerts, 30 s atomic prometheus incl. the OCP block (`msi_psu_ocp_*` on TS / `msi_psu_multirail_ocp` on MEG P; variant-gated, refreshed every write because C1h is a 5 s rolling average), 60 s history, rescan after 5 failures |
 | `dashboard.py` | Loopback-only `http.server` reading the history files; charts are hand-drawn `<canvas>` JS |
 | `alerts.py` | `AlertEngine` (edge-triggered + consecutive debounce), severities, per-pin OCP/imbalance mirror |
 | `config.py` | INI config, precedence CLI > file > `DEFAULTS` |
@@ -110,7 +110,7 @@ runtime imports.
 ## Verification (no hardware required)
 
 ```bash
-uv run --group dev pytest -q              # 358 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
+uv run --group dev pytest -q              # 365 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
 uv run --group dev ruff check .           # must be clean
 uv run --group dev mypy msi_psu_monitor/  # must be clean
 ```

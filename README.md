@@ -206,10 +206,18 @@ it is `0`, `msi_psu_info{product,vendor,fw,serial}`, rail voltages/currents,
 `msi_psu_fan_speed`, `msi_psu_zero_fan{state}`,
 `msi_psu_status_12v_2x6{status}`, `msi_psu_total_energy_kwh`,
 `msi_psu_alert{alert}` and the uptime counters. `--ocp -f prometheus` exports the OCP
-limits as `msi_psu_ocp_enabled`, `msi_psu_ocp_pin_point_a`, `msi_psu_ocp_pin_diff_a`,
+limits as `msi_psu_ocp_available` (`1` when this model answers the C0h/C1h registers),
+`msi_psu_ocp_enabled`, `msi_psu_ocp_pin_point_a`, `msi_psu_ocp_pin_diff_a`,
 `msi_psu_ocp_trigger_s`, `msi_psu_ocp_diff_trigger_s`, `msi_psu_ocp_warning_s`,
 `msi_psu_ocp_status{connector}`, `msi_psu_ocp_run_time{connector}` and
 `msi_psu_ocp_total_time{connector}`.
+
+The daemon refreshes the same OCP block once per prometheus write (30 s by default —
+the 0xC1h state is a rolling 5 s average, so it must not be cached for the whole
+session). On models without those registers — the MEG units, where 0xC1h is the
+26-byte black box — it exports `msi_psu_ocp_available 0` instead of nothing, so a
+dashboard can tell "not supported" from "exporter broken"; the multi-rail MEG
+models add `msi_psu_multirail_ocp` (1 = per-rail protection) from the same address.
 
 The daemon replaces the file atomically (`.tmp` + rename), so scrapers never read a
 partial file:

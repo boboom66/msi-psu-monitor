@@ -455,9 +455,33 @@ def format_ocp_json(config, state, product):
     return json.dumps(payload, indent=2)
 
 
+#: HELP line of the always-exported OCP availability gauge (see below).
+OCP_AVAILABLE_HELP = (
+    '# HELP msi_psu_ocp_available 12V-2x6 OCP registers exposed by this model (1) or not (0)'
+)
+
+
+def format_ocp_availability_prometheus(available):
+    """The honest stand-in for a model without the C0h/C1h OCP registers.
+
+    The daemon always exports this gauge: an absent ``msi_psu_ocp_*`` block is
+    indistinguishable from a broken exporter on a dashboard.
+    """
+    return '\n'.join(
+        [
+            OCP_AVAILABLE_HELP,
+            '# TYPE msi_psu_ocp_available gauge',
+            f'msi_psu_ocp_available {1 if available else 0}',
+        ]
+    )
+
+
 def format_ocp_prometheus(config, state, product):
     """Format the C0h threshold configuration (+ C1h state) as prometheus text."""
     lines = [
+        OCP_AVAILABLE_HELP,
+        '# TYPE msi_psu_ocp_available gauge',
+        'msi_psu_ocp_available 1',
         '# HELP msi_psu_ocp_enabled 12V-2x6 OCP enabled (1) or disabled (0)',
         '# TYPE msi_psu_ocp_enabled gauge',
         f'msi_psu_ocp_enabled{{}} {1 if config["enabled"] else 0}',

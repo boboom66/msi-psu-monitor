@@ -76,6 +76,12 @@ class MonitorDaemon:
         self._next_history = 0.0
         self._next_prune = 0.0
         self._next_discovery = 0.0
+        # OCP block (C0h thresholds + C1h state) for the prometheus file.
+        # ocp_available stays None until a PSU is open and its variant is known.
+        self.ocp_available = None
+        self.ocp_config = None
+        self.ocp_state = None
+        self.ocp_multirail = None
 
     # ---- device lifecycle ------------------------------------------------
 
@@ -151,6 +157,12 @@ class MonitorDaemon:
         except Exception:  # pragma: no cover - best effort on a dying device
             pass
         self.psu = None
+        # The replacement may be a different model, so forget the OCP block
+        # instead of exporting the previous PSU's thresholds.
+        self.ocp_available = None
+        self.ocp_config = None
+        self.ocp_state = None
+        self.ocp_multirail = None
 
     def _rediscover(self):
         self._drop_psu()
@@ -203,12 +215,85 @@ class MonitorDaemon:
             self._rediscover()
         return None
 
+    def refresh_ocp(self):
+        """Read the C0h/C1h OCP block for the prometheus file.
+
+        Only the MPG TS models answer 0xC0 with the 8-byte 12V-2x6 OCP
+        configuration and 0xC1 with its 42-byte state; on the MEG units 0xC1 is
+        the 26-byte black box, so reading it there would export a different
+        register as if it were OCP. Nothing is cached: the C1h state is a rolling
+        5 s average, and the 30 s prometheus cadence is the right refresh rate
+        (one extra HID round trip per write). A failed read clears the block and
+        warns rather than leaving the previous values behind.
+        """
+        psu = self.psu
+        if psu is None:
+            return
+        self.ocp_available = bool(getattr(psu, 'supports_ocp_config', False))
+        if not self.ocp_available:
+            self.ocp_config = None
+            self.ocp_state = None
+            self.ocp_multirail = self._read_multirail(psu)
+            return
+        try:
+            config = psu.read_ocp_thresholds()
+        except Exception as exc:  # pragma: no cover - defensive against odd devices
+            logger.warning(f'OCP configuration read failed: {exc}')
+            config = None
+        self.ocp_config = config
+        self.ocp_state = None
+        if config is None:
+            logger.warning('The PSU did not answer the 0xC0 OCP configuration read.')
+            return
+        reader = getattr(psu, 'read_ocp_state', None)
+        if reader is None:
+            self.ocp_state = None
+            return
+        try:
+            self.ocp_state = reader()
+        except Exception as exc:  # pragma: no cover - the state block is a bonus
+            logger.warning(f'OCP state read failed: {exc}')
+            self.ocp_state = None
+
+    def _read_multirail(self, psu):
+        """Read the 1-byte 0xC0 multirail flag (MEG P models only).
+
+        The other half of the same overloaded address: these models report
+        whether per-rail OCP protection is active instead of the 12V-2x6
+        thresholds. ``None`` means "this model does not answer that read".
+        """
+        reader = getattr(psu, 'read_multirail_ocp', None)
+        if reader is None or not getattr(psu, 'supports_multirail_ocp', False):
+            return None
+        try:
+            return reader()
+        except Exception as exc:  # pragma: no cover - defensive against odd devices
+            logger.warning(f'Multirail OCP read failed: {exc}')
+            return None
+
     def write_prometheus(self, sensors, output=None):
         """Atomically replace the textfile collector output."""
         target = Path(output) if output else self.prom_path
         if target is None:
             return None
-        stats.atomic_write_text(target, monitor.format_prometheus(sensors) + '\n')
+        body = [monitor.format_prometheus(sensors)]
+        # Re-read on every prometheus write: the 0xC1h state is a rolling 5 s
+        # average, so caching it once per session would export stale currents as
+        # if they were live.
+        self.refresh_ocp()
+        if self.ocp_config is not None:
+            body.append(
+                monitor.format_ocp_prometheus(
+                    self.ocp_config, self.ocp_state, sensors.get('product')
+                )
+            )
+        elif self.ocp_available is not None:
+            body.append(monitor.format_ocp_availability_prometheus(self.ocp_available))
+            if self.ocp_multirail is not None:
+                body.append(
+                    monitor.format_multirail_prometheus(self.ocp_multirail, sensors.get('product'))
+                )
+        stats.atomic_write_text(target, '\n'.join(body) + '\n')
         return target
 
     def record_history(self, sensors):

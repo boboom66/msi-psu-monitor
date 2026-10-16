@@ -22,14 +22,59 @@ class Clock:
         self.now += seconds
 
 
+def ocp_config():
+    """C0h thresholds as an MPG TS model reports them."""
+    return {
+        'enabled': True,
+        'point_a': 12.0,
+        'diff_a': 5.0,
+        'trigger_s': 20,
+        'diff_trigger_s': 20,
+        'warning_s': 180,
+    }
+
+
+def ocp_state():
+    """C1h realtime state: both 12V-2x6 connectors, all pins normal."""
+    return {
+        'status_12v5': 0,
+        'run_time': 0,
+        'total_time': 446400,
+        'pins_1_6': [7.0] * 6,
+        'status_12v3': 0,
+        'run_time_2': 0,
+        'total_time_2': 446400,
+        'pins_7_12': [7.0] * 6,
+    }
+
+
 class StubPSU:
-    def __init__(self, sensors=None, alerts=None, fan=None, error=None):
+    # Default to a MEG model: there 0xC1 is the 26-byte black box, not OCP state.
+    supports_ocp_config = False
+    supports_multirail_ocp = False
+
+    def __init__(self, sensors=None, alerts=None, fan=None, error=None, ocp=None):
         self._sensors = sensors if sensors is not None else {}
         self._alerts = alerts
         self._fan = fan or {}
         self.error = error
+        self.ocp = ocp
+        self.multirail = None
+        self.ocp_reads = 0
         self.reads = 0
         self.closed = False
+
+    def read_ocp_thresholds(self):
+        self.ocp_reads += 1
+        return self.ocp
+
+    def read_ocp_state(self):
+        self.ocp_reads += 1
+        return ocp_state()
+
+    def read_multirail_ocp(self):
+        self.ocp_reads += 1
+        return self.multirail
 
     def open(self):
         return self
@@ -126,6 +171,111 @@ def test_tick_cadence_prom_30s_history_60s(tmp_path):
     clock.advance(30)
     assert daemon.tick()
     assert daemon.state.count == 3
+
+
+def test_the_daemon_exports_the_ocp_block_for_ts_models(tmp_path):
+    """The textfile collector carries the C0h thresholds and the C1h state."""
+    psu = StubPSU(clean_sensors(), alerts={'ocp_12v': False}, ocp=ocp_config())
+    psu.supports_ocp_config = True
+    daemon = make_daemon(tmp_path, psu, prom_path=str(tmp_path / 'psu.prom'))
+    assert daemon.tick()
+
+    prom = (tmp_path / 'psu.prom').read_text()
+    assert 'msi_psu_up 1' in prom
+    assert 'msi_psu_ocp_available 1' in prom
+    assert 'msi_psu_ocp_enabled{} 1' in prom
+    assert 'msi_psu_ocp_pin_point_a{} 12.0' in prom
+    assert 'msi_psu_ocp_pin_diff_a{} 5.0' in prom
+    assert 'msi_psu_ocp_status{connector="1"} 0' in prom
+    assert 'msi_psu_ocp_status{connector="2"} 0' in prom
+
+
+def test_the_ocp_state_is_refreshed_on_every_prometheus_write(tmp_path):
+    """C1h is a rolling 5 s average, so one read per session would go stale."""
+    clock = Clock()
+    psu = StubPSU(clean_sensors(), alerts={'ocp_12v': False}, ocp=ocp_config())
+    psu.supports_ocp_config = True
+    daemon = make_daemon(tmp_path, psu, clock=clock, prom_path=str(tmp_path / 'psu.prom'))
+    daemon.tick()
+    reads = psu.ocp_reads
+
+    clock.advance(30)
+    daemon.tick()
+    assert psu.ocp_reads > reads
+
+
+def test_the_daemon_never_reads_ocp_on_a_meg_model(tmp_path):
+    """0xC1 on MEG units is the black box; exporting it as OCP state would lie."""
+    psu = StubPSU(clean_sensors(), alerts={'ocp_12v': False}, ocp=ocp_config())
+    daemon = make_daemon(tmp_path, psu, prom_path=str(tmp_path / 'psu.prom'))
+    assert daemon.tick()
+
+    prom = (tmp_path / 'psu.prom').read_text()
+    assert 'msi_psu_ocp_available 0' in prom
+    assert 'msi_psu_ocp_enabled' not in prom
+    assert psu.ocp_reads == 0
+
+
+def test_a_meg_p_model_exports_the_multirail_flag_instead(tmp_path):
+    """0xC0's other meaning: per-rail vs combined protection on the MEG P models."""
+    psu = StubPSU(clean_sensors(), alerts={'ocp_12v': False})
+    psu.supports_multirail_ocp = True
+    psu.multirail = True
+    daemon = make_daemon(tmp_path, psu, prom_path=str(tmp_path / 'psu.prom'))
+    assert daemon.tick()
+
+    prom = (tmp_path / 'psu.prom').read_text()
+    assert 'msi_psu_ocp_available 0' in prom
+    assert 'msi_psu_multirail_ocp{} 1' in prom
+    assert 'msi_psu_ocp_enabled' not in prom
+
+
+def test_a_model_with_neither_ocp_view_exports_no_ocp_lines(tmp_path):
+    """MEG Ai1600T: 0xC0/0xC1 give no OCP data at all, so claim none."""
+    psu = StubPSU(clean_sensors(), alerts={'ocp_12v': False})
+    daemon = make_daemon(tmp_path, psu, prom_path=str(tmp_path / 'psu.prom'))
+    assert daemon.tick()
+
+    prom = (tmp_path / 'psu.prom').read_text()
+    assert 'msi_psu_ocp_available 0' in prom
+    assert 'msi_psu_multirail_ocp' not in prom
+    assert psu.ocp_reads == 0
+
+
+def test_a_replacement_psu_does_not_inherit_the_old_ocp_block(tmp_path):
+    clock = Clock()
+    ts = StubPSU(clean_sensors(), alerts={'ocp_12v': False}, ocp=ocp_config())
+    ts.supports_ocp_config = True
+    meg = StubPSU(clean_sensors(), alerts={'ocp_12v': False})
+    daemon = make_daemon(tmp_path, ts, clock=clock, prom_path=str(tmp_path / 'psu.prom'))
+    daemon.tick()
+    assert 'msi_psu_ocp_enabled{} 1' in (tmp_path / 'psu.prom').read_text()
+
+    daemon._rediscover()  # the PSU dropped off the bus
+    daemon.psu_factory = lambda path: meg
+    clock.advance(30)
+    daemon.tick()
+
+    prom = (tmp_path / 'psu.prom').read_text()
+    assert 'msi_psu_ocp_available 0' in prom
+    assert 'msi_psu_ocp_enabled' not in prom
+
+
+def test_a_failed_ocp_read_clears_the_exported_block(tmp_path):
+    clock = Clock()
+    psu = StubPSU(clean_sensors(), alerts={'ocp_12v': False}, ocp=ocp_config())
+    psu.supports_ocp_config = True
+    daemon = make_daemon(tmp_path, psu, clock=clock, prom_path=str(tmp_path / 'psu.prom'))
+    daemon.tick()
+    assert 'msi_psu_ocp_enabled{} 1' in (tmp_path / 'psu.prom').read_text()
+
+    psu.ocp = None  # the C0h read now NAKs
+    clock.advance(30)
+    daemon.tick()
+
+    prom = (tmp_path / 'psu.prom').read_text()
+    assert 'msi_psu_ocp_available 1' in prom  # the model still supports it
+    assert 'msi_psu_ocp_enabled' not in prom  # but no thresholds may be claimed
 
 
 def test_prometheus_is_written_atomically_and_replaced(tmp_path):
