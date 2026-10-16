@@ -313,10 +313,14 @@ journalctl -u msi-psu-monitor -f
 2. 44B/62B `0xE0` 抓包确认 `BULK_*` 偏移（对照 `docs/protocol.md`）；
 3. Ai1300TS（PID `0xAA6F`）能被扫到并正确判变体；
 4. `--fan-duty 0/50/100` 写后读回一致，`F1h` 保存后断电重启仍生效；
+4b. 配 `[fan] mode = customized` + `duty` 后重启 daemon，`journalctl` 出现
+   `Restored the configured fan profile`，且电源侧设置确实被改写；
 5. 满载下单针 >12A 触发 `ocp_pinN`，针差 >5A 触发 `pin_imbalance`；
 6. 运行中拔插 USB：daemon 连续 5 次读失败后重扫并自动重连（`journalctl` 可见 `rescanning`）；
 7. 72h 烤机：`state.json` 的 `energy_wh` 与插座功率计积分值偏差可接受；
 8. `--ocp` 读出的 4 个阈值与 MSI Center 界面 / 出厂规格一致（12A/5A/20s/180s），
    且 `ConnN` 状态与 `--once` 的 `12V-2x6 Status` 行不矛盾；
-9. `--ocp` 在 MEG 机型（`0xC9EB`/`0x56D4`/`0xE749`）上打印「not available」并 exit 0，
-   不产生 NAK 重试或超时。
+9. `--ocp` 在 MEG P 系（`0x56D4`/`0xE749`）上输出 1 字节单多轨标志（`per-rail protection`
+   或 `single combined-rail`），与 MSI Center 的对应开关一致，不产生 NAK 重试或超时；
+10. `--ocp` 在 MEG Ai1600T（`0xC9EB`）上打印「not available」并 exit 0（两个 `0xC0` 视图
+   都不支持），不产生 NAK 重试或超时。

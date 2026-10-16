@@ -69,7 +69,7 @@ bash scripts/build_deb.sh                        → dist/msi-psu-monitor_1.0.0_
 - **Q10 Pin6 / AVG 数值**：待真机复核。
 - **内核模块**：`kernel/msi-psu-ai1600ts.patch` 需 Proxmox 7.0 内核头文件，仓库内无法构建；用户态工具是受支持路径。
 
-### 真机验收（`docs/verify.md` §8，共 9 项，均待样机）
+### 真机验收（`docs/verify.md` §8，共 10 项，均待样机）
 
 1. `--once` 读数与 MSI Center 对照（误差 <1%）。
 2. 抓包核对 62B 与 40B 变体的 `0xE0` 布局。
