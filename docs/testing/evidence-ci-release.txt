@@ -1,0 +1,25 @@
+GitHub Actions release evidence (2026-10-19)
+===========================================
+Release: https://github.com/boboom66/msi-psu-monitor/releases/tag/v1.0.0
+Run:     https://github.com/boboom66/msi-psu-monitor/actions/runs/39208968894
+Tag:     v1.0.0
+Head:    e3ab7ae827943c86584880a9f040659e85bab928
+Jobs:    build (ubuntu-22.04-arm, aarch64, arm64) success
+         build (ubuntu-22.04, x86_64, amd64) success
+         publish success
+
+Assets:  msi-psu-monitor_1.0.0_linux_x86_64.tar.gz
+         msi-psu-monitor_1.0.0_linux_aarch64.tar.gz
+         msi-psu-monitor_1.0.0_amd64.deb
+         msi-psu-monitor_1.0.0_arm64.deb
+         msi-psu-monitor-hardware-kit-1.0.0-linux-{x86_64,aarch64}.tar.gz
+         SBOM-{x86_64,aarch64}.json
+         SHA256SUMS
+
+SHA256SUMS contains hardware-kit entries; no source `_all.deb` (the smoke test
+creates one but the release workflow now deletes it before upload).
+All release asset digests returned by the API match SHA256SUMS.
+
+BUILD-INFO in both tarballs: build_glibc=2.35.
+x86_64 artifact was previously run clean-env on the WSL host; aarch64 binary is
+ELF 64-bit ARM aarch64 (running it needs arm64/qemu, still BLOCKED here).

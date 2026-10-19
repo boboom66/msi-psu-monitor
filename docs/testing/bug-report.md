@@ -69,3 +69,12 @@ Phase 2 会把上表映射为 TEST-xxx，并在 `test-cases.md` 中记录前置�
 
 - 长稳：demo daemon 20,000 样本（约 200s，`sample_interval=0.01`），RSS 稳定在 16.6MB、fd=3、prom 约 4.4KB、history 1,164 行；无 traceback，正常 `Stopped after 20000 samples`。
   证据：[evidence-soak-20k.tsv](evidence-soak-20k.tsv)。24h/72h 仍未跑。
+
+## 7. CI release 阶段发现并修复
+
+| ID | 严重度 | 状态 | 描述 | 证据 | 影响 | 处理 |
+|---|---|---|---|---|---|---|
+| DEF-013 | P2 | 已修复 | 首次 v1.0.0 release 把 smoke test 生成的 source `.deb`（Architecture: all, Depends: python3）一起发布 | 首次 release 资产含 `msi-psu-monitor_1.0.0_all.deb`；`dpkg-deb -f` 显示 `Depends: python3`；修复后资产无该文件 | 违背“官方下载不需要 Python”，且与自包含 deb 混淆 | release workflow 在 smoke 后删除 `_all.deb`，upload/publish 只匹配自包含 arch deb，并加回归断言 |
+| DEF-014 | P2 | 已修复 | 首次修复后 `SHA256SUMS` 只覆盖 release tar/deb/SBOM，未覆盖 hardware kit | 修复前 `SHA256SUMS` 无 hardware-kit 行；修复后含两架构 kit | kit 资产无校验和 | checksum 命令加入 `msi-psu-monitor-*hardware-kit*.tar.gz`，并由 release_security 测试锁定 |
+
+首个失败 run 还暴露了两个 CI-only 断言（`dist/*.tar.gz`、旧 `sha256sum` 行）；已在 tests 中更新并在后续 tag 重跑。
