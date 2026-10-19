@@ -1,7 +1,7 @@
 # 测试用例（第二阶段）
 
 - 基线提交：`650076a`；当前修复后工作树：Phase 2（见 git log）。
-- 全量自动化用例由 `pytest --collect-only` 收集，当前 **630** 个；本文件记录本轮新增/关键用例、
+- 全量自动化用例由 `pytest --collect-only` 收集，当前 **636** 个；本文件记录本轮新增/关键用例、
   人工 E2E 用例和仍无法执行的真机/root 用例。
 - 状态：PASS 已实际执行且符合预期；FAIL 已实际执行且不符合；BLOCKED 环境/权限/硬件限制；
   NOT RUN 尚未执行；N/A 不适用。
@@ -57,7 +57,7 @@
 
 ## D. 已有自动化覆盖
 
-原有 630 个 pytest 用例（含本文件列出的新增项）由 `tests/` 直接执行；逐项结果以
+原有 636 个 pytest 用例（含本文件列出的新增项）由 `tests/` 直接执行；逐项结果以
 `pytest -q` 的实际输出为准，不在此重复伪造逐条结果。测试模块与覆盖范围见
 [test-plan.md](test-plan.md) §4 和 [test-report.md](test-report.md)。
 
@@ -83,3 +83,7 @@
 
 | TEST-061 | FUNC-191/197 | CI release | push tag v1.0.0；build x86_64 + ubuntu-22.04-arm + publish | 两个 build success、release 发布、SHA256SUMS 覆盖全部资产 | 通过（run 39208968894） | PASS |
 | TEST-062 | FUNC-191/192 | 发布不含 source deb | 检查 release 资产与 SHA256SUMS | 无 `_all.deb`（Depends python3），仅自包含 amd64/arm64 deb | 通过 | PASS（DEF-013） |
+
+| TEST-063 | FUNC-025 | export 原子写 | 目标已有文件，`_write_csv` 写一半抛 ENOSPC | 目标仍是旧内容、scratch 被清理 | 通过 | PASS（DEF-015） |
+| TEST-064 | FUNC-001/026 | 被忽略参数拒绝 | export + `-f json`/`--serial`；控制写 + `-f json` | argparse exit 2，错误说明 does not apply | 通过 | PASS（DEF-016） |
+| TEST-065 | FUNC-023 | 配置 format 固定模式 | 配置 `format=json` + `--fan-mode auto` | 文本输出 + warning | 通过 | PASS（DEF-016） |

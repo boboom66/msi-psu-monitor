@@ -870,3 +870,53 @@ def test_show_log_reports_an_unwritable_output(monkeypatch, capsys, tmp_path):
     code, captured = run_main(monkeypatch, capsys, stub, ['--show-log', '-O', str(target)])
     assert code == EXIT_ERROR
     assert 'cannot write' in captured.err
+
+
+def test_export_preserves_an_existing_file_when_the_write_fails(monkeypatch, capsys, tmp_path):
+    """A failed export must not leave a truncated file where the old one was."""
+    target = tmp_path / 'out.csv'
+    target.write_text('old export\n', encoding='utf-8')
+
+    def explode(stream, header, rows):
+        stream.write('partial\n')
+        raise OSError(28, 'No space left on device')
+
+    monkeypatch.setattr(monitor, '_write_csv', explode)
+    code, captured = run_main(
+        monkeypatch, capsys, StubPSU(), ['--export', '--from', '2h', '-O', str(target)]
+    )
+    assert code == EXIT_ERROR
+    assert 'cannot write' in captured.err
+    assert target.read_text(encoding='utf-8') == 'old export\n'
+    assert not (tmp_path / 'out.csv.tmp').exists()
+
+
+@pytest.mark.parametrize(
+    'argv',
+    [
+        ['--export', '--from', '2h', '-f', 'json'],
+        ['--export', '--from', '2h', '--serial', 'SN1'],
+        ['--fan-mode', 'auto', '-f', 'json'],
+        ['--buzzer-off', '-f', 'prometheus'],
+    ],
+)
+def test_flags_that_would_be_silently_ignored_are_rejected(monkeypatch, capsys, argv):
+    """--format/--serial must not be accepted by modes that cannot honour them."""
+    code, captured = run_main(monkeypatch, capsys, StubPSU(sensors()), list(argv))
+    assert code == 2
+    assert 'does not apply' in captured.err
+
+
+def test_a_config_format_is_ignored_with_a_warning_in_fixed_format_modes(
+    monkeypatch, capsys, tmp_path
+):
+    """CLI rejects -f json with writes; a config-file format must not be silent."""
+    conf = tmp_path / 'psu.conf'
+    conf.write_text('[monitor]\nformat = json\n', encoding='utf-8')
+    stub = StubPSU(sensors())
+    code, captured = run_main(
+        monkeypatch, capsys, stub, ['--fan-mode', 'auto', '--config', str(conf)]
+    )
+    assert code == EXIT_OK
+    assert captured.out.strip() == 'Fan mode: auto'
+    assert 'fixed output format' in captured.err

@@ -59,7 +59,7 @@ Phase 2 会把上表映射为 TEST-xxx，并在 `test-cases.md` 中记录前置�
 | DEF-010 | P2 | 已修复 | daemon `open()` 成功、`init()` 失败时未关闭已打开的 hidraw fd | `test_a_failed_init_closes_the_already_open_device` | 持续发现失败时每轮泄漏一个 fd | `_ensure_psu` 失败路径关闭 psu |
 | DEF-011 | P3 | 已修复 | Dashboard `/api/export` 用 `",".join` 拼 CSV，值含逗号/引号时错列 | `test_export_endpoint_quotes_a_comma_in_a_value` | 手工编辑的历史文件可让导出列错位 | 改用 `csv.writer`（与 CLI 一致） |
 
-回归命令：`uv run --group dev pytest -q` → 630 passed；覆盖率 92%；`ruff check`/`mypy`/`smoke` 见 test-report。
+回归命令：`uv run --group dev pytest -q` → 636 passed；覆盖率 92%；`ruff check`/`mypy`/`smoke` 见 test-report。
 
 ## 6. Phase 3 补充：响应式与长稳验证
 
@@ -78,3 +78,10 @@ Phase 2 会把上表映射为 TEST-xxx，并在 `test-cases.md` 中记录前置�
 | DEF-014 | P2 | 已修复 | 首次修复后 `SHA256SUMS` 只覆盖 release tar/deb/SBOM，未覆盖 hardware kit | 修复前 `SHA256SUMS` 无 hardware-kit 行；修复后含两架构 kit | kit 资产无校验和 | checksum 命令加入 `msi-psu-monitor-*hardware-kit*.tar.gz`，并由 release_security 测试锁定 |
 
 首个失败 run 还暴露了两个 CI-only 断言（`dist/*.tar.gz`、旧 `sha256sum` 行）；已在 tests 中更新并在后续 tag 重跑。
+
+## 8. 2026-10-19 第二轮缺陷修复
+
+| ID | 严重度 | 状态 | 描述 | 证据 | 影响 | 处理 |
+|---|---|---|---|---|---|---|
+| DEF-015 | P2 | 已修复 | `--export -O` 直接写目标文件；中途 OSError 会留下被截断的旧导出 | `test_export_preserves_an_existing_file_when_the_write_fails`（旧实现会把 `old export` 覆盖成 partial） | 数据导出损坏/不可恢复 | 普通文件改为 scratch + fsync + `os.replace`；FIFO/字符设备保留直接写 |
+| DEF-016 | P2 | 已修复 | `-f/--format` 在 export/控制写中被接受但静默忽略；`--serial` 在 export 中被忽略；配置文件 format 在固定输出模式中也被静默忽略 | 新增参数化 `test_flags_that_would_be_silently_ignored_are_rejected`、`test_a_config_format_is_ignored_with_a_warning_in_fixed_format_modes` | 调用方以为得到 JSON/选了设备，实际不是 | 不兼容组合 argparse exit 2；配置 format 在固定格式模式给出 warning 并回落 text |
