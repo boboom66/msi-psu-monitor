@@ -92,6 +92,68 @@ def test_save_is_atomic_and_leaves_no_tmp_file(tmp_path):
     assert not path.with_name(path.name + '.tmp').exists()
 
 
+def test_an_interrupted_save_keeps_the_previous_state_intact(tmp_path, monkeypatch):
+    """os.replace is the moment the new document becomes visible.
+
+    The old test only checked "target exists, .tmp gone", which an in-place
+    ``path.write_text()`` passes too -- so the atomicity the module promises was
+    never actually exercised. Here the scratch file is written and only the
+    replace fails: the target must still hold the previous complete document.
+    """
+    path = stats.state_path(tmp_path)
+    stats.MonitorState(count=1, watt_sum=100.0).save(path)
+    before = path.read_bytes()
+
+    def no_space(src, dst):
+        raise OSError(28, 'No space left on device')
+
+    monkeypatch.setattr(stats.os, 'replace', no_space)
+    with pytest.raises(OSError):
+        stats.MonitorState(count=2, watt_sum=200.0).save(path)
+
+    assert path.read_bytes() == before
+    reloaded = stats.MonitorState.load(path)
+    assert (reloaded.count, reloaded.watt_sum) == (1, 100.0)
+    scratch = path.with_name(path.name + '.tmp')
+    assert scratch.exists()  # only the scratch file was replaced/created
+    assert '"count": 2' in scratch.read_text()
+
+
+def test_strict_load_reports_an_existing_file_it_had_to_discard(tmp_path):
+    """The dashboard cannot show zeros for a file it could not read."""
+    path = stats.state_path(tmp_path)
+    path.write_text('{"version": 1, "count": 5')  # truncated by a crash
+    assert stats.MonitorState.load(path).count == 0  # CLI/daemon stay lenient
+    with pytest.raises(stats.StateError, match='not valid JSON'):
+        stats.MonitorState.load(path, strict=True)
+
+
+def test_strict_load_still_accepts_a_missing_file(tmp_path):
+    """First run is not a fault, even for the dashboard: no file, no 503."""
+    assert stats.MonitorState.load(stats.state_path(tmp_path), strict=True).count == 0
+
+
+@pytest.mark.parametrize(
+    'content',
+    ['{not json', json.dumps({'version': 99, 'count': 5})],
+    ids=['truncated', 'wrong-version'],
+)
+def test_strict_load_raises_for_an_unusable_file_only_when_asked(tmp_path, content):
+    path = stats.state_path(tmp_path)
+    path.write_text(content)
+    assert stats.MonitorState.load(path).count == 0
+    with pytest.raises(stats.StateError):
+        stats.MonitorState.load(path, strict=True)
+
+
+def test_strict_load_refuses_a_non_regular_state_file(tmp_path):
+    """A directory/FIFO named state.json is "exists but unusable", not "absent"."""
+    path = stats.state_path(tmp_path)
+    path.mkdir()
+    with pytest.raises(stats.StateError, match='not a regular file'):
+        stats.MonitorState.load(path, strict=True)
+
+
 def test_load_tolerates_missing_and_corrupt_files(tmp_path):
     missing = tmp_path / 'nope.json'
     assert stats.MonitorState.load(missing).count == 0

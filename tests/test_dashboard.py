@@ -1,6 +1,7 @@
 """Tests for the local dashboard HTTP endpoints (no hardware, no network egress)."""
 
 import json
+import os
 import pathlib
 import re
 import select
@@ -136,6 +137,136 @@ def test_bad_window_is_rejected(live_server):
     with pytest.raises(HTTPError) as exc:
         _get(live_server + '/api/export?columns=wattage')
     assert exc.value.code == 400
+
+
+def test_state_endpoint_exposes_the_last_sample_time(live_server):
+    """Without last_ts the page cannot tell a live daemon from a week-old file."""
+    _, body = _get(live_server + '/api/state')
+    payload = json.loads(body)
+    assert payload['last_ts'] == pytest.approx(time.time(), abs=120)
+
+
+def test_blank_query_values_are_400_not_defaults(live_server):
+    """`?from=` and `?columns=` are hard errors on the CLI; the HTTP API agrees.
+
+    parse_qs dropped blank values by default, so `?from=` silently became the
+    default window and `?columns=` silently exported every column -- the same
+    input the CLI rejects with exit 1.
+    """
+    for route in (
+        '/api/history?from=',
+        '/api/export?from=',
+        '/api/export?columns=',
+    ):
+        with pytest.raises(HTTPError) as exc:
+            _get(live_server + route)
+        assert exc.value.code == 400, route
+
+
+def test_a_missing_state_file_is_still_a_normal_first_run(tmp_path):
+    """Strict mode must not turn "the daemon has not run yet" into a 503."""
+    httpd = dashboard.make_server('127.0.0.1', 0, tmp_path)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, body = _get(f'http://127.0.0.1:{httpd.server_port}/api/state')
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=5)
+    payload = json.loads(body)
+    assert status == 200
+    assert payload['count'] == 0
+    assert payload['last_ts'] is None
+
+
+def test_a_corrupt_state_file_is_a_503_while_history_still_serves(tmp_path):
+    """Zero totals next to a full curve is the contradiction this guards.
+
+    MonitorState.load() recovers from every damaged file by returning empty
+    state, which is right for the CLI/daemon and wrong for the dashboard: HTTP
+    200 with count 0 looks exactly like a daemon that never recorded anything,
+    while /api/history happily returns real rows.
+    """
+    monitor_state = stats.MonitorState(product='MPG Ai1600TS')
+    monitor_state.update(600.0, 94.0, ts=time.time())
+    stats.append_history(tmp_path, _sensors(), ts=time.time())
+    # Write the good file first, then damage it in place.
+    monitor_state.save(stats.state_path(tmp_path))
+    stats.state_path(tmp_path).write_text('{not json', encoding='utf-8')
+
+    httpd = dashboard.make_server('127.0.0.1', 0, tmp_path)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    base = f'http://127.0.0.1:{httpd.server_port}'
+    try:
+        with pytest.raises(HTTPError) as exc:
+            _get(base + '/api/state')
+        assert exc.value.code == 503
+        assert b'not valid JSON' in exc.value.read()
+        # The history is still readable and must keep being served.
+        status, body = _get(base + '/api/history?from=all')
+        assert status == 200
+        assert json.loads(body)['count'] == 1
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=5)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason='root can read a chmod 000 file')
+def test_an_unreadable_state_file_is_a_503_with_its_path(tmp_path):
+    monitor_state = stats.MonitorState(product='MPG Ai1600TS')
+    monitor_state.update(600.0, 94.0, ts=time.time())
+    path = stats.state_path(tmp_path)
+    monitor_state.save(path)
+    httpd = dashboard.make_server('127.0.0.1', 0, tmp_path)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        path.chmod(0o000)
+        with pytest.raises(HTTPError) as exc:
+            _get(f'http://127.0.0.1:{httpd.server_port}/api/state')
+    finally:
+        path.chmod(0o600)
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=5)
+    assert exc.value.code == 503
+    body = exc.value.read()
+    assert str(path).encode() in body
+    assert b'not readable' in body
+
+
+def test_the_page_shows_sample_age_and_marks_stale_data(live_server):
+    """A stopped daemon keeps answering 200 from state.json; only age shows it."""
+    page = _get(live_server + '/')[1]
+    assert 'const STALE_AFTER_S = 300;' in page
+    assert 'st.last_ts' in page
+    assert 'last sample ' in page
+    assert "info.classList.toggle('stale'" in page
+
+
+def test_the_chart_x_axis_uses_real_timestamps():
+    """Row-number spacing made a six-hour outage look like two adjacent samples."""
+    page = dashboard.PAGE
+    assert 'Date.parse(r.time)' in page
+    assert 'useTime' in page
+    # The row index survives only as the documented fallback position.
+    assert '[Number.isFinite(t) ? t / 1000 : null, i, v]' in page
+    assert 'pad + (p[1] / span)' in page
+    # and the y/legend readers must use the value slot, not the row slot.
+    assert 'y(p[2])' in page
+    assert 's.pts[s.pts.length - 1][2]' in page
+
+
+def test_the_weekly_canvas_is_drawn_at_its_css_height():
+    """The page drew at 150 px inside a 120 px box and squashed every bar."""
+    page = dashboard.PAGE
+    assert ' canvas { width: 100%; display: block; }' in page
+    assert ' #grid canvas { height: 120px; }' in page
+    assert ' #weekly { height: 150px; }' in page
+    assert 'canvas.clientHeight || 150' in page
 
 
 def test_unknown_route_is_404(live_server):

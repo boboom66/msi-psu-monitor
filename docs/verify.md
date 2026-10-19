@@ -40,32 +40,35 @@ uv run --group dev ruff format --check .
 
 ### 1.1 测试模块清单
 
-| 模块 | 覆盖 |
+| 模块 | 覆盖（每行点名至少一个真实测试函数，由 `test_docs_consistency.py` 与收集结果核对） |
 |------|------|
-| `tests/test_protocol.py` | 命令帧拼装、握手、NAK 处理、`lin11_to_int` 标度 |
-| `tests/test_protocol_lin11.py` | LINEAR11 原始向量（含 exp −4 / −7 边界与无符号尾数） |
-| `tests/test_psu_sensors.py` | 62 B / 40 B / 20 B 三种载荷解析、P 系五轨、未知机型拒解 |
-| `tests/test_alerts.py` | 阈值判定、`consecutive_required` 去抖、严重度、告警行格式 |
-| `tests/test_state.py` | 累计统计、`rail_watts()`、历史追加/裁剪、`--export` 列 |
-| `tests/test_config.py` | INI 解析、`[daemon]`、`[fan]` 段与非法值回落；显式 `--config` 缺失/格式错误必须报错而非静默用默认值；越界 port 回落 |
-| `tests/test_monitor_format.py` | text / json / prometheus 三种 formatter 输出串 |
-| `tests/test_cli_alerts.py` | CLI 告警路径与退出码 2 |
-| `tests/test_cli_features.py` | `--watch`/`-O`/`--serial`/`--show-log`/`--fan-*`/`--export`/互斥校验 |
-| `tests/test_ocp.py` | 0xC0 阈值 / 0xC1 状态 / 单多轨标志的三格式输出与机型门 |
-| `tests/test_daemon.py` | 采样节拍、原子写、重扫、历史、风扇 Profile 恢复；`OSError`（拔插）计入重扫而非崩主循环；只答 ident 的样本判为读失败；OCP 块：TS 机型导出阈值 + 每周期刷新状态、MEG 机型一次 C0/C1 都不读、换机后不继承旧阈值 |
-| `tests/test_dashboard.py` | HTTP 端点、历史/状态载荷、CSV 导出、HEAD 与错误码一致；端口被占时一行错误 + exit 1 |
-| `tests/test_demo.py` | 合成电源、5 机型切换、告警位注入 |
-| `tests/test_schema.py` | JSON / prometheus 输出结构契约 |
-| `tests/test_monitor.py` | 遗留冒烟（兼容旧接口，勿删） |
-| `tests/test_pid_consistency.py` | 五处 USB PID 列表 + README 载荷大小一致性 |
-| `tests/test_stdlib_only.py` | `python -I` 子进程导入全部模块（零第三方依赖） |
-| `tests/test_docs_consistency.py` | 文档里的用例数、测试文件名、CLI 参数清单、版本号双重来源不得与事实不符 |
+| `tests/test_protocol.py` | `lin11_to_int` 的 8 条标度/符号向量（`test_unsigned_mode_keeps_high_bit`、`test_exponent_negative_shift`）；帧拼装与 NAK 覆盖在 `test_psu_sensors.py` |
+| `tests/test_protocol_discovery.py` | sysfs 发现、5 个 PID 全覆盖、演示模式不碰 sysfs（`test_detect_devices_never_returns_the_device_directory_name`）；解析器用真实实现（`test_resolve_device_uses_the_real_parser`） |
+| `tests/test_protocol_lin11.py` | LINEAR11 原始向量与 exp −4 / −7 边界（`test_negative_exponent`、`test_default_mantissa_is_unsigned_not_twos_complement`） |
+| `tests/test_psu_sensors.py` | 62 B / 40 B / 20 B 载荷解析、P 系五轨、帧/NAK（`test_a_meg_frame_whose_first_payload_byte_is_0xfe_is_still_decoded`）、告警位顺序、0xC1 状态/黑盒 |
+| `tests/test_alerts.py` | 阈值判定、`consecutive_required` 去抖（`test_debounce_needs_two_consecutive_polls`）、严重度、`retain()` 换机清理 |
+| `tests/test_state.py` | 能量积分、原子写中断（`test_an_interrupted_save_keeps_the_previous_state_intact`）、strict load、历史追加/裁剪、`--export` 列 |
+| `tests/test_config.py` | INI 解析、`[daemon]`、`[fan]` 段与非法值回落；显式 `--config` 缺失/格式错误必须报错（`test_an_explicit_config_file_must_exist`）；越界 port 回落 |
+| `tests/test_monitor_format.py` | text / json / prometheus 三种 formatter（`test_prometheus_reports_down_for_a_short_payload`）；prometheus 契约在这里，不在 `test_schema.py` |
+| `tests/test_cli_alerts.py` | CLI 告警路径与退出码 2（`test_once_alert_exits_two_and_prints_line`）、黑盒空表 |
+| `tests/test_cli_features.py` | `--watch`/`-O`/`--serial`/`--show-log`/`--fan-*`/`--export`/互斥校验（`test_an_empty_columns_spec_is_not_silently_every_column`） |
+| `tests/test_ocp.py` | 0xC0 阈值 / 0xC1 状态 / 单多轨标志的三格式输出与机型门（`test_run_ocp_on_a_meg_p_model_shows_the_multirail_flag`） |
+| `tests/test_daemon.py` | 采样节拍、原子写（`test_a_failed_prometheus_replace_keeps_the_previous_textfile`）、重扫、风扇 Profile 恢复、只答 ident 判读失败、OCP 块换机不继承旧阈值 |
+| `tests/test_dashboard.py` | HTTP 端点、损坏 state.json 的 503（`test_a_corrupt_state_file_is_a_503_while_history_still_serves`）、HEAD 与错误码一致、真实时间 x 轴 |
+| `tests/test_demo.py` | 合成电源、5 机型切换、告警位注入（`test_every_supported_variant_can_be_emulated`） |
+| `tests/test_packaging.py` | 安装器/`.deb`/udev/config 不变量（`test_the_deb_does_not_inherit_the_builders_umask`、`test_the_unit_does_not_require_a_config_nothing_installs`） |
+| `tests/test_schema.py` | JSON 输出结构契约（`test_json_schema_keys_frozen`）；prometheus 契约在 `test_monitor_format.py` |
+| `tests/test_monitor.py` | 遗留冒烟（兼容旧接口，勿删；`test_format_text_contains_keys`） |
+| `tests/test_pid_consistency.py` | 五处 USB PID 列表 + README 载荷双数字（`test_readme_payload_sizes_match_the_parser`） |
+| `tests/test_stdlib_only.py` | `python -I` 子进程导入全部模块（零第三方依赖；`test_the_probe_covers_every_shipped_module`） |
+| `tests/test_docs_consistency.py` | 文档里的用例数、测试文件名、§1.1 覆盖表函数名、CLI 参数清单、版本号双重来源不得与事实不符（`test_quoted_test_counts_are_accurate`） |
 
 `tests/test_docs_consistency.py` 是「文档防伪」：文档里写下的数字与文件名，都由测试去核对一遍。
 
-1. 任何文档写了 `N passed` / `N tests` / `N 个单测` 就必须等于 `pytest --collect-only` 的真实数字
-   （`* tests`、`* 个单测` 这类写法此前逃过了正则，`git log` 里两个老旧数字就是这么烂掉的）；
-2. 引用的 `` `tests/xxx.py` `` 必须存在；
+1. 任何文档写了 `N passed` / `N tests` / `N 个单测` / `N 通过` 就必须等于 `pytest --collect-only` 的真实数字
+   （`* tests`、`* 个单测`、`* 通过` 这类写法此前逃过了正则，`git log` 里三个老旧数字就是这么烂掉的）；
+2. 引用的 `` `tests/xxx.py` `` 必须存在，§1.1 表里每行至少点名一个真实测试函数（与收集结果核对），
+   且每个测试文件都要在表里有一行；
 3. 每个测试文件都必须在某处文档里被提到；
 4. README 的 Usage 参数清单必须与 `build_parser()` 完全一致（少写/多写都失败）；
 5. `__version__` 与 `pyproject.toml` 的 `version` 必须一致（`--version`、`.deb` 控制文件各读一份）；
@@ -83,7 +86,7 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。当前基线：**454 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
+三条全绿即通过。当前基线：**472 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
 
 > `ruff format --check .` **可以全仓跑**（CI 也跑）：`protocol.py`/`__init__.py`/`__main__.py`/
 > `tests/test_monitor.py` 这四个历史文件混用引号风格，已由 `[tool.ruff.format] exclude` +

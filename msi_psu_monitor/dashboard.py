@@ -36,6 +36,12 @@ logger = logging.getLogger('msi_psu.dashboard')
 DEFAULT_HOST = '127.0.0.1'
 DEFAULT_PORT = 8899
 ROW_LIMIT = 20000
+#: How old the newest sample may be before the page calls the data stale. The
+#: daemon persists state.json with each prometheus write (every 30 s by
+#: default), so five minutes is ten missed writes: long enough to ride out one
+#: slow disk, short enough that a stopped daemon is visible before the numbers
+#: are trusted. Page-only; no endpoint changes shape because of it.
+STALE_AFTER_S = 300
 
 PAGE = """<!DOCTYPE html>
 <html lang="en">
@@ -48,6 +54,7 @@ PAGE = """<!DOCTYPE html>
         font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; }
  h1 { font-size: 18px; margin: 0 0 4px; }
  .sub { color: #8b98a8; font-size: 12px; margin-bottom: 14px; }
+ .sub.stale { color: #e0a25c; }
  .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
  button, a.btn { background: #222831; color: #dfe4ea; border: 1px solid #333c47;
         border-radius: 5px; padding: 5px 11px; font-size: 13px; cursor: pointer;
@@ -58,7 +65,9 @@ PAGE = """<!DOCTYPE html>
  .card h2 { font-size: 13px; font-weight: 600; margin: 0 0 2px; color: #b9c4d1; }
  .last { font-size: 18px; font-variant-numeric: tabular-nums; }
  .meta { font-size: 11px; color: #7c8794; margin-bottom: 6px; }
- canvas { width: 100%; height: 120px; display: block; }
+ canvas { width: 100%; display: block; }
+ #grid canvas { height: 120px; }
+ #weekly { height: 150px; }
  .foot { font-size: 12px; color: #7c8794; margin-top: 6px; }
 </style>
 </head>
@@ -93,6 +102,9 @@ let range = '7d', rows = [];
 // Injected by the server (see PAGE_SUBSTITUTIONS): a Python constant is not
 // visible to the browser, and a bare reference here only throws at runtime.
 const ROW_LIMIT = __ROW_LIMIT__;
+// A successful /api/state is not proof of a live daemon: state.json survives a
+// stop, so the age of its last sample is the only evidence the page has.
+const STALE_AFTER_S = __STALE_AFTER_S__;
 
 function buildCards() {
   const grid = document.getElementById('grid');
@@ -113,25 +125,50 @@ function num(v) { const n = parseFloat(v); return Number.isFinite(n) ? n : null;
 
 function series(key) {
   const pts = [];
-  rows.forEach((r, i) => { const v = num(r[key]); if (v !== null) pts.push([i, v]); });
+  rows.forEach((r, i) => {
+    const v = num(r[key]);
+    if (v === null) return;
+    const t = Date.parse(r.time);
+    // [epoch, row index, value]: the row number is the fallback position, and an
+    // unparseable timestamp stays null instead of collapsing onto epoch 0.
+    pts.push([Number.isFinite(t) ? t / 1000 : null, i, v]);
+  });
   return pts;
+}
+
+function fmtStamp(sec, from, to) {
+  const d = new Date(sec * 1000), pad2 = n => String(n).padStart(2, '0');
+  const hm = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  const sameDay = new Date(from * 1000).toDateString() === new Date(to * 1000).toDateString();
+  return sameDay ? hm : pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + ' ' + hm;
 }
 
 function draw(canvas, all, showAxis) {
   const dpr = window.devicePixelRatio || 1;
-  const w = canvas.clientWidth || 320, h = 120;
+  const w = canvas.clientWidth || 320, h = canvas.clientHeight || 120;
   canvas.width = w * dpr; canvas.height = h * dpr;
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
 
   const pad = 26;
-  let lo = Infinity, hi = -Infinity;
-  all.forEach(s => s.pts.forEach(p => { if (p[1] < lo) lo = p[1]; if (p[1] > hi) hi = p[1]; }));
+  let lo = Infinity, hi = -Infinity, t0 = Infinity, t1 = -Infinity, timed = true;
+  all.forEach(s => s.pts.forEach(p => {
+    if (p[2] < lo) lo = p[2];
+    if (p[2] > hi) hi = p[2];
+    if (p[0] === null) timed = false;
+    else { if (p[0] < t0) t0 = p[0]; if (p[0] > t1) t1 = p[0]; }
+  }));
   if (!Number.isFinite(lo)) { ctx.fillStyle = '#7c8794'; ctx.fillText('no data', 8, 20); return []; }
   if (hi - lo < 1e-9) { hi += 1; lo -= 1; }
+  // X is wall-clock whenever every point has a timestamp: spacing by row number
+  // makes a six-hour outage look like two adjacent samples, and pins the newest
+  // point to the right edge, which reads as "live" even when nothing is.
   const span = rows.length > 1 ? rows.length - 1 : 1;
-  const x = i => pad + (i / span) * (w - pad - 6);
+  const useTime = timed && Number.isFinite(t0) && t1 > t0;
+  const x = p => useTime
+    ? pad + ((p[0] - t0) / (t1 - t0)) * (w - pad - 6)
+    : pad + (p[1] / span) * (w - pad - 6);
   const y = v => h - 16 - ((v - lo) / (hi - lo)) * (h - 28);
 
   ctx.strokeStyle = '#262d36'; ctx.lineWidth = 1;
@@ -141,11 +178,16 @@ function draw(canvas, all, showAxis) {
     ctx.fillStyle = '#7c8794'; ctx.font = '10px sans-serif';
     ctx.fillText(hi.toFixed(hi >= 100 ? 0 : 2), 2, 12);
     ctx.fillText(lo.toFixed(lo >= 100 ? 0 : 2), 2, h - 18);
+    if (useTime) {
+      ctx.fillText(fmtStamp(t0, t0, t1), pad, h - 3);
+      const tail = fmtStamp(t1, t0, t1);
+      ctx.fillText(tail, w - 6 - ctx.measureText(tail).width, h - 3);
+    }
   }
 
   all.forEach(s => {
     ctx.strokeStyle = s.color; ctx.lineWidth = 1.6; ctx.beginPath();
-    s.pts.forEach((p, k) => { const px = x(p[0]), py = y(p[1]); k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
+    s.pts.forEach((p, k) => { const px = x(p), py = y(p[2]); k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
     ctx.stroke();
   });
   return [lo, hi];
@@ -156,7 +198,7 @@ function render() {
     const canvas = document.getElementById('cv-' + c.id);
     const all = c.keys.map(([k, color]) => ({color, pts: series(k)}));
     const range2 = draw(canvas, all, true);
-    const last = all.map(s => s.pts.length ? s.pts[s.pts.length - 1][1] : null);
+    const last = all.map(s => s.pts.length ? s.pts[s.pts.length - 1][2] : null);
     document.getElementById('last-' + c.id).textContent = last
       .map((v, i) => v === null ? '--' : v.toFixed(c.id === 'fan' ? 0 : 2) + ' ' + (c.keys[i][0] === 'eff' ? '%' : c.unit))
       .join('   ');
@@ -186,7 +228,7 @@ function drawWeekly() {
   const canvas = document.getElementById('weekly');
   const entries = Object.entries(daily).slice(-7);
   const dpr = window.devicePixelRatio || 1;
-  const w = canvas.clientWidth || 640, h = 150;
+  const w = canvas.clientWidth || 640, h = canvas.clientHeight || 150;
   canvas.width = w * dpr; canvas.height = h * dpr;
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -218,23 +260,47 @@ async function okJson(response) {
   return response.json();
 }
 
+function ago(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return 'unknown';
+  if (seconds < 90) return Math.round(seconds) + 's';
+  if (seconds < 5400) return Math.round(seconds / 60) + 'm';
+  if (seconds < 172800) return Math.round(seconds / 3600) + 'h';
+  return Math.round(seconds / 86400) + 'd';
+}
+
 async function load() {
   const info = document.getElementById('info');
-  try {
-    const [hist, st] = await Promise.all([
-      fetch(`/api/history?from=${range}`).then(okJson),
-      fetch('/api/state').then(okJson),
-    ]);
-    rows = hist.rows.slice(-ROW_LIMIT);
-    daily = st.daily || {};
-    info.textContent =
-      `${st.product || 'MSI PSU'} \\u00b7 samples ${st.count} \\u00b7 avg ${st.power_avg.toFixed(2)} W ` +
-      `\\u00b7 avg eff ${st.efficiency_avg.toFixed(2)} % \\u00b7 total ${st.total_energy_kwh.toFixed(3)} kWh`;
-  } catch (err) {
-    // A failed poll has to be visible: leaving the previous numbers on screen
-    // without a word is how a dead daemon keeps looking healthy.
-    info.textContent = `Data may be stale (${err})`;
+  const problems = [];
+  let hist = null, st = null;
+  // Two independent fetches: an unreadable state.json (503 + reason) must not
+  // blank the history charts, which are still perfectly readable.
+  try { hist = await fetch('/api/history?from=' + range).then(okJson); }
+  catch (err) { problems.push('history unavailable (' + err + ')'); }
+  try { st = await fetch('/api/state').then(okJson); }
+  catch (err) { problems.push('totals unavailable (' + err + ')'); }
+  if (hist) rows = hist.rows.slice(-ROW_LIMIT);
+  if (st) daily = st.daily || {};
+
+  const now = Date.now() / 1000;
+  let text;
+  if (st) {
+    text = (st.product || 'MSI PSU') + ' \\u00b7 samples ' + st.count + ' \\u00b7 avg ' +
+      st.power_avg.toFixed(2) + ' W \\u00b7 avg eff ' + st.efficiency_avg.toFixed(2) + ' % \\u00b7 total ' +
+      st.total_energy_kwh.toFixed(3) + ' kWh';
+    text += st.last_ts
+      ? ' \\u00b7 last sample ' + ago(now - st.last_ts) + ' ago'
+      : ' \\u00b7 no sample timestamp';
+  } else {
+    text = 'Totals unavailable';
   }
+  if (problems.length) text += ' \\u00b7 ' + problems.join('; ');
+  info.textContent = text;
+  // HTTP 200 is not freshness: state.json outlives the daemon, so a stopped
+  // process keeps answering with its last totals. Age, not status, decides.
+  const age = st && st.last_ts ? now - st.last_ts : NaN;
+  // A negative age is a clock step, not freshness: treat it as stale too.
+  const stale = !Number.isFinite(age) || age < 0 || age > STALE_AFTER_S || problems.length > 0;
+  info.classList.toggle('stale', stale);
   render();
 }
 
@@ -266,6 +332,7 @@ setInterval(load, __REFRESH_MS__);
 PAGE_SUBSTITUTIONS = {
     '__REFRESH_MS__': '30000',
     '__ROW_LIMIT__': str(ROW_LIMIT),
+    '__STALE_AFTER_S__': str(STALE_AFTER_S),
 }
 
 
@@ -284,6 +351,11 @@ def _state_dir_problem(state_dir):
     never ran: ``count: 0``, ``power_avg: 0.0``, ``total_energy_kwh: 0.0``, HTTP
     200. The distinction matters -- one means "nothing was recorded", the other
     means "the numbers on screen are not the numbers on disk".
+
+    Only the directory is checked here, because that gates every ``/api/`` route:
+    without it even the history files cannot be listed. A problem with the
+    ``state.json`` file itself is reported by ``/api/state`` alone, so one damaged
+    file cannot hide a month of readable history.
     """
     path = Path(state_dir)
     if not path.is_dir():
@@ -294,16 +366,34 @@ def _state_dir_problem(state_dir):
 
 
 def _history_payload(state_dir, from_spec):
-    """Return the JSON payload for ``/api/history``."""
-    window = stats.parse_from(from_spec) if from_spec and from_spec != 'all' else None
+    """Return the JSON payload for ``/api/history``.
+
+    A blank ``?from=`` raises like ``--from ''`` does on the CLI: it must not
+    silently become the default window.
+    """
+    window = None if from_spec is None or from_spec == 'all' else stats.parse_from(from_spec)
     since = None if window is None else time.time() - window
     rows = list(stats.iter_history(state_dir, since_ts=since))
     return {'from': from_spec or 'all', 'count': len(rows), 'rows': rows}
 
 
 def _state_payload(state_dir):
-    """Return the JSON payload for ``/api/state``."""
-    monitor_state = stats.MonitorState.load(stats.state_path(state_dir))
+    """Return the JSON payload for ``/api/state``.
+
+    Raises ``stats.StateError`` when an existing ``state.json`` cannot be used;
+    the route turns that into a 503 with the reason. Answering zeros for a file
+    we could not read would be indistinguishable from a daemon that never ran.
+
+    ``last_ts`` travels with the totals on purpose: an HTTP 200 only proves the
+    file was readable, not that the daemon is still writing it. Without the
+    timestamp, a week-old state.json renders exactly like a live one.
+    """
+    path = stats.state_path(state_dir)
+    if path.exists() and not os.access(path, os.R_OK):
+        # read_text() would raise PermissionError and be reported generically;
+        # this names the file and the fix ("run as the user that owns it").
+        raise stats.StateError(f'{path} is not readable by this user')
+    monitor_state = stats.MonitorState.load(path, strict=True)
     return {
         'product': monitor_state.product,
         'serial': monitor_state.serial,
@@ -311,6 +401,7 @@ def _state_payload(state_dir):
         'power_avg': monitor_state.power_avg,
         'efficiency_avg': monitor_state.efficiency_avg,
         'total_energy_kwh': monitor_state.total_energy_kwh,
+        'last_ts': monitor_state.last_ts,
         'daily': dict(sorted(monitor_state.daily.items())),
     }
 
@@ -342,7 +433,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.wfile.write(payload)
 
     def _query(self):
-        return parse_qs(urlparse(self.path).query)
+        # keep_blank_values: ``?from=`` and ``?columns=`` are hard errors on the
+        # CLI (parse_from('')/parse_columns('') raise), so they must be 400s
+        # here too instead of silently selecting the default.
+        return parse_qs(urlparse(self.path).query, keep_blank_values=True)
 
     def _from_spec(self):
         return (self._query().get('from') or ['2h'])[0]
@@ -383,7 +477,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 payload = _history_payload(self.state_dir, self._from_spec())
                 return 200, json.dumps(payload), 'application/json', ()
             if route == '/api/state':
-                payload = _state_payload(self.state_dir)
+                try:
+                    payload = _state_payload(self.state_dir)
+                except stats.StateError as exc:
+                    # A damaged state file is not "0 samples": say which file and
+                    # why, and leave /api/history untouched.
+                    return 503, f'{exc}\n', 'text/plain; charset=utf-8', ()
                 return 200, json.dumps(payload), 'application/json', ()
             if route == '/api/export':
                 header, rows = stats.build_export(

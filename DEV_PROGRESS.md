@@ -272,7 +272,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 454 passed
+uv run --group dev pytest -q                     → 472 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 34 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
@@ -286,95 +286,74 @@ bash scripts/smoke.sh                            → 56 项全过（三种格式
   所以 `ruff format --check .` 可以进 CI（此前只能逐文件跑）。
 - `tests/test_pid_consistency.py`：五处 USB PID 列表 + README 载荷大小必须与解析器一致。
 - `tests/test_stdlib_only.py`：`python -I` 子进程导入全部模块，第三方依赖混入即失败。
-- `ast.parse(feature_version=(3, 10))`：全部 `.py` 通过 3.10 语法校验（本机只有 3.12/3.13）。
-- **3.12 矩阵真跑过**（本轮补）：用 `uv venv --python 3.12` 建了个裸 3.12 环境（离线装 pytest），
-  把工作树复制一份、不带 `.venv`、也不装本包，直接跑 `python3 -m pytest`（**414 通过**）与
-  `bash scripts/smoke.sh`（**56 项全过**）。3.10 本机无解释器也无网络装，只能靠三重静态把关。
+- `ast.parse(feature_version=(3, 10))`：全部 `.py` 通过 3.10 语法校验（静态兜底）。
+- **3.12 与 3.10 矩阵真跑过**（turn8 重跑）：`uv venv --python /usr/bin/python3.12` 与
+  `uv venv --python 3.10` 各建裸环境（只装 dev 组 pytest，不装本包），把工作树复制一份、
+  不带 `.venv`，直接跑 `python3 -m pytest`：**3.12.3 → 472 通过**、**3.10.21 → 472 通过**。
+  3.10 这条以前根本跑不起来：两个测试模块 `import tomllib`（3.11+），CI 的 3.10 矩阵会在
+  收集阶段就红；本轮加 `tomli>=2; python_version < '3.11'`（dev 组）并 try/except 回退。
+  `bash scripts/smoke.sh`（**56 项全过**）是 turn7 在同一裸 3.12 环境跑的，本轮未重跑。
 - CI 含 3.10 / 3.12 双矩阵 + `ruff check` + `ruff format --check` + `mypy` + `pytest`
   + **构建 `.deb`**。
 
-运行期零第三方依赖（`pyproject.toml` 的 `dependencies = []`），仅 dev 组含 pytest/ruff/mypy。
+运行期零第三方依赖（`pyproject.toml` 的 `dependencies = []`），仅 dev 组含 pytest/ruff/mypy
+（以及只在 3.10 安装的 tomli）。
 
 ## 待办
 
-### turn7 复核剩余 11 条（下次从这里继续）
+### 只读复核（turn8）turn7 剩余的 11 条（本轮已全部处理）
 
-已复跑成真、尚未动手（下面第 1/2/3 条在真进程上实测过：`/api/state` 无 `last_ts`、21 天前的
-数据照 200 回；`chmod 000 state.json` 后 `/api/state` 回 **200 + 全 0** 而同目录 `/api/history`
-有一条真数据，只有服务端日志知道原因；`?from=` 与 `?columns=` 空值分别回 200。第 4/5 条是
-页内 JS/CSS，属读码结论，本机无浏览器无法实测）。每条都带 file:line / 触发输入 / 错误后果，
-report 原件在
-`/tmp/review-turn7-report.tests-truth.md` 与 `/tmp/review-turn7-report.dashboard-http.md`
-（`/tmp` 会被清，复跑脚本 `/tmp/review-turn7.js` 也要重写；下面的描述自足）。
+turn7 留下的 11 条已逐条修完；每条都补了「改回旧行为就会红」的测试。turn7 的 report 原件
+（`/tmp/review-turn7-report.*`）已被清掉，下面的记录自足。
 
 **dashboard-http 车道（2 个 P1 + 3 个 P2）**
 
-1. **[P1] 停掉的 daemon / 一周前的数据在页面上仍像实时的**：`_state_payload()`
-   (`dashboard.py:304-315`) 只回 `product/serial/count/power_avg/efficiency_avg/
-   total_energy_kwh/daily`，**丢掉了 `MonitorState.last_ts`**（`state.py:263` 写盘、
-   `state.py:278` 读回），页内 `render()`(`dashboard.py:230-236`) 也只在 **HTTP 失败**
-   时才说 `Data may be stale`——而已落盘的旧数据是 HTTP 200，永远走成功分支。
-   修法：`_state_payload` 加 `last_ts`，页面渲染「last sample … ago」并按 age 标注陈旧
-   （常量如 `STALE_AFTER_S = 300`，注释说明与 daemon 30 s prom 写盘的关系）。
-2. **[P1] 目录可读但 `state.json` 不可读/不存在/坏 JSON 时仍 200 + 全 0**：
-   `_state_dir_problem()`(`dashboard.py:280-293`) 只查目录；`MonitorState.load()` 把每种
-   单文件失败都吞成空状态（`state.py:301-324`），于是 `/api/state` 回 `count: 0,
-   total_energy_kwh: 0.0, daily: {}`，而同目录 `/api/history` 有真数据——页面同时显示
-   「samples 0 · avg 0.00 W · total 0.000 kWh」和一条满曲线。这正好违背该函数自己的
-   docstring。修法：`state.py` 加 `StateError`，`load(..., strict=True)` 在「文件存在但
-   不可用」时抛（CLI/daemon 仍走宽容默认），dashboard 捕获后 503 + 原因；另在
-   `_state_dir_problem` 里补 state 文件本身的 `os.access` 检查。
-3. **[P2] 空查询值被静默换成默认**：`_query()` 用 `parse_qs(...)`（`keep_blank_values=
-   False`），所以 `?from=` 变 2h、`?columns=` 变全列、`/api/export?columns=` 静默导出全部
-   9 列；而同一输入在 CLI 是硬错误（`state.py:594-595` 的 `parse_columns('')`/`parse_from('')`
-   抛错 + `docs/verify.md:315` 记录 exit 1）。修法：`keep_blank_values=True`，让既有的
-   `except ValueError`(`dashboard.py:388-390`) 回 400；补 `?from=`/`?columns=` 空值测试。
-4. **[P2] 曲线用行号当 x 轴**：`series()`(`dashboard.py:114-118`) 取 `i`（数组下标）而非
-   `r.time`；`draw()` 的 `span = rows.length-1`(`dashboard.py:133-134`) 按条数等距铺开，
-   也没有任何 x 轴标签。后果：12:00 与 18:00 两点画得和相邻两分钟一样近，**6 小时停机
-   看起来像连续监控**，并且最新的点总被钉在最右边，强化 finding 1 的「实时」错觉。
-   修法：`series()` 携带 `Date.parse(r.time)` 的 epoch，按真实时间跨度映射 x（时间不可用
-   时回退行号）。
-5. **[P2] 周图按 150 px 画、却被 CSS 压到 120 px**：`canvas { height: 120px }`
-   (`dashboard.py:61`) 覆盖了 `<canvas id="weekly" height="150">`(`dashboard.py:79`)，
-   而 `drawWeekly` 内部按 `h = 150` 算(`dashboard.py:189`)，浏览器把 150 px 后备缓冲塞进
-   120 px 盒子 → 柱与标签纵向压 0.8×。纯观感（PNG 导出取后备缓冲，不受影响）。修法：把
-   规则收窄成 `#grid canvas { height: 120px }`，或在 `drawWeekly` 里读 `canvas.clientHeight`。
+1. **[P1] 停掉的 daemon / 一周前的数据仍像实时的**：`/api/state` 现在回 `last_ts`，页面显示
+   「last sample … ago」；超过 `dashboard.STALE_AFTER_S`（300 s = 10 个 30 s prom 写盘周期）
+   就把表头标成陈旧（`.sub.stale`），不再只在 HTTP 失败时才提示。测试：
+   `test_state_endpoint_exposes_the_last_sample_time`、`test_the_page_shows_sample_age_and_marks_stale_data`。
+2. **[P1] 目录可读但 `state.json` 坏掉时仍 200 + 全 0**：新增 `state.StateError` 与
+   `MonitorState.load(strict=True)`；CLI/daemon 仍走宽容默认。`/api/state` 捕获后回 503 + 原因，
+   目录级问题仍由 `_state_dir_problem()` 负责。**`/api/history` 不受影响**（页面也改成两个 fetch
+   独立处理），一个坏文件不会连历史曲线一起藏掉。测试：
+   `test_a_corrupt_state_file_is_a_503_while_history_still_serves`、
+   `test_an_unreadable_state_file_is_a_503_with_its_path` 与 `test_state.py` 的四条 strict-load 用例。
+3. **[P2] 空查询值被静默换成默认**：`_query()` 改用 `keep_blank_values=True`，`?from=` 与
+   `?columns=` 现在和 CLI 一样是硬错误（400），不再悄悄变成默认窗口/全列。
+   测试：`test_blank_query_values_are_400_not_defaults`。
+4. **[P2] 曲线用行号当 x 轴**：`series()` 携带 `Date.parse(r.time) / 1000`，`draw()` 在全部点都有
+   时间戳时按真实时间跨度映射，取不到时间才回退行号；两端画 `HH:MM` / `MM-DD HH:MM` 轴标签。
+   停机 6 小时不再看起来像两个相邻样本。测试：`test_the_chart_x_axis_uses_real_timestamps`。
+5. **[P2] 周图按 150 px 画、被 CSS 压到 120 px**：CSS 收窄为
+   `#grid canvas { height: 120px }` + `#weekly { height: 150px }`，`drawWeekly()` 改为读
+   `canvas.clientHeight`；两个图表都按实际盒子高度画。测试：
+   `test_the_weekly_canvas_is_drawn_at_its_css_height`。
 
 **tests-truth 车道（1 个 P1 + 5 个 P2）**
 
-6. **[P1] 两条叫「atomic」的测试从没测过原子性**：`tests/test_state.py:88-92` 只断言
-   目标文件存在、`.tmp` 事后不在；`tests/test_daemon.py:322` 同形状。把
-   `state.atomic_write_text`(`state.py:133-139`) 换成原地 `path.write_text()` 后 454 条
-   单测 + 56 项冒烟**全绿**，而 `state.py:136-138`、`msi_psu_monitor/AGENTS.md:88-89`
-   把这当成规范；读侧 `state.py:286-287` 会把截断的 state.json 当空状态（= 全 0，
-   与「daemon 从没跑过」无法区分）。修法：新增「中断写」测试——monkeypatch `os.replace`
-   抛 `OSError`，断言目标仍是旧字节、没被截断、只留下临时文件；daemon 的 prometheus
-   写盘同样补一条。
-7. **[P2] `docs/verify.md:45` 与 `:58` 把覆盖算给了错的模块**：`tests/test_protocol.py`
-   8 条全是 `lin11_to_int`（帧/NAK 真覆盖在 `tests/test_psu_sensors.py:598-640,656-665,
-   693-699`），`tests/test_schema.py` 只 import `format_json`（prometheus 契约在
-   `tests/test_monitor_format.py:68-84` 与 `tests/test_cli_features.py:280-284,374-377`）。
-   `tests/test_docs_consistency.py:62-79` 只校验反引号里的**文件名存在**，表里写错内容它
-   看不见。修法：改表 + 让每行至少点名一个真测试函数并与 `pytest --collect-only` 校验。
-8. **[P2] `DEV_PROGRESS.md:291` 的「414 通过」不在计数护栏里**：`TEST_COUNT_RE`
-   (`test_docs_consistency.py:22-26`) 只认 `passed|个单测|个單測|tests?`，不认「通过」，
-   所以那句裸 3.12 环境的计数（现在应是 454）无人校验。修法：正则补 `通过|通過`，并用
-   裸 3.12 环境实跑一次把数字对齐（当时 414 是真测值，之后加了 40 条测试没人回头改）。
-9. **[P2] 零依赖探针漏了 `__main__.py`**：`tests/test_stdlib_only.py:20-28` 的模块元组是
-   写死的（`protocol/alerts/config/state/monitor/daemon/dashboard/demo`），而
-   `msi_psu_monitor/AGENTS.md:116-117` 与 `DEV_PROGRESS.md:288` 都说「导入**全部模块**」。
-   给 `__main__.py`（console-script 入口）加个第三方 import，两条护栏全绿。修法：元组加
-   `'__main__'`，并加「元组必须覆盖 `msi_psu_monitor/*.py`」的完整性断言。
-10. **[P2] `tests/test_pid_consistency.py:65-66` 比的是 `bulk_size` 而不是真正的门限
-    `payload_size`**：README 那列写 62（TS 帧长），而 `_parse_bulk` 实际门控的是
-    `VARIANTS[...]['payload_size']`（TS = 44）；`_parse_bulk` 这个函数在仓库里根本不存在
-    （只在 docstring 里）。修法：docstring 去掉幽灵函数名，断言改成 README 的「62 (44
-    data)」两个数分别对 `bulk_size`/`payload_size`。
-11. **[P2] `msi_psu_monitor/AGENTS.md:132-138` 还留着已作废的「绝不要全仓跑 ruff
-    format」**：上一轮改了根 `AGENTS.md:127-129` 与 `docs/verify.md`，漏了这份（而它是
-    `msi_psu_monitor/` 下自动加载的 agent 文件，会指示 agent 去撤销一个绿灯 CI 检查）。
-    修法：删掉该段，并让 `test_docs_consistency.py` 断言该措辞在任何文档里都不出现。
+6. **[P1] 两条叫「atomic」的测试从没测过原子性**：状态写盘与 prometheus 写盘各补一条「临时文件
+   写完、`os.replace` 失败」的用例，断言目标仍是旧字节、只多出一个 `.tmp`；换成原地
+   `write_text()` 这两条都会红。测试：`test_an_interrupted_save_keeps_the_previous_state_intact`、
+   `test_a_failed_prometheus_replace_keeps_the_previous_textfile`。
+7. **[P2] `docs/verify.md` 的覆盖表把功劳算给了错的模块**：§1.1 重写为 20 行（补上漏掉的
+   `test_protocol_discovery.py` / `test_packaging.py`），每行点名至少一个真实测试函数；
+   `test_docs_consistency.py` 用 `pytest --collect-only` 的实际收集结果核对函数名，并要求每个
+   测试文件都有行。顺带修正文件名正则不收数字的问题：`test_protocol_lin11.py` 之前根本不在
+   两条文档校验的覆盖范围内。测试：`test_the_coverage_table_names_real_test_functions`。
+8. **[P2] turn7 留下的裸计数不在护栏里**：`TEST_COUNT_RE` 补 `通过|通過`。那个未受护栏保护的旧通过数已按裸环境实跑对齐：
+   3.12.3 与 3.10.21 各 **472 通过**（细节见上节「质量门禁」）。
+9. **[P2] 零依赖探针漏了 `__main__.py`**：`SHIPPED_MODULES` 元组补 `__main__`，并新增
+   `test_the_probe_covers_every_shipped_module`，把元组与 `msi_psu_monitor/*.py` 精确对齐。
+10. **[P2] `test_pid_consistency.py` 比的是 `bulk_size` 而不是真正的门限 `payload_size`**：README
+    的 0xE0 列改成「62 bytes (44 data)」两个数，测试分别对 `bulk_size` / `payload_size` 断言；
+    docstring 里那个仓库中不存在的 `_parse_bulk` 已删。
+11. **[P2] 包内 `AGENTS.md` 还留着作废的「ruff format 不得全仓跑」禁令**：该段改为
+    「`ruff format --check .` 全仓可跑、CI 已跑」，并新增
+    `test_no_document_still_forbids_repo_wide_ruff_format`，该措辞在任何文档里再出现都会红。
+
+顺带发现并修掉一个 CI 必然失败：3.10 矩阵在**收集阶段**就红——`tests/test_docs_consistency.py`
+与 `tests/test_stdlib_only.py` 直接 `import tomllib`（3.11 才有）。现在改为 try/except 回退到
+`tomli`，dev 组加 `tomli>=2; python_version < '3.11'`，3.10.21 裸环境已全绿。
 
 ### 外部阻塞
 

@@ -144,6 +144,18 @@ def atomic_write_text(path, text):
     os.replace(tmp, path)
 
 
+class StateError(Exception):
+    """An existing state file could not be used.
+
+    Only raised by ``MonitorState.load(..., strict=True)``. The default load stays
+    lenient on purpose: the CLI and the daemon must survive a hand-edited or
+    half-written ``state.json`` instead of crash-looping under ``Restart=always``.
+    The dashboard can afford to be strict, and has to be: answering
+    ``count: 0`` for a file it could not read is indistinguishable from a daemon
+    that has never run.
+    """
+
+
 class MonitorState:
     """Cumulative averages and energy totals, with atomic persistence."""
 
@@ -282,7 +294,7 @@ class MonitorState:
         )
 
     @classmethod
-    def load(cls, path):
+    def load(cls, path, strict=False):
         """Load state from ``path``; a missing, unreadable or corrupt file yields empty state.
 
         "Unreadable" includes bytes that are not valid UTF-8 in the locale
@@ -293,8 +305,21 @@ class MonitorState:
 
         Every branch that loses data says so: something is wrong with the file,
         and quietly showing zeros as if they were measured totals would hide it.
+
+        ``strict=True`` raises :class:`StateError` instead of returning empty state
+        when an *existing* file cannot be used. A missing file is the normal
+        first run in both modes, not a fault: the dashboard needs that
+        distinction, while the CLI and the daemon deliberately keep the lenient
+        default so a damaged file can never wedge the sample loop.
         """
         target = Path(path)
+
+        def unusable(reason):
+            """Return empty state, or raise when the caller needs to know why."""
+            if strict:
+                raise StateError(f'{path}: {reason}')
+            return cls()
+
         if not target.exists():
             # The normal first-run case: no state yet, nothing to warn about.
             return cls()
@@ -303,24 +328,26 @@ class MonitorState:
             # on /dev/zero returns bytes forever (until MemoryError), and the
             # reader's contract is that a damaged file cannot wedge the process.
             logger.warning(f'Ignoring {path}: not a regular file.')
-            return cls()
+            return unusable('not a regular file')
         try:
             raw = target.read_text()
         except FileNotFoundError:
+            # Removed between exists() and read_text(): still the first-run case.
             return cls()
         except (OSError, UnicodeDecodeError) as exc:
             logger.warning(f'Cannot read the state file {path}: {exc}')
-            return cls()
+            return unusable(f'cannot be read ({exc})')
         try:
             data = json.loads(raw)
         except ValueError as exc:
             logger.warning(f'Ignoring the state file {path}: {exc}')
-            return cls()
+            return unusable(f'is not valid JSON ({exc})')
         if not isinstance(data, dict) or data.get('version') != STATE_VERSION:
             version = data.get('version') if isinstance(data, dict) else None
             logger.warning(
                 f'Ignoring the state file {path}: format version {version!r} is not {STATE_VERSION}'
             )
+            return unusable(f'has format version {version!r}, expected {STATE_VERSION}')
         return cls.from_dict(data)
 
     def save(self, path):

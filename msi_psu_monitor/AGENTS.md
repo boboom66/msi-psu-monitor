@@ -124,16 +124,16 @@ runtime imports.
 ## Verification (no hardware required)
 
 ```bash
-uv run --group dev pytest -q              # 454 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
+uv run --group dev pytest -q              # 472 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
 uv run --group dev ruff check .           # must be clean
 uv run --group dev mypy msi_psu_monitor/  # must be clean
 ```
 
-`ruff format` must NOT be enforced repo-wide: `protocol.py`, `__init__.py`,
-`__main__.py` and `tests/test_monitor.py` mix quote styles and a full format pass
-would create a churn diff (formatting `protocol.py` alone rewrites ~200 lines of
-unrelated quote styles). Format only the files you touched, and revert format-only
-churn in `protocol.py` — it is deliberately left in its original style.
+`ruff format --check .` is safe repo-wide and is a CI gate: the four legacy files
+that mix quote styles are excluded by `[tool.ruff.format] exclude` with
+`[tool.ruff] force-exclude = true`, which also blocks them when named explicitly.
+Format the files you touch (`ruff format <path>`); the exclusion list is the fix, so
+do not re-add a repo-wide warning.
 
 Full no-hardware walkthrough (demo mode, daemon + dashboard chain, `.deb`):
 `docs/verify.md`.

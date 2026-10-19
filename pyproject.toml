@@ -38,7 +38,9 @@ msi-psu-monitor-daemon = "msi_psu_monitor.daemon:main"
 include = ["msi_psu_monitor*"]
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10"]
+# tomli is the stdlib tomllib backport for the 3.10 CI leg: two test modules parse
+# pyproject.toml, and tomllib only exists from 3.11. Runtime dependencies stay [].
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10", "tomli>=2; python_version < '3.11'"]
 
 [tool.ruff]
 line-length = 100

@@ -33,13 +33,17 @@ Python standard library only — no third-party runtime dependencies.
 
 ## Supported Hardware
 
-| PSU Model | USB ID | 0xE0 Payload | Features |
+| PSU Model | USB ID | 0xE0 Reply | Features |
 |-----------|--------|--------------|----------|
-| MPG Ai1600TS | `0db0:808c` | 62 bytes | Per-pin current monitoring (GPU Safeguard+), combined 12V rail |
-| MPG Ai1300TS | `0db0:aa6f` | 62 bytes | Per-pin current monitoring (GPU Safeguard+), combined 12V rail |
+| MPG Ai1600TS | `0db0:808c` | 62 bytes (44 data) | Per-pin current monitoring (GPU Safeguard+), combined 12V rail |
+| MPG Ai1300TS | `0db0:aa6f` | 62 bytes (44 data) | Per-pin current monitoring (GPU Safeguard+), combined 12V rail |
 | MEG Ai1600T | `0db0:c9eb` | 20 bytes | Combined 12V rail, no per-pin monitoring |
 | MEG Ai1300P | `0db0:56d4` | 40 bytes | 5 per-rail 12V plus a combined rail, CPU/GPU wattage |
 | MEG Ai1000P | `0db0:e749` | 40 bytes | 5 per-rail 12V plus a combined rail, CPU/GPU wattage |
+
+The reply size is the frame the device returns. A parenthesised number is the shortest
+payload the parser can decode: an MPG TS frame is 62 bytes, but only the first 44 carry
+sensor data, and that 44 is the gate a short reply has to clear.
 
 The variant is chosen from the product string reported by the PSU, never from the USB
 PID, so a re-badged device with a known product name still parses correctly.

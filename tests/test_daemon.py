@@ -3,6 +3,8 @@
 import logging
 import time
 
+import pytest
+
 from msi_psu_monitor import state as stats
 from msi_psu_monitor.config import DEFAULTS
 from msi_psu_monitor.daemon import EXIT_ERROR, RESCAN_AFTER_FAILURES, MonitorDaemon
@@ -319,7 +321,7 @@ def test_a_failed_ocp_read_clears_the_exported_block(tmp_path):
     assert 'msi_psu_ocp_enabled' not in prom  # but no thresholds may be claimed
 
 
-def test_prometheus_is_written_atomically_and_replaced(tmp_path):
+def test_prometheus_is_replaced_not_appended(tmp_path):
     clock = Clock()
     daemon = make_daemon(
         tmp_path,
@@ -334,6 +336,37 @@ def test_prometheus_is_written_atomically_and_replaced(tmp_path):
     daemon.sample()
     daemon.write_prometheus(daemon.sample())
     assert target.read_text().count('msi_psu_power_total {}') == 1
+
+
+def test_a_failed_prometheus_replace_keeps_the_previous_textfile(tmp_path, monkeypatch):
+    """node_exporter reads this file; a torn rewrite would export half a sample.
+
+    The write goes through ``state.atomic_write_text``, so when the final
+    os.replace fails the last complete document -- ``msi_psu_up 1`` included --
+    must still be what the next scrape sees.
+    """
+    clock = Clock()
+    daemon = make_daemon(
+        tmp_path,
+        StubPSU(clean_sensors(), alerts={'ocp_12v': False}),
+        clock=clock,
+        prom_path=str(tmp_path / 'psu.prom'),
+    )
+    daemon.tick()
+    target = tmp_path / 'psu.prom'
+    before = target.read_bytes()
+    assert b'msi_psu_up' in before
+
+    def no_space(src, dst):
+        raise OSError(28, 'No space left on device')
+
+    monkeypatch.setattr(stats.os, 'replace', no_space)
+    clock.advance(30)
+    with pytest.raises(OSError):
+        daemon.write_prometheus(daemon.sample())
+
+    assert target.read_bytes() == before
+    assert target.with_name(target.name + '.tmp').exists()
 
 
 def test_a_failed_read_stops_the_textfile_from_claiming_health(tmp_path):

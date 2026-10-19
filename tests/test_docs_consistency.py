@@ -11,7 +11,11 @@ import pathlib
 import re
 import subprocess
 import sys
-import tomllib
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10: the stdlib module arrives in 3.11
+    import tomli as tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DOCS = [
@@ -24,26 +28,46 @@ DOCS = [
 ]
 # "341 passed", "341 tests" and "341 个单测" all quote the same fact. No \b after
 # the CJK alternatives: 测 is a word character, so \b would never match there.
-TEST_COUNT_RE = re.compile(r'(\d+)\s*(?:passed|个单测|个單測|tests?\b)')
-PY_FILE_RE = re.compile(r'`tests/(test_[a-z_]+\.py)`')
+TEST_COUNT_RE = re.compile(r'(\d+)\s*(?:passed|个单测|个單測|tests?\b|通过|通過)')
+PY_FILE_RE = re.compile(r'`tests/(test_[a-z0-9_]+\.py)`')
+COVERAGE_ROW_RE = re.compile(r'^\| `tests/(test_[a-z0-9_]+\.py)` \| (.+) \|$', re.M)
+COVERAGE_NAME_RE = re.compile(r'`(test_[a-z0-9_]+)`')
 
 
 def _test_files():
     return {path.name for path in (ROOT / 'tests').glob('test_*.py')}
 
 
+_COLLECTED = {}
+
+
+def _collect():
+    """Return (count, names) from one pytest collection run.
+
+    names is the set of (file, function) pairs pytest actually collected, which
+    is how the coverage table is checked against reality rather than against its
+    own prose.
+    """
+    if not _COLLECTED:
+        result = subprocess.run(
+            [sys.executable, '-m', 'pytest', '--collect-only', '-q', '--no-header'],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        match = re.search(r'(\d+) tests? collected', result.stdout)
+        assert match, result.stdout
+        _COLLECTED['count'] = int(match.group(1))
+        _COLLECTED['names'] = set(
+            re.findall(r'^(tests/test_[a-z0-9_]+\.py)::(test_[a-z0-9_]+)', result.stdout, re.M)
+        )
+    return _COLLECTED['count'], _COLLECTED['names']
+
+
 def _collected_count():
     """The number pytest would run, without running it."""
-    result = subprocess.run(
-        [sys.executable, '-m', 'pytest', '--collect-only', '-q', '--no-header'],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    match = re.search(r'(\d+) tests? collected', result.stdout)
-    assert match, result.stdout
-    return int(match.group(1))
+    return _collect()[0]
 
 
 def test_quoted_test_counts_are_accurate():
@@ -70,6 +94,36 @@ def test_named_test_modules_exist():
             if name not in known:
                 missing.add(f'{doc.relative_to(ROOT)} -> tests/{name}')
     assert not missing, '\n'.join(sorted(missing))
+
+
+def test_the_coverage_table_names_real_test_functions():
+    """The §1.1 table is read as authority even when it credits the wrong module.
+
+    It used to say tests/test_protocol.py covers frame assembly and NAK handling
+    (it only exercises lin11_to_int) and that tests/test_schema.py covers the
+    prometheus contract (it imports format_json only). Every row now has to name
+    at least one function pytest actually collects, and every test module has to
+    have a row at all.
+    """
+    verify = (ROOT / 'docs' / 'verify.md').read_text(encoding='utf-8')
+    rows = COVERAGE_ROW_RE.findall(verify)
+    assert rows, 'verify.md §1.1 no longer has a coverage table'
+
+    documented = [filename for filename, _ in rows]
+    assert len(documented) == len(set(documented)), 'duplicate rows in the coverage table'
+    missing = sorted(set(_test_files()) - set(documented))
+    assert not missing, f'test modules missing from the §1.1 table: {missing}'
+
+    _, collected = _collect()
+    problems = []
+    for filename, cell in rows:
+        named = COVERAGE_NAME_RE.findall(cell)
+        if not named:
+            problems.append(f'{filename}: names no test function')
+        for name in named:
+            if (f'tests/{filename}', name) not in collected:
+                problems.append(f'{filename}: {name} is not collected by pytest')
+    assert not problems, '\n'.join(problems)
 
 
 def test_every_test_module_is_documented():
@@ -183,6 +237,26 @@ def test_the_quoted_real_hardware_check_count_matches_verify_md():
     assert len(HARDWARE_ENTRY_RE.findall(section)) == expected, (
         'DEV_PROGRESS.md lists a different number of hardware checks than verify.md §8'
     )
+
+
+STALE_FORMAT_BAN_RE = re.compile(
+    r'must NOT be enforced repo-wide|不要全仓跑 ruff format|絕不要全倉跑 ruff format'
+)
+
+
+def test_no_document_still_forbids_repo_wide_ruff_format():
+    """A note telling an agent to undo a green CI gate is worse than no note.
+
+    msi_psu_monitor/AGENTS.md is auto-loaded for work under that package and still
+    said "ruff format must NOT be enforced repo-wide" after the exclusion list
+    made that check safe and CI started running it.
+    """
+    offenders = [
+        str(doc.relative_to(ROOT))
+        for doc in DOCS
+        if doc.is_file() and STALE_FORMAT_BAN_RE.search(doc.read_text(encoding='utf-8'))
+    ]
+    assert not offenders, f'still forbids repo-wide formatting: {offenders}'
 
 
 def test_the_readme_has_no_duplicate_section_heading():

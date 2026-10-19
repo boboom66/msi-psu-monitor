@@ -63,12 +63,24 @@ def test_readme_hardware_table_covers_every_model():
 
 
 def test_readme_payload_sizes_match_the_parser():
-    """The documented 0xE0 payload size is what ``_parse_bulk`` gates on."""
-    rows = re.findall(r'\| ([^|]+?) \| `0db0:([0-9a-f]{4})` \| (\d+) bytes? \|', _text('README.md'))
+    """Both documented numbers must match their field, not just one of them.
+
+    The README used to say "62 bytes" for the TS models while ``get_sensors()``
+    gated on ``payload_size`` (44): the documented number was the frame length,
+    never the threshold a short reply has to clear. The column now carries
+    "62 bytes (44 data)"; where the two are equal the parenthetical is omitted.
+    """
+    rows = re.findall(
+        r'\| ([^|]+?) \| `0db0:([0-9a-f]{4})` \| (\d+) bytes?(?: \((\d+) data\))? \|',
+        _text('README.md'),
+    )
     assert len(rows) == len(MSIPSU.VARIANTS)
     by_pid = {f'{entry["pid"]:04x}': entry for entry in MSIPSU.VARIANTS.values()}
-    for _name, pid, size in rows:
-        assert int(size) == by_pid[pid.lower()]['bulk_size'], pid
+    for _name, pid, bulk, payload in rows:
+        entry = by_pid[pid.lower()]
+        assert int(bulk) == entry['bulk_size'], pid
+        # No parenthetical means bulk_size == payload_size for that model.
+        assert int(payload or bulk) == entry['payload_size'], pid
 
 
 def test_every_variant_name_is_documented():
