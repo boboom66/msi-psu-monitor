@@ -37,3 +37,7 @@ def test_the_release_workflow_publishes_the_hardware_kit():
     text = (ROOT / '.github' / 'workflows' / 'release.yml').read_text(encoding='utf-8')
     assert 'build_hardware_kit.sh' in text
     assert 'hardware-kit' in text
+    # A broad dist/*.tar.gz also matches the hardware kit and then the explicit
+    # kit glob passes the same asset twice to gh release create.
+    assert 'dist/*.tar.gz' not in text
+    assert 'dist/msi-psu-monitor_*.tar.gz' in text

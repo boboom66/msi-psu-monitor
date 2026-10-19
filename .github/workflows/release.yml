@@ -59,8 +59,8 @@ jobs:
         with:
           name: release-${{ matrix.arch }}
           path: |
-            dist/*.tar.gz
-            dist/*.tar.gz.sha256
+            dist/msi-psu-monitor_*.tar.gz
+            dist/msi-psu-monitor_*.tar.gz.sha256
             dist/*.deb
             dist/*.deb.sha256
             dist/SBOM-*.json
@@ -87,7 +87,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" \
-            dist/*.tar.gz dist/*.deb dist/SBOM-*.json dist/*hardware-kit*.tar.gz dist/SHA256SUMS \
+            dist/msi-psu-monitor_*.tar.gz dist/*.deb dist/SBOM-*.json \
+            dist/*hardware-kit*.tar.gz dist/SHA256SUMS \
             --repo "${{ github.repository }}" \
             --title "${{ github.ref_name }}" \
             --generate-notes
