@@ -12,3 +12,8 @@ Inside 22.04 chroot runs: --version / --once / --show-alert-log (demo)
 Frozen smoke on package binaries: once/zero-fan/buzzer/performance/rail/alertlog/VIN all PASS
 .deb: msi-psu-monitor_1.0.0_amd64.deb, Depends: libc6 (>= 2.35), zlib1g
 Note: local chroot build, not GitHub Actions; arm64 still not built/verified.
+
+.deb extracted and run inside 22.04:
+  MSI_PSU_DEMO=1 /debroot/usr/bin/msi-psu-monitor --version  -> 1.0.0
+  --once demo output -> PASS
+Kit --demo -> 26 PASS, 0 FAIL
