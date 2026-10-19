@@ -26,6 +26,18 @@ ProtectSystem=full
 ProtectHome=yes
 PrivateTmp=yes
 NoNewPrivileges=yes
+# Defence in depth that does not touch /dev/hidraw* or the StateDirectory.
+# Deliberately no UMask=0077: state.json stays readable by the uaccess user, so
+# a non-root dashboard can still read the totals it is meant to show.
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
 
 # Alerts are written to stderr, which journald records:
 #   journalctl -u msi-psu-monitor -f

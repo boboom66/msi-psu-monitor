@@ -199,7 +199,7 @@ def detect_devices():
     found = []
     for uevent in sorted(glob.glob(SYSFS_HIDRAW_GLOB)):
         try:
-            with open(uevent) as f:
+            with open(uevent, encoding="utf-8") as f:
                 content = f.read()
         except OSError:
             continue

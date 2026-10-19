@@ -1,6 +1,10 @@
 """Tests for the persistent cumulative state and the history/export helpers."""
 
 import json
+import os
+import pathlib
+import subprocess
+import sys
 from datetime import date, datetime
 
 import pytest
@@ -483,10 +487,15 @@ def test_iter_history_reads_columns_positionally_with_a_renamed_header(tmp_path)
 
 
 def test_iter_history_warns_about_a_non_canonical_header(tmp_path, caplog):
+    """A renamed header is still readable, but the operator hears about it.
+
+    A UTF-8 BOM is not in this class any more: it is an encoding detail, so it
+    is stripped before the header is compared (see the BOM test below).
+    """
     path = stats.history_path(tmp_path, date(2026, 2, 9))
-    path.write_text('\ufeff' + ','.join(stats.HISTORY_COLUMNS) + '\n')
+    path.write_text('timestamp,volts\n2026-02-09T10:00:00,12.100\n', encoding='utf-8')
     with caplog.at_level('WARNING'):
-        assert list(stats.iter_history(tmp_path)) == []
+        list(stats.iter_history(tmp_path))
     assert 'no canonical header' in caplog.text
 
 
@@ -571,3 +580,74 @@ def test_load_ignores_a_state_file_that_is_not_a_regular_file(tmp_path, caplog):
     with caplog.at_level('WARNING'):
         assert stats.MonitorState.load(path).count == 0
     assert 'not a regular file' in caplog.text
+
+
+def test_atomic_write_fsyncs_the_file_and_its_directory(tmp_path, monkeypatch):
+    """A rename that outruns the data can leave an empty state.json after a crash.
+
+    os.replace alone is atomic but not durable: on a power cut the rename can
+    land while the file contents are still in the page cache, so the reader finds
+    a complete-looking file with zero bytes. The kWh counters are rewritten once
+    a minute, which makes that window real.
+    """
+    calls = []
+    real_fsync = os.fsync
+
+    def counting(fsync_fd):
+        calls.append(fsync_fd)
+        return real_fsync(fsync_fd)
+
+    monkeypatch.setattr(stats.os, 'fsync', counting)
+    stats.atomic_write_text(tmp_path / 'x.txt', 'hello')
+    assert (tmp_path / 'x.txt').read_text(encoding='utf-8') == 'hello'
+    assert len(calls) >= 2, 'the scratch file and the directory entry must both be synced'
+
+
+def test_load_accepts_a_utf8_bom(tmp_path):
+    """A BOM from a Windows editor must not turn the totals into unreadable."""
+    path = stats.state_path(tmp_path)
+    body = json.dumps({'version': 1, 'count': 3, 'energy_wh': 12.0})
+    path.write_bytes(bytes([0xEF, 0xBB, 0xBF]) + body.encode('utf-8'))
+    assert stats.MonitorState.load(path).count == 3
+    assert stats.MonitorState.load(path, strict=True).count == 3
+
+
+def test_state_files_are_read_as_utf8_regardless_of_locale(tmp_path):
+    """LC_ALL=C + PYTHONUTF8=0 used to make read_text() use ASCII.
+
+    A state.json is user-editable, so a non-ASCII product value is legal. Under
+    the locale a systemd unit can inherit it was decoded as ASCII, the file was
+    discarded as unreadable, and the dashboard reported zero totals.
+    """
+    path = stats.state_path(tmp_path)
+    path.write_bytes('{"version": 1, "count": 1, "product": "电源"}'.encode('utf-8'))
+    root = pathlib.Path(__file__).resolve().parents[1]
+    code = (
+        'from msi_psu_monitor.state import MonitorState; '
+        f'print(MonitorState.load({str(path)!r}).product.encode("utf-8").hex())'
+    )
+    env = {
+        'PATH': '/usr/bin:/bin',
+        'LC_ALL': 'C',
+        'LANG': 'C',
+        'PYTHONUTF8': '0',
+        'PYTHONCOERCECLOCALE': '0',
+    }
+    result = subprocess.run(
+        [sys.executable, '-c', code], cwd=root, capture_output=True, text=True, env=env
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == 'e794b5e6ba90'
+
+
+def test_a_bom_on_the_history_header_is_still_canonical(tmp_path, caplog):
+    """The BOM is an encoding detail, not a reason to re-read the columns by hand."""
+    path = stats.history_path(tmp_path, date(2026, 2, 9))
+    header = ','.join(stats.HISTORY_COLUMNS)
+    row = '2026-02-09T10:00:00,12.100,5.040,3.320,50.000,56.0,2050,600.0,94.00,,'
+    path.write_bytes(bytes([0xEF, 0xBB, 0xBF]) + (header + chr(10) + row + chr(10)).encode('utf-8'))
+    with caplog.at_level('WARNING'):
+        rows = list(stats.iter_history(tmp_path))
+    assert len(rows) == 1
+    assert rows[0]['12v'] == '12.100'
+    assert 'no canonical header' not in caplog.text

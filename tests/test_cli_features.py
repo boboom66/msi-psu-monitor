@@ -2,6 +2,10 @@
 
 import csv
 import io
+import os
+import pathlib
+import subprocess
+import sys
 import time
 
 import pytest
@@ -636,3 +640,32 @@ def test_once_prunes_with_the_configured_retention(monkeypatch, capsys, tmp_path
     assert code == EXIT_OK
     kept = stats.MonitorState.load(stats.state_path(state_dir))
     assert kept.daily, 'the 40-day-old bucket must survive with retention_days = 60'
+
+
+@pytest.mark.parametrize('argv', (['--once'], ['--help'], ['--version']))
+def test_a_closed_stdout_pipe_is_not_a_traceback(tmp_path, argv):
+    """A shell pipeline that stops reading is normal usage, not a CLI fault.
+
+    Unhandled, BrokenPipeError escapes as exit 120 plus "Exception ignored on
+    flushing sys.stdout", which looks like a crash in scripts and cron mail.
+    --help/--version leave through argparse's SystemExit before the main handler,
+    so they exercise the final-flush path separately.
+    """
+    root = pathlib.Path(__file__).resolve().parents[1]
+    env = dict(os.environ, MSI_PSU_DEMO='1', MSI_PSU_STATE_DIR=str(tmp_path))
+    read_fd, write_fd = os.pipe()
+    os.close(read_fd)  # no reader: the first write gets EPIPE
+    try:
+        proc = subprocess.run(
+            [sys.executable, '-m', 'msi_psu_monitor', *argv],
+            cwd=root,
+            stdout=write_fd,
+            stderr=subprocess.PIPE,
+            env=env,
+            timeout=30,
+        )
+    finally:
+        os.close(write_fd)
+    assert proc.returncode == 0, proc.stderr.decode()
+    assert b'BrokenPipeError' not in proc.stderr
+    assert b'Traceback' not in proc.stderr

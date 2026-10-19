@@ -25,6 +25,24 @@ CONFIG_FILES = (
     os.path.expanduser('~/.config/msi-psu-monitor/config.ini'),
 )
 
+#: Options each section understands. Anything else is a typo the loader would
+#: otherwise ignore silently -- a misspelled ``intervall`` just keeps the default,
+#: which is exactly the kind of failure an operator cannot see.
+KNOWN_OPTIONS = {
+    'monitor': {'interval', 'format', 'output', 'verbose', 'quiet', 'no_alerts', 'serial'},
+    'alerts': {'consecutive_required'},
+    'daemon': {
+        'state_dir',
+        'prom_path',
+        'port',
+        'sample_interval',
+        'prom_interval',
+        'history_interval',
+        'retention_days',
+    },
+    'fan': {'mode', 'duty'},
+}
+
 DEFAULTS = {
     'interval': 2.0,
     'format': 'text',
@@ -64,7 +82,10 @@ def load_config(path=None):
     # .get() time -- outside the except below, so it escaped as a traceback.
     parser = configparser.ConfigParser(interpolation=None)
     try:
-        read = parser.read(files)
+        # utf-8-sig: UTF-8 regardless of the service manager's locale, and a
+        # BOM saved by a Windows editor is tolerated instead of becoming an
+        # "unknown section" warning on the first line.
+        read = parser.read(files, encoding='utf-8-sig')
     except (configparser.Error, UnicodeDecodeError) as exc:
         # A malformed file would otherwise escape as a traceback from main().
         # UnicodeDecodeError (a Latin-1 or UTF-16 file a Windows editor saved,
@@ -75,6 +96,14 @@ def load_config(path=None):
         # Silently falling back to the defaults would leave the user staring at
         # settings that are not the ones they wrote.
         raise ConfigError(f'config file not found or unreadable: {path}')
+    for section in parser.sections():
+        known = KNOWN_OPTIONS.get(section)
+        if known is None:
+            logger.warning(f'Ignoring unknown config section [{section}].')
+            continue
+        for option in parser[section]:
+            if option not in known:
+                logger.warning(f'Ignoring unknown option [{section}] {option}.')
     monitor = parser['monitor'] if parser.has_section('monitor') else {}
     alerts = parser['alerts'] if parser.has_section('alerts') else {}
     cfg['interval'] = _as_float(monitor.get('interval'), cfg['interval'])

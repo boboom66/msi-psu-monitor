@@ -767,11 +767,13 @@ def _state_dir(cfg):
 def emit(output, output_path):
     """Write ``output`` to stdout, or replace ``output_path`` atomically."""
     if not output_path:
-        print(output)
+        # flush: a closed pipe must fail here, inside main()'s handler, not during
+        # the interpreter's shutdown flush (which would exit 120).
+        print(output, flush=True)
         return
     if os.path.exists(output_path) and not os.path.isfile(output_path):
         # A fifo or /dev/stdout cannot be replaced, only written into.
-        with open(output_path, 'w') as handle:
+        with open(output_path, 'w', encoding='utf-8') as handle:
             handle.write(output + '\n')
         return
     stats.atomic_write_text(output_path, output + '\n')
@@ -1022,7 +1024,7 @@ def run_export(args, cfg):
     # The CSV is streamed, so it is written in place; a failed write is reported
     # rather than left behind as a silently truncated file (or a traceback).
     try:
-        with open(args.output, 'w', newline='') as handle:
+        with open(args.output, 'w', newline='', encoding='utf-8') as handle:
             _write_csv(handle, header, rows)
     except OSError as exc:
         logger.error(f'Error: cannot write {args.output}: {exc}')
@@ -1034,6 +1036,8 @@ def _write_csv(stream, header, rows):
     writer = csv.writer(stream)
     writer.writerow(header)
     writer.writerows(rows)
+    # Same reason as emit(): surface a broken pipe at the write, not at exit.
+    stream.flush()
 
 
 def resolve_format(configured):
@@ -1278,7 +1282,45 @@ def _validate_args(parser, args):
         parser.error('--port is only valid together with --dashboard')
 
 
+def _redirect_stdout_to_devnull():
+    """Point stdout at /dev/null after a broken pipe, so shutdown cannot re-raise."""
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(devnull, sys.stdout.fileno())
+        finally:
+            os.close(devnull)
+    except (OSError, ValueError):  # pragma: no cover - stdout already replaced
+        pass
+
+
 def main():
+    """CLI entry point: a closed stdout pipe is normal shell usage, not a fault.
+
+    ``msi-psu-monitor --once | head -1`` closes the pipe before the frame is
+    written. Python turns that into BrokenPipeError; unhandled, the interpreter's
+    shutdown flush prints "Exception ignored" and exits 120. Line-buffer stdout
+    so the failing write raises (not the flush at exit), and answer 0.
+    """
+    if hasattr(sys.stdout, 'reconfigure'):
+        try:
+            sys.stdout.reconfigure(line_buffering=True)
+        except (OSError, ValueError):  # pragma: no cover - detached stdout
+            pass
+    try:
+        _main()
+    except BrokenPipeError:
+        _redirect_stdout_to_devnull()
+    finally:
+        # --help/--version exit through argparse's SystemExit before _main()'s
+        # own handler, so a closed pipe can only surface at this final flush.
+        try:
+            sys.stdout.flush()
+        except BrokenPipeError:
+            _redirect_stdout_to_devnull()
+
+
+def _main():
     parser = build_parser()
     args = parser.parse_args()
     _validate_args(parser, args)
@@ -1373,6 +1415,10 @@ def main():
     except PermissionError:
         logger.error('Error: Permission denied. Run as root.')
         sys.exit(EXIT_ERROR)
+    except BrokenPipeError:
+        # Handled by main(): redirect stdout and answer 0. Re-raise so the
+        # generic handler below cannot turn normal `| head` usage into exit 1.
+        raise
     except Exception as exc:
         logger.error(f'Error: {exc}')
         if verbose:

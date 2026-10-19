@@ -130,18 +130,41 @@ def _daily_buckets(raw):
     return buckets
 
 
+def _fsync_dir(directory):
+    """Persist a rename in ``directory``; best-effort on filesystems without it."""
+    try:
+        fd = os.open(directory, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def atomic_write_text(path, text):
-    """Write ``text`` to ``path`` atomically (``.tmp`` + ``os.replace``).
+    """Write ``text`` to ``path`` atomically and durably.
 
     The single definition of the "never write the target in place" rule: a torn
     ``state.json`` or a half-written textfile collector output is worse than no
     file at all, because the reader cannot tell it apart from a complete one.
+
+    The scratch file is fsynced before the rename and the directory after it.
+    Without that a power cut can leave a successfully renamed but empty file:
+    the kWh counters this module exists to preserve are written once a minute,
+    and a rename that outruns the data would silently reset them to zero.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + '.tmp')
-    tmp.write_text(text)
+    with open(tmp, 'w', encoding='utf-8') as handle:
+        handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())
     os.replace(tmp, path)
+    _fsync_dir(path.parent)
 
 
 class StateError(Exception):
@@ -330,7 +353,7 @@ class MonitorState:
             logger.warning(f'Ignoring {path}: not a regular file.')
             return unusable('not a regular file')
         try:
-            raw = target.read_text()
+            raw = target.read_text(encoding='utf-8-sig')
         except FileNotFoundError:
             # Removed between exists() and read_text(): still the first-run case.
             return cls()
@@ -366,7 +389,7 @@ def _is_canonical_header(line):
 def _has_canonical_header(path):
     """Return whether ``path`` already starts with the exact column header."""
     try:
-        with path.open(newline='') as handle:
+        with path.open(newline='', encoding='utf-8-sig') as handle:
             first = handle.readline()
     except (OSError, UnicodeDecodeError):
         return False
@@ -383,7 +406,7 @@ def _repair_history_header(path):
     either way the canonical header goes on top and the remaining lines stay.
     """
     try:
-        with path.open(newline='') as handle:
+        with path.open(newline='', encoding='utf-8-sig') as handle:
             lines = handle.readlines()
     except (OSError, UnicodeDecodeError):
         return False
@@ -438,10 +461,10 @@ def append_history(state_dir, sensors, ts=None):
         # not be glued to this row: the merged line still starts with a parseable
         # timestamp, so it would be exported as real data with every column after
         # the tear shifted, and this sample would be lost inside it.
-        with path.open('a', newline='') as handle:
+        with path.open('a', newline='', encoding='utf-8') as handle:
             handle.write('\n')
         logger.warning(f'{path.name}: the last line was incomplete; it is kept as its own row.')
-    with path.open('a', newline='') as handle:
+    with path.open('a', newline='', encoding='utf-8') as handle:
         writer = csv.writer(handle)
         if not has_header:
             writer.writerow(HISTORY_COLUMNS)
@@ -524,7 +547,7 @@ def iter_history(state_dir, since_ts=None):
             logger.warning(f'Skipping {path.name}: not a regular file.')
             continue
         try:
-            with path.open(newline='') as handle:
+            with path.open(newline='', encoding='utf-8-sig') as handle:
                 first = handle.readline()
                 if not first:
                     continue  # an empty day file: nothing to read, nothing wrong

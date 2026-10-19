@@ -126,3 +126,38 @@ def test_the_readme_fan_snippet_is_copy_pasteable():
     # The keys are real, too: an unknown option is dropped by the loader.
     for option in parser['fan']:
         assert f'fan_{option}' in DEFAULTS or option in DEFAULTS
+
+
+def test_the_unit_keeps_the_hardening_baseline_without_breaking_hidraw():
+    """Defence in depth that cannot lock the daemon out of /dev/hidraw*.
+
+    PrivateDevices would hide the hidraw node the daemon exists to read, and a
+    0077 umask would make state.json unreadable to the uaccess user running the
+    dashboard. Both stay out on purpose.
+    """
+    text = UNIT.read_text(encoding='utf-8')
+    # Only active directives: the comments explain why PrivateDevices/UMask are
+    # absent, and those words must not count as the setting itself.
+    active = {
+        line.split('=', 1)[0].strip(): line.split('=', 1)[1].strip()
+        for line in text.splitlines()
+        if line.strip() and not line.lstrip().startswith('#') and '=' in line
+    }
+    for name, value in (
+        ('ProtectSystem', 'full'),
+        ('ProtectHome', 'yes'),
+        ('PrivateTmp', 'yes'),
+        ('NoNewPrivileges', 'yes'),
+        ('ProtectKernelTunables', 'yes'),
+        ('ProtectKernelModules', 'yes'),
+        ('ProtectKernelLogs', 'yes'),
+        ('ProtectControlGroups', 'yes'),
+        ('ProtectClock', 'yes'),
+        ('RestrictSUIDSGID', 'yes'),
+        ('LockPersonality', 'yes'),
+        ('RestrictRealtime', 'yes'),
+        ('RestrictNamespaces', 'yes'),
+    ):
+        assert active.get(name) == value, f'{name} must be {value}'
+    assert 'PrivateDevices' not in active
+    assert 'UMask' not in active

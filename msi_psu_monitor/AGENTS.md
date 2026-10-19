@@ -57,8 +57,10 @@ runtime imports.
 - **A history file is identified by its header, not its existence**: ``append_history()``
   writes the header whenever the file is missing *or empty*, so a crash between open and
   the header cannot leave a day file whose first data row DictReader reads as columns.
-- **Every write is atomic**: `path.with_name(name + '.tmp')` + `os.replace()` for
-  `state.json` and the prometheus textfile. Never write the target in place.
+- **Every write is atomic and fsynced**: `path.with_name(name + '.tmp')` +
+  `flush` + `os.fsync` + `os.replace()`, then a best-effort directory fsync, for
+  `state.json` and the prometheus textfile. Never write the target in place: a rename
+  that outruns the data can leave a complete-looking empty file after a power cut.
 - **A failed read must not leave a healthy-looking textfile behind**: the daemon
   rewrites it with `msi_psu_up 0` + `msi_psu_error_info{reason}` (once per distinct
   reason, not once per tick), because node_exporter re-exports the last file forever.
@@ -110,6 +112,12 @@ runtime imports.
 - `dashboard.py` resolves a request once in `_route()` and both `do_GET`/`do_HEAD`
   consume that tuple: never write a second response path, or HEAD starts lying about
   404s and Content-Length.
+- Dashboard transport errors go through `DashboardServer.handle_error`: a client that
+  hangs up is debug-level, anything else keeps its traceback via `logger.exception`.
+  Never let `socketserver` print a raw traceback into the journal.
+- Text IO is explicit UTF-8 everywhere: read `utf-8-sig` (a BOM is an encoding detail),
+  write `utf-8`. A unit inheriting `LC_ALL=C` must still read a config with non-ASCII
+  comments and a hand-edited state.json.
 - USB IDs live in five places that `tests/test_pid_consistency.py` cross-checks:
   `PSU_PRODUCT_IDS`, `MSIPSU.VARIANTS[*]["pid"]`, `systemd/99-msi-psu.rules`,
   `scripts/install.sh` and the README table. Adding a model means touching all five.
@@ -124,7 +132,7 @@ runtime imports.
 ## Verification (no hardware required)
 
 ```bash
-uv run --group dev pytest -q              # 472 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
+uv run --group dev pytest -q              # 487 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
 uv run --group dev ruff check .           # must be clean
 uv run --group dev mypy msi_psu_monitor/  # must be clean
 ```

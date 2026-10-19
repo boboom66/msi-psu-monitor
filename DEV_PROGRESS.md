@@ -272,7 +272,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 472 passed
+uv run --group dev pytest -q                     → 487 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 34 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
@@ -289,11 +289,11 @@ bash scripts/smoke.sh                            → 56 项全过（三种格式
 - `ast.parse(feature_version=(3, 10))`：全部 `.py` 通过 3.10 语法校验（静态兜底）。
 - **3.12 与 3.10 矩阵真跑过**（turn8 重跑）：`uv venv --python /usr/bin/python3.12` 与
   `uv venv --python 3.10` 各建裸环境（只装 dev 组 pytest，不装本包），把工作树复制一份、
-  不带 `.venv`，直接跑 `python3 -m pytest`：**3.12.3 → 472 通过**、**3.10.21 → 472 通过**。
+  不带 `.venv`，直接跑 `python3 -m pytest`：**3.12.3 → 487 通过**、**3.10.21 → 487 通过**。
   3.10 这条以前根本跑不起来：两个测试模块 `import tomllib`（3.11+），CI 的 3.10 矩阵会在
   收集阶段就红；本轮加 `tomli>=2; python_version < '3.11'`（dev 组）并 try/except 回退。
   `bash scripts/smoke.sh`（**56 项全过**）是 turn7 在同一裸 3.12 环境跑的，本轮未重跑。
-- CI 含 3.10 / 3.12 双矩阵 + `ruff check` + `ruff format --check` + `mypy` + `pytest`
+- CI 含 3.10 / 3.12 / 3.13 三矩阵 + `ruff check` + `ruff format --check` + `mypy` + `pytest`
   + **构建 `.deb`**。
 
 运行期零第三方依赖（`pyproject.toml` 的 `dependencies = []`），仅 dev 组含 pytest/ruff/mypy
@@ -341,7 +341,7 @@ turn7 留下的 11 条已逐条修完；每条都补了「改回旧行为就会�
    测试文件都有行。顺带修正文件名正则不收数字的问题：`test_protocol_lin11.py` 之前根本不在
    两条文档校验的覆盖范围内。测试：`test_the_coverage_table_names_real_test_functions`。
 8. **[P2] turn7 留下的裸计数不在护栏里**：`TEST_COUNT_RE` 补 `通过|通過`。那个未受护栏保护的旧通过数已按裸环境实跑对齐：
-   3.12.3 与 3.10.21 各 **472 通过**（细节见上节「质量门禁」）。
+   3.12.3 与 3.10.21 各 **487 通过**（细节见上节「质量门禁」）。
 9. **[P2] 零依赖探针漏了 `__main__.py`**：`SHIPPED_MODULES` 元组补 `__main__`，并新增
    `test_the_probe_covers_every_shipped_module`，把元组与 `msi_psu_monitor/*.py` 精确对齐。
 10. **[P2] `test_pid_consistency.py` 比的是 `bulk_size` 而不是真正的门限 `payload_size`**：README
@@ -355,6 +355,39 @@ turn7 留下的 11 条已逐条修完；每条都补了「改回旧行为就会�
 与 `tests/test_stdlib_only.py` 直接 `import tomllib`（3.11 才有）。现在改为 try/except 回退到
 `tomli`，dev 组加 `tomli>=2; python_version < '3.11'`，3.10.21 裸环境已全绿。
 
+### 产品级加固（turn9，样机前，无硬件可测）
+
+样机未到，本轮只做不依赖硬件的产品级收口；每条都有「改回旧行为就会红」的回归测试。
+
+- **掉电不再把 kWh 清零（P1）**：`state.atomic_write_text` 原来只有 rename、没有 fsync，
+  掉电后可能出现「改名成功、内容为空」的 state.json。现在临时文件 `flush + fsync`，
+  rename 后再 fsync 目录（不支持的 FS 静默跳过）。测试：
+  `test_atomic_write_fsyncs_the_file_and_its_directory`。
+- **文本 IO 与 locale 解耦（P1）**：配置/state/历史显式 UTF-8（读 `utf-8-sig` 容忍 BOM，
+  写 UTF-8），`emit` 与 CSV 也显式。systemd 继承 `LC_ALL=C` 时，一份带中文注释的配置
+  过去会直接 `ConfigError`；现在正常加载。测试：
+  `test_a_utf8_config_is_read_under_an_ascii_locale`、
+  `test_state_files_are_read_as_utf8_regardless_of_locale`、
+  `test_a_utf8_bom_is_tolerated`、`test_load_accepts_a_utf8_bom`。
+- **`| head` 不再像是崩溃（P1）**：CLI 统一收口 BrokenPipeError（行缓冲 + 最终 flush），
+  `--once` / `--help` / `--version` 在已关闭的 stdout 上都是 exit 0、无
+  `Exception ignored`；此前是 exit 120。测试：
+  `test_a_closed_stdout_pipe_is_not_a_traceback`。
+- **dashboard 客户端提前断开不再刷 traceback（P2）**：新增 `DashboardServer.handle_error`，
+  ConnectionError/TimeoutError 降到 debug，真实异常仍带堆栈进 logger；`_send` 捕获
+  ConnectionError，空闲连接 30 s 超时。测试：
+  `test_an_early_client_disconnect_does_not_print_a_traceback`、
+  `test_an_unexpected_handler_error_keeps_its_traceback`。
+- **响应头（P2）**：全部响应加 `X-Content-Type-Options: nosniff`、
+  `X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`。测试：
+  `test_security_headers_are_present_on_every_route`。
+- **配置拼写错误不再静默（P2）**：未知 section/option 各打一行 warning，
+  `intervall = 5` 不会再悄悄用默认值。测试：
+  `test_unknown_sections_and_options_are_reported`。
+- **systemd 纵深防御（P2）**：补 ProtectKernel*/ProtectControlGroups/ProtectClock/
+  Restrict*/LockPersonality；仍不碰 `/dev/hidraw*`，明确不加 `UMask=0077`
+  （会让 state.json 对 uaccess 用户不可读，打破非 root dashboard）。测试：
+  `test_the_unit_keeps_the_hardening_baseline_without_breaking_hidraw`。
 ### 外部阻塞
 
 - **Q6 EPS 数量**：等 MSI 回函；未回前按 2×EPS 处理。

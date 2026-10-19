@@ -1,6 +1,9 @@
 """Unit tests for INI configuration loading (config.load_config)."""
 
 import logging
+import pathlib
+import subprocess
+import sys
 
 import pytest
 
@@ -167,3 +170,59 @@ def test_a_non_finite_interval_falls_back_to_the_default(tmp_path, token):
     assert cfg['sample_interval'] == DEFAULTS['sample_interval']
     assert cfg['prom_interval'] == DEFAULTS['prom_interval']
     assert cfg['history_interval'] == DEFAULTS['history_interval']
+
+
+def test_unknown_sections_and_options_are_reported(tmp_path, caplog):
+    """A misspelled option used to keep the default without a word."""
+    conf = tmp_path / 'psu.conf'
+    conf.write_text(
+        """[monitor]
+intervall = 5
+[typo]
+foo = 1
+""",
+        encoding='utf-8',
+    )
+    with caplog.at_level(logging.WARNING):
+        cfg = load_config(str(conf))
+    assert cfg['interval'] == DEFAULTS['interval']
+    text = caplog.text.lower()
+    assert 'unknown config section [typo]' in text
+    assert 'unknown option [monitor] intervall' in text
+
+
+def test_a_utf8_config_is_read_under_an_ascii_locale(tmp_path):
+    """The service manager may run with LC_ALL=C; a Chinese comment is still valid."""
+    conf = tmp_path / 'psu.conf'
+    conf.write_text(
+        """# 中文注释
+[monitor]
+interval = 5
+""",
+        encoding='utf-8',
+    )
+    root = pathlib.Path(__file__).resolve().parents[1]
+    code = (
+        'from msi_psu_monitor.config import load_config; '
+        f'print(load_config({str(conf)!r})["interval"])'
+    )
+    env = {
+        'PATH': '/usr/bin:/bin',
+        'LC_ALL': 'C',
+        'LANG': 'C',
+        'PYTHONUTF8': '0',
+        'PYTHONCOERCECLOCALE': '0',
+    }
+    result = subprocess.run(
+        [sys.executable, '-c', code], cwd=root, capture_output=True, text=True, env=env
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == '5.0'
+
+
+def test_a_utf8_bom_is_tolerated(tmp_path):
+    """Notepad saves UTF-8 with a BOM; that must not become a missing section."""
+    conf = tmp_path / 'psu.conf'
+    body = '[monitor]' + chr(10) + 'interval = 4' + chr(10)
+    conf.write_bytes(bytes([0xEF, 0xBB, 0xBF]) + body.encode('utf-8'))
+    assert load_config(str(conf))['interval'] == 4.0

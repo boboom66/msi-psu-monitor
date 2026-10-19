@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -415,22 +416,38 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # pragma: no cover - quiet by default
         pass
 
+    #: An idle keep-alive connection must not pin a worker thread forever.
+    timeout = 30
+
     def _send(self, status, body, content_type, extra_headers=(), with_body=True):
         """Write one response; ``with_body=False`` keeps HEAD honest.
 
         The Content-Length always describes the entity a GET would return, so a
         HEAD carries the same status, type and length as its GET twin.
+
+        A browser that closes the tab mid-response raises ConnectionError out of
+        send_header()/write(). That is routine on a loopback dashboard, so it is
+        logged at debug level instead of escaping as a traceback.
         """
         payload = body.encode('utf-8')
-        self.send_response(status)
-        self.send_header('Content-Type', content_type)
-        self.send_header('Content-Length', str(len(payload)))
-        self.send_header('Cache-Control', 'no-store')
-        for name, value in extra_headers:
-            self.send_header(name, value)
-        self.end_headers()
-        if with_body:
-            self.wfile.write(payload)
+        try:
+            self.send_response(status)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(len(payload)))
+            self.send_header('Cache-Control', 'no-store')
+            # The page is local and read-only, but a fixed set of headers costs
+            # nothing and keeps a future embedded link from being frameable.
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.send_header('X-Frame-Options', 'DENY')
+            self.send_header('Referrer-Policy', 'no-referrer')
+            for name, value in extra_headers:
+                self.send_header(name, value)
+            self.end_headers()
+            if with_body:
+                self.wfile.write(payload)
+        except ConnectionError as exc:
+            logger.debug(f'client disconnected during a {status} response: {exc}')
+            self.close_connection = True
 
     def _query(self):
         # keep_blank_values: ``?from=`` and ``?columns=`` are hard errors on the
@@ -509,12 +526,33 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self._send(status, body, content_type, extra_headers, with_body=False)
 
 
+class DashboardServer(ThreadingHTTPServer):
+    """Threaded loopback server that treats a client hang-up as routine."""
+
+    #: Do not wait for worker threads on shutdown: a half-open keep-alive
+    #: connection must not delay Ctrl-C.
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        """Log instead of letting socketserver print a raw traceback.
+
+        A browser closing the tab shows up here as ConnectionError; on a
+        loopback dashboard that is normal and must stay out of the journal.
+        Anything else is a real bug, so it keeps its traceback (via the logger).
+        """
+        exc = sys.exc_info()[1]
+        if isinstance(exc, (ConnectionError, TimeoutError)):
+            logger.debug(f'{client_address}: client disconnected: {exc}')
+            return
+        logger.exception(f'Unhandled error while serving {client_address}')
+
+
 def make_server(host=DEFAULT_HOST, port=DEFAULT_PORT, state_dir=None):
     """Build (but do not start) a dashboard server bound to ``state_dir``."""
     handler = type(
         'BoundDashboardHandler', (DashboardHandler,), {'state_dir': Path(state_dir or '.')}
     )
-    return ThreadingHTTPServer((host, port), handler)
+    return DashboardServer((host, port), handler)
 
 
 def serve(host=DEFAULT_HOST, port=DEFAULT_PORT, state_dir=None):

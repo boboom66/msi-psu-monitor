@@ -1,5 +1,7 @@
 """Tests for the local dashboard HTTP endpoints (no hardware, no network egress)."""
 
+import contextlib
+import io
 import json
 import os
 import pathlib
@@ -433,3 +435,57 @@ def test_serve_reports_a_port_that_is_already_taken(tmp_path, caplog):
         first.server_close()
     assert code == 1
     assert any('cannot serve' in record.message for record in caplog.records)
+
+
+def test_an_early_client_disconnect_does_not_print_a_traceback(tmp_path):
+    """Closing a tab mid-response is routine; socketserver used to print a traceback."""
+    httpd = dashboard.make_server('127.0.0.1', 0, tmp_path)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    captured = io.StringIO()
+    status = None
+    request = b'GET / HTTP/1.1\r\nHost: x\r\n\r\n'
+    try:
+        with contextlib.redirect_stderr(captured):
+            for _ in range(3):
+                sock = socket.create_connection(('127.0.0.1', httpd.server_port), timeout=5)
+                sock.sendall(request)
+                sock.close()
+            time.sleep(0.5)
+        status, _ = _get(f'http://127.0.0.1:{httpd.server_port}/api/state')
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=5)
+    assert status == 200, 'the server must keep serving after a hang-up'
+    assert 'Traceback' not in captured.getvalue()
+    assert 'Exception occurred' not in captured.getvalue()
+
+
+def test_security_headers_are_present_on_every_route(live_server):
+    """Cheap hardening; the page is local but a future embedded link is not."""
+    for route in ('/', '/api/state', '/api/history?from=2h'):
+        status, headers = _head(live_server + route)
+        assert status == 200
+        assert headers['X-Content-Type-Options'] == 'nosniff'
+        assert headers['X-Frame-Options'] == 'DENY'
+        assert headers['Referrer-Policy'] == 'no-referrer'
+
+
+def test_an_unexpected_handler_error_keeps_its_traceback(tmp_path, caplog):
+    """A hang-up is routine; a real bug must still land in the journal with a stack."""
+    httpd = dashboard.make_server('127.0.0.1', 0, tmp_path)
+    try:
+        with caplog.at_level('ERROR', logger='msi_psu.dashboard'):
+            try:
+                raise RuntimeError('boom')
+            except RuntimeError:
+                httpd.handle_error(None, ('127.0.0.1', 1))
+    finally:
+        httpd.server_close()
+    assert 'Unhandled error while serving' in caplog.text
+    assert 'RuntimeError: boom' in caplog.text
+
+
+def test_an_idle_connection_cannot_pin_a_thread_forever():
+    assert 0 < dashboard.DashboardHandler.timeout <= 60

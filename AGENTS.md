@@ -8,7 +8,7 @@ Protocol rules live in `msi_psu_monitor/AGENTS.md` (auto-loaded via `opencode.js
 
 ```bash
 uv sync --group dev                                  # py>=3.10, dev toolchain (pytest/ruff/mypy), zero runtime deps
-uv run --group dev pytest -q                         # 472 tests, no hardware needed
+uv run --group dev pytest -q                         # 487 tests, no hardware needed
 uv run --group dev pytest -q tests/test_state.py     # single file
 uv run --group dev ruff check .                      # must be clean
 uv run --group dev mypy msi_psu_monitor/             # must be clean
@@ -23,7 +23,7 @@ sudo ./scripts/install.sh                            # package + systemd daemon 
 ```
 
 `docs/verify.md` is the full no-hardware checklist — use it instead of improvising.
-CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12.
+CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12/3.13.
 
 ## Gotchas (agent would miss these)
 
@@ -121,6 +121,9 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12.
   `cp` shipped root-only modules and `.service` files, breaking the uaccess use case the
   udev rule exists for. `scripts/smoke.sh` builds the `.deb` under `umask 077` and reads
   the modes back out of the archive.
+- **Text IO is locale-independent**: config/state/history read `utf-8-sig` and write
+  `utf-8`; systemd can inherit `LC_ALL=C`. `state.atomic_write_text` fsyncs the scratch
+  file and the directory, so a power cut cannot leave an empty `state.json` behind.
 - **Line endings**: `.gitattributes` enforces LF; CRLF breaks the shell scripts.
 - **`kernel/` patch is out-of-tree** (Proxmox 7.0 headers unavailable) — never build it
   here; the userspace tool is the supported path.
