@@ -161,7 +161,7 @@ daemon + alert 注入                              alerts-YYYYMMDD.log 写入，
 
 ## 9. Phase 2 增量（2026-10-19）
 
-- 当前提交：Phase 3 修复（见 git log），测试 **630 passed**（3.10.21 / 3.12.3 裸环境与 3.12.3 venv）。
+- 当前提交：Phase 3 修复（见 git log），测试 **636 passed**（3.10.21 / 3.12.3 裸环境与 3.12.3 venv）。
 - 覆盖率：源语句 **92%**（`coverage report` 8 个模块；`__main__.py` 未覆盖）；CI 的门限为 90%。
 - 新增测试：真实 console 子进程 E2E、Host/CSP、JS 语法、HID 短/垃圾帧、daemon fd 泄漏、
   `--iterations` 边界、AlertLog `-O`、release/CI 门禁静态检查；
@@ -174,18 +174,18 @@ daemon + alert 注入                              alerts-YYYYMMDD.log 写入，
 - 仍 BLOCKED/NOT RUN：真实 hidraw/PSU、root/systemd/udev、安装卸载、22.04/arm64、真实浏览器、
   24h/72h 长稳、真实 tag 发布。
 
-> Phase 1 段落中的 569 是当时基线，保留作历史记录；当前以本节 630 为准。
+> Phase 1 段落中的 569 是当时基线，保留作历史记录；当前以本节 636 为准。
 
 ## 10. Phase 3 全量审计增量（2026-10-19）
 
 ### 10.1 实际执行证据
 
 ```text
-pytest -q                              630 passed in 17.9s
+pytest -q                              636 passed in 17.9s
 ruff check .                           All checks passed!
 ruff format --check .                  50 files already formatted
 mypy msi_psu_monitor/                  Success: no issues found in 10 source files
-coverage run --branch -m pytest -q     630 passed
+coverage run --branch -m pytest -q     636 passed
 coverage report                        TOTAL 92% (statement)
 bash scripts/smoke.sh                  58 passed, 0 failed
 shellcheck -S warning scripts/*.sh scripts/hardware/*.sh   exit 0
@@ -208,7 +208,7 @@ systemd-analyze verify                 exit 0
 
 | 状态 | 数量/说明 |
 |---|---|
-| PASS | 630 个自动化测试 + 静态检查 + smoke 58 |
+| PASS | 636 个自动化测试 + 静态检查 + smoke 58 |
 | FAIL | 0（本轮修复后） |
 | BLOCKED | 真实 hidraw/PSU、root/systemd/udev、22.04/arm64、真实浏览器、长稳、正式发版 |
 | NOT RUN | 24h/72h、真实 release 下载/升级/回滚、真实浏览器 PNG/CSV |
@@ -265,3 +265,9 @@ systemd-analyze verify                 exit 0
   `SHA256SUMS` 覆盖 kit，**不含** smoke 生成的 `_all.deb`；API digest 与 `SHA256SUMS` 全部一致。
 - 两个 tar 的 `BUILD-INFO` 均为 `build_glibc=2.35`；aarch64 二进制经 `file` 确认为 ARM aarch64。
 - 证据：[evidence-ci-release.txt](evidence-ci-release.txt)。
+
+### 10.10 第二轮 CLI/导出修复（2026-10-19）
+
+- DEF-015：`--export -O` 改为 scratch + fsync + replace；失败保留旧文件，新增回归。
+- DEF-016：`-f/--format` 与 `--serial` 在固定输出/本地历史模式中不再静默忽略；配置文件 format 给出 warning。
+- 当前全套 **636 passed**；新增测试已实际执行。

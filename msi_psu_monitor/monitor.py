@@ -1185,11 +1185,28 @@ def run_export(args, cfg):
     if not args.output:
         _write_csv(sys.stdout, header, rows)
         return EXIT_OK
-    # The CSV is streamed, so it is written in place; a failed write is reported
-    # rather than left behind as a silently truncated file (or a traceback).
+    # A regular file is replaced atomically: a failed write must not destroy the
+    # previous export. A fifo/character device (e.g. /dev/stdout) cannot be
+    # renamed over, so it keeps the direct stream path.
+    target = args.output
     try:
-        with open(args.output, 'w', newline='', encoding='utf-8') as handle:
-            _write_csv(handle, header, rows)
+        if os.path.exists(target) and not os.path.isfile(target):
+            with open(target, 'w', newline='', encoding='utf-8') as handle:
+                _write_csv(handle, header, rows)
+        else:
+            scratch = target + '.tmp'
+            try:
+                with open(scratch, 'w', newline='', encoding='utf-8') as handle:
+                    _write_csv(handle, header, rows)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(scratch, target)
+            except OSError:
+                try:
+                    os.unlink(scratch)
+                except OSError:
+                    pass
+                raise
     except OSError as exc:
         logger.error(f'Error: cannot write {args.output}: {exc}')
         return EXIT_ERROR
@@ -1419,6 +1436,17 @@ def _validate_args(parser, args):
         )
     if args.export and args.watch is not None:
         parser.error('--export cannot be combined with --watch')
+    if args.export and args.format not in (None, 'text'):
+        # --export always writes CSV; accepting -f json silently ignored it.
+        parser.error('--export writes CSV; --format does not apply')
+    if args.export and args.serial is not None:
+        # --export reads the local history, not a device; a serial filter would
+        # be silently ignored.
+        parser.error('--export reads local history; --serial does not apply')
+    if _write_requested(args) and args.format not in (None, 'text'):
+        # Control-write results are plain text; silently ignoring -f json would
+        # hand the caller machine-readable output it did not get.
+        parser.error('control writes report text; --format does not apply')
     if args.output is not None and not args.output:
         # `--columns "$COLS"` with COLS unset was the same silent no-op: the flag
         # was accepted and the output went to stdout instead of the named file.
@@ -1574,6 +1602,20 @@ def _main():
         # text frames without a word was the silent half of it.
         logger.warning(
             f'--watch prints the text format only; ignoring [monitor] format = {cfg["format"]!r}'
+        )
+        args.format = 'text'
+    if args.format != 'text' and (
+        args.dashboard
+        or args.export
+        or args.show_log
+        or args.show_alert_log
+        or _write_requested(args)
+    ):
+        # These modes have a fixed output shape; accepting [monitor] format from
+        # the config file and silently printing text/CSV anyway is the same
+        # silent no-op the CLI-level checks reject.
+        logger.warning(
+            f'this mode has a fixed output format; ignoring [monitor] format = {cfg["format"]!r}'
         )
         args.format = 'text'
 
