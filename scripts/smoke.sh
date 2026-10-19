@@ -39,7 +39,7 @@ PASS=0
 FAIL=0
 # Keep in sync with the count quoted in docs/verify.md: a check that quietly
 # disappears from this script is a gap nobody notices.
-EXPECTED_TOTAL=56
+EXPECTED_TOTAL=58
 
 ok()   { PASS=$((PASS + 1)); printf '\033[0;32m  ok\033[0m   %s\n' "$1"; }
 bad()  { FAIL=$((FAIL + 1)); printf '\033[0;31m  FAIL\033[0m %s\n' "$1"; [ $# -gt 1 ] && printf '       %s\n' "$2"; }
@@ -143,6 +143,10 @@ assert_contains "-O 保留原因行" "not available" "$(cat "$OCP_FILE" 2>/dev/n
 printf '\n\033[1m[4] 风扇写入\033[0m\n'
 OUT=$($MONITOR --fan-mode customized --fan-duty 55 2>/dev/null)
 assert_contains "风扇写 + 读回校验" "Fan mode: customized   Duty: 55%" "$OUT"
+OUT=$($MONITOR --zero-fan off 2>/dev/null)
+assert_contains "Zero Fan 写 + 读回校验" "Zero Fan: off" "$OUT"
+OUT=$($MONITOR --buzzer-off 2>/dev/null)
+assert_contains "蜂鸣器静音命令" "Buzzer: silenced" "$OUT"
 
 printf '\n\033[1m[5] 参数互斥（应为 2 = 用法错误）\033[0m\n'
 $MONITOR --ocp --watch 1 >/dev/null 2>&1

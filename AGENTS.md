@@ -8,7 +8,7 @@ Protocol rules live in `msi_psu_monitor/AGENTS.md` (auto-loaded via `opencode.js
 
 ```bash
 uv sync --group dev                                  # py>=3.10, dev toolchain (pytest/ruff/mypy), zero runtime deps
-uv run --group dev pytest -q                         # 487 tests, no hardware needed
+uv run --group dev pytest -q                         # 513 tests, no hardware needed
 uv run --group dev pytest -q tests/test_state.py     # single file
 uv run --group dev ruff check .                      # must be clean
 uv run --group dev mypy msi_psu_monitor/             # must be clean
@@ -82,12 +82,11 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12/3.13.
   complementary model gates and MEG Ai1600T answering neither (`CPSU.cs:823-832` vs
   `CPSU.cs:840-856`). Gate on `MSIPSU.supports_ocp_config`, never on payload length.
 - **0xC1 is overloaded too**: InfoID `0x00` is the 42-byte OCP state, InfoID `1..10` is the
-  black-box log (`read_ocp_state` vs `read_blackbox`). Do not swap them. `read_blackbox`
-  returns device slot order (InfoID ascending) — nothing documents which slot is newest,
-  so `format_blackbox` sorts newest-first on each record's own cumulative counters
-  (`total_time`, then `total_count`), which the printed line then shows next to it.
-  Never present slot order as chronological order, and keep the demo's counters in the
-  same direction as its slot numbers.
+  black-box log (`read_ocp_state` vs `read_blackbox`). Do not swap them. REV6 p.13
+  defines InfoID `1` as the latest record, so `read_blackbox` returns newest-first and
+  `format_blackbox` displays it in that order; the cumulative counters are shown next to
+  each line but never used to reorder it (they can wrap or reset). Keep the demo's slot
+  numbers and counters in the same direction.
 - **`--ocp` is read-only by scope**: 一期 only *inspects* the thresholds. The write
   (`0xC0` 8 bytes + `0xF1`, clamped to 10-14 A / 4-8 A / 5-30 s / 30-240 s) is a separate,
   separately approved batch — do not add it while "fixing" the display.

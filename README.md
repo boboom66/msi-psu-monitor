@@ -16,7 +16,8 @@ Python standard library only — no third-party runtime dependencies.
 - **Alerting with exit codes** — hardware alert bits (E1h) plus the software mirror,
   debounced, reported on stderr; `0` normal / `1` fault / `2` alert.
 - **Fan display and control** — read mode/duty/Zero Fan (41h/42h), write and save a
-  custom duty (41h + F1h) with read-back verification.
+  custom duty (41h + F1h) or toggle Zero Fan (43h + F1h), both with read-back
+  verification; silence the 12+4 OCP buzzer (C2h).
 - **Black-box dump** — the last 10 GPU Safeguard+ trip records (`--show-log`).
 - **OCP threshold inspection** — display the 12V-2x6 OCP configuration (pin trip point,
   pin spread, trigger and warning times) and the per-connector state, read-only (`--ocp`).
@@ -27,8 +28,9 @@ Python standard library only — no third-party runtime dependencies.
 - **History export** — 9-column CSV over any `m/h/d` window, to a file or stdout.
 - **Local dashboard** — loopback-only charts (7 live curves + weekly energy) drawn
   from the daemon history, with per-chart PNG/CSV export.
-- **Fan profile restore** — the daemon re-asserts a configured fan mode/duty every time
-  it (re)opens the PSU, so a custom curve survives AC loss (`[fan]` in the config file).
+- **Fan profile restore** — the daemon re-asserts a configured fan mode/duty/Zero Fan
+  every time it (re)opens the PSU, so a custom curve survives AC loss (`[fan]` in the
+  config file).
 - **No-hardware demo mode** — exercise the whole pipeline with `MSI_PSU_DEMO=1`, including every supported model via `MSI_PSU_DEMO_MODEL` (`ai1300p`, `meg_ai1600`, ...).
 
 ## Supported Hardware
@@ -86,7 +88,8 @@ sudo msi-psu-monitor -f prometheus -O /var/lib/node_exporter/msi-psu.prom
 ```
 msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
                 [-O OUTPUT] [--serial SERIAL] [--fan-mode {auto,customized}]
-                [--fan-duty 0-100] [--export] [--from FROM_SPEC]
+                [--fan-duty 0-100] [--zero-fan {on,off}] [--buzzer-off]
+                [--export] [--from FROM_SPEC]
                 [--columns COLUMNS] [--dashboard] [--port PORT] [--show-log]
                 [--ocp] [--no-alerts] [--config CONFIG] [--verbose] [--quiet]
                 [--version]
@@ -102,6 +105,9 @@ msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
       --fan-mode   Write the fan control mode (41h) and save it (F1h)
       --fan-duty   Custom fan duty in percent; implies --fan-mode customized,
                    and is refused together with --fan-mode auto
+      --zero-fan   Enable/disable Zero Fan (43h) and save it (F1h); 12+4
+                   (MPG TS) models only
+      --buzzer-off Silence the 12+4 OCP buzzer (C2h); MPG TS models only
       --export     Export the daemon history as CSV
       --from       Export window: 30m, 2h, 7d, ... (required with --export)
       --columns    Export columns (default: all)
@@ -133,6 +139,10 @@ sudo msi-psu-monitor --ocp
 # Fan control: set 75% and verify, then hand back to the PSU curve
 sudo msi-psu-monitor --fan-duty 75
 sudo msi-psu-monitor --fan-mode auto
+
+# Zero Fan toggle and buzzer silence (MPG TS models)
+sudo msi-psu-monitor --zero-fan off
+sudo msi-psu-monitor --buzzer-off
 
 # Last two hours of temperature and fan as CSV
 sudo msi-psu-monitor --export --from 2h --columns temp,fan -O psu-2h.csv
@@ -251,14 +261,15 @@ Optional INI file, resolved as `/etc/msi-psu-monitor.conf` then
 
 The optional `[fan]` section re-applies a fan profile on every daemon (re)open — the
 way MSI Center re-asserts its profile when it takes the device over. It is off unless
-`mode` is set, so a stock install never writes to the PSU:
+`mode` or `zero_fan` is set, so a stock install never writes to the PSU:
 
 ```ini
 [fan]
-# Off unless `mode` is set: `auto` hands the fan back to the PSU, `customized`
-# holds the fixed `duty` (0-100).
+# Off unless `mode`/`zero_fan` is set: `auto` hands the fan back to the PSU,
+# `customized` holds the fixed `duty` (0-100); `zero_fan` is the 43h switch.
 mode = customized
 duty = 60
+zero_fan = on
 ```
 
 Both installers (`apt install`, `scripts/install.sh`) drop

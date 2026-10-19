@@ -40,7 +40,7 @@ KNOWN_OPTIONS = {
         'history_interval',
         'retention_days',
     },
-    'fan': {'mode', 'duty'},
+    'fan': {'mode', 'duty', 'zero_fan'},
 }
 
 DEFAULTS = {
@@ -61,6 +61,7 @@ DEFAULTS = {
     'retention_days': 30,
     'fan_mode': None,
     'fan_duty': None,
+    'fan_zero_fan': None,
 }
 
 
@@ -151,6 +152,14 @@ def load_config(path=None):
             cfg['fan_duty'] = min(100, max(0, cfg['fan_duty']))
     elif mode:
         logger.warning(f'Ignoring unknown [fan] mode {mode!r} (use auto or customized).')
+    raw_zero = (fan.get('zero_fan') or '').strip().lower()
+    if raw_zero:
+        if raw_zero in ('1', 'true', 'yes', 'on'):
+            cfg['fan_zero_fan'] = True
+        elif raw_zero in ('0', 'false', 'no', 'off'):
+            cfg['fan_zero_fan'] = False
+        else:
+            logger.warning(f'Ignoring unknown [fan] zero_fan value {raw_zero!r} (use on or off).')
     return cfg
 
 

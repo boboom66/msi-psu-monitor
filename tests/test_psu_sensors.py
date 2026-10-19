@@ -716,3 +716,60 @@ def test_a_meg_frame_whose_first_payload_byte_is_0xfe_is_still_decoded(monkeypat
     sensors = psu.get_sensors()
     assert 'error' not in sensors and 'payload_error' not in sensors
     assert sensors['vout_12v'] == (11.984, 'V')
+
+
+class RecordingHID(FakeHID):
+    """FakeHID that records 0x50 writes and ACKs them."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.writes = []
+        self.accept = True
+
+    def write_command(self, data, timeout_ms=250):
+        # Same shape HIDDevice sends: the 0x50 command byte, then the payload.
+        self.writes.append(tuple([0x50] + list(data)))
+        return self.accept
+
+
+def test_set_zero_fan_writes_43_then_saves():
+    psu = _psu_1300ts()
+    psu.hid = RecordingHID()
+    assert psu.set_zero_fan(True) is True
+    assert psu.hid.writes == [(0x50, 0x43, 1), (0x50, 0xF1)]
+
+
+def test_set_zero_fan_off_writes_zero():
+    psu = _psu_1300ts()
+    psu.hid = RecordingHID()
+    assert psu.set_zero_fan(False) is True
+    assert psu.hid.writes == [(0x50, 0x43, 0), (0x50, 0xF1)]
+
+
+def test_a_refused_zero_fan_write_returns_false():
+    psu = _psu_1300ts()
+    psu.hid = RecordingHID()
+    psu.hid.accept = False
+    assert psu.set_zero_fan(True) is False
+
+
+def test_zero_fan_and_buzzer_are_refused_on_a_meg_model():
+    psu = _psu_1300ts(commands={(0xFA, 0x51): b'MEG Ai1300P' + bytes([0])})
+    psu.hid = RecordingHID()
+    assert psu.set_zero_fan(True) is False
+    assert psu.silence_buzzer() is False
+    assert psu.hid.writes == []
+
+
+def test_silence_buzzer_sends_c2_without_a_payload():
+    psu = _psu_1300ts()
+    psu.hid = RecordingHID()
+    assert psu.silence_buzzer() is True
+    assert psu.hid.writes == [(0x50, 0xC2)]
+
+
+def test_read_zero_fan_uses_the_fourth_fanduty_byte():
+    psu = _psu_1300ts(registers={0x42: bytes([0x1E, 0x1E, 0x32, 0x01])})
+    assert psu.read_zero_fan() is True
+    psu = _psu_1300ts(registers={0x42: bytes([0x1E, 0x1E, 0x32, 0x00])})
+    assert psu.read_zero_fan() is False

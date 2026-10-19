@@ -272,12 +272,12 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 487 passed
+uv run --group dev pytest -q                     → 513 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 34 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
 bash scripts/build_deb.sh                        → dist/msi-psu-monitor_1.0.0_all.deb
-bash scripts/smoke.sh                            → 56 项全过（三种格式/告警按机型/黑盒/OCP/风扇/daemon/dashboard/.deb 内容与权限）
+bash scripts/smoke.sh                            → 58 项全过（三种格式/告警按机型/黑盒/OCP/风扇/Zero Fan/蜂鸣器/daemon/dashboard/.deb 内容与权限）
 ```
 
 护栏（机器强制，不靠人记）：
@@ -289,10 +289,10 @@ bash scripts/smoke.sh                            → 56 项全过（三种格式
 - `ast.parse(feature_version=(3, 10))`：全部 `.py` 通过 3.10 语法校验（静态兜底）。
 - **3.12 与 3.10 矩阵真跑过**（turn8 重跑）：`uv venv --python /usr/bin/python3.12` 与
   `uv venv --python 3.10` 各建裸环境（只装 dev 组 pytest，不装本包），把工作树复制一份、
-  不带 `.venv`，直接跑 `python3 -m pytest`：**3.12.3 → 487 通过**、**3.10.21 → 487 通过**。
+  不带 `.venv`，直接跑 `python3 -m pytest`：**3.12.3 → 513 通过**、**3.10.21 → 513 通过**。
   3.10 这条以前根本跑不起来：两个测试模块 `import tomllib`（3.11+），CI 的 3.10 矩阵会在
   收集阶段就红；本轮加 `tomli>=2; python_version < '3.11'`（dev 组）并 try/except 回退。
-  `bash scripts/smoke.sh`（**56 项全过**）是 turn7 在同一裸 3.12 环境跑的，本轮未重跑。
+  `bash scripts/smoke.sh`（**58 项全过**）在 3.12 裸环境重跑过（turn10）。
 - CI 含 3.10 / 3.12 / 3.13 三矩阵 + `ruff check` + `ruff format --check` + `mypy` + `pytest`
   + **构建 `.deb`**。
 
@@ -341,7 +341,7 @@ turn7 留下的 11 条已逐条修完；每条都补了「改回旧行为就会�
    测试文件都有行。顺带修正文件名正则不收数字的问题：`test_protocol_lin11.py` 之前根本不在
    两条文档校验的覆盖范围内。测试：`test_the_coverage_table_names_real_test_functions`。
 8. **[P2] turn7 留下的裸计数不在护栏里**：`TEST_COUNT_RE` 补 `通过|通過`。那个未受护栏保护的旧通过数已按裸环境实跑对齐：
-   3.12.3 与 3.10.21 各 **487 通过**（细节见上节「质量门禁」）。
+   3.12.3 与 3.10.21 各 **513 通过**（细节见上节「质量门禁」）。
 9. **[P2] 零依赖探针漏了 `__main__.py`**：`SHIPPED_MODULES` 元组补 `__main__`，并新增
    `test_the_probe_covers_every_shipped_module`，把元组与 `msi_psu_monitor/*.py` 精确对齐。
 10. **[P2] `test_pid_consistency.py` 比的是 `bulk_size` 而不是真正的门限 `payload_size`**：README
@@ -388,6 +388,23 @@ turn7 留下的 11 条已逐条修完；每条都补了「改回旧行为就会�
   Restrict*/LockPersonality；仍不碰 `/dev/hidraw*`，明确不加 `UMask=0077`
   （会让 state.json 对 uaccess 用户不可读，打破非 root dashboard）。测试：
   `test_the_unit_keeps_the_hardening_baseline_without_breaking_hidraw`。
+### REV6 功能补齐（turn10）：Zero Fan / 蜂鸣器 / 黑盒顺序
+
+对照 REV6 与 MSI Center 源码补了三个缺口；每条都有不依赖硬件的 mock 回归：
+
+- **Zero Fan 开关（43h + F1h）**：`--zero-fan on|off`，写后读回 42h byte 4，3 次重试；
+  `[fan] zero_fan = on|off` 让 daemon 在重连时随风扇 Profile 一起恢复；MEG 机型明确拒绝
+  （`set_zero_fan` 返回 False，CLI exit 1），不会向语义未验证的寄存器写入。
+- **蜂鸣器静音（C2h）**：`--buzzer-off`，TS 专属、写后无回读（ACK 即成功）；用于 12+4 OCP
+  蜂鸣已触发时静音。
+- **黑盒顺序按 REV6 p.13**：InfoID 1 是最新记录。`read_blackbox` 返回的槽序即新→旧，
+  `format_blackbox` 改为按 InfoID 升序展示，不再用累计计数器重排（计数器可能回绕/清零）；
+  docs/protocol.md 与两份 AGENTS 同步纠正。
+- **写操作收口**：`run_write_controls` 只 emit 一次（`-O` 不会被第二行覆盖）；Zero Fan 先写、
+  风扇后写，与 Cooling Wizard 顺序一致；CLI 冲突校验覆盖 `--watch/--export/--show-log/--ocp/--dashboard`。
+- **测试**：513（新增 26 条：协议帧、CLI 读回/组合/冲突、demo、config、daemon 恢复）。
+- **真机验收**：verify.md §8 增加第 12 项（Zero Fan 读回 + 断电保持、buzzer 实际静音），
+  两份清单同步为 12 项。
 ### 外部阻塞
 
 - **Q6 EPS 数量**：等 MSI 回函；未回前按 2×EPS 处理。
@@ -571,7 +588,7 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
   先删掉 override 证明默认目录确实不同，再桩住 `MonitorState.save` 记录本次运行写过的
   每个路径，要求全部落在 tmp 里。
 
-### 真机验收（`docs/verify.md` §8，共 11 项，均待样机）
+### 真机验收（`docs/verify.md` §8，共 12 项，均待样机）
 
 诊断命令与判定标准在 `docs/verify.md` §8；这里只列清单，项数与它逐条对齐（文档测试强制）。
 
@@ -587,6 +604,8 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
 8. `--ocp` 阈值与 MSI Center/出厂规格一致，且连接器状态与 `12V-2x6 Status` 行不矛盾。
 9. `--ocp` 在 MEG P 系上输出单多轨标志，与 MSI Center 开关一致（不发 NAK、不超时）。
 10. `--ocp` 在 MEG Ai1600T 上打印「not available」并 exit 0（不发 NAK、不超时）。
+11. `--zero-fan on/off` 读回一致（42h byte 4）+ `F1h` 断电重启后仍生效；
+    `--buzzer-off` 能让 12+4 OCP 蜂鸣停止（无回读，听感确认）。
 
 ## 决策记录（本轮新增）
 
@@ -595,8 +614,8 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
   `--ocp` 一并做出：MPG TS 出 12V-2x6 阈值，MEG P 系出单多轨模式，Ai1600T 打印原因。
 - **demo 覆盖全机型**：`MSI_PSU_DEMO_MODEL` 让多轨/单轨两条路径在无硬件时可端到端跑
   （CLI/daemon/prometheus/history/export），此前它们只有单测覆盖。
-- **风扇 Profile 恢复放在 daemon**：`[fan] mode` 是 opt-in，daemon 每次打开/重连 PSU
-  重发 41h + F1h；不配置则永不写电源。
+- **风扇 Profile 恢复放在 daemon**：`[fan] mode/duty/zero_fan` 是 opt-in，daemon 每次
+  打开/重连 PSU 重发 41h + F1h（及 43h + F1h）；不配置则永不写电源。
 - **打包根目录权限**：`mktemp -d` 的 0700 会被 `dpkg-deb` 收进 `./`，已在
   `build_deb.sh` 里 `chmod 755`。
 

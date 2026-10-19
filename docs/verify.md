@@ -3,7 +3,7 @@
 > 没有真机也能验证 CLI、告警、daemon、历史落盘、prometheus 与 dashboard 全链路。
 > 下面每条命令都已在 `.venv`（Python 3.13.15）实跑通过；测试套件另在**裸环境**复核过
 > 3.12.3 与 3.10.21 两遍（把工作树复制一份、不带 `.venv`、不装本包，直接
-> `python3 -m pytest`，各 **487 通过**；`smoke.sh` 的 **56 项**在 3.12 裸环境跑过）。
+> `python3 -m pytest`，各 **513 通过**；`smoke.sh` 的 **58 项**在 3.12 裸环境跑过）。
 > 3.10 另有静态兜底——ruff `target-version = "py310"`、mypy
 > `python_version = "3.10"`（按 3.10 typeshed 分析）、smoke 里对每个 `.py` 的
 > `ast.parse(feature_version=(3, 10))`。
@@ -78,7 +78,7 @@ uv run --group dev ruff format --check .
    ——该常量同时会被脚本自己核对，检查项被误删时脚本也会失败。
 
 一条命令跑完整条无硬件链路（三种格式 / 告警 exit 2 及按机型鉴名 / 黑盒 / OCP /
-风扇写 / daemon→prometheus+历史 / dashboard HTTP / 3.10 语法），共 56 项，失败即非零退出：
+风扇/Zero Fan/蜂鸣器写 / daemon→prometheus+历史 / dashboard HTTP / 3.10 语法），共 58 项，失败即非零退出：
 
 ```bash
 bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
@@ -87,7 +87,7 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。当前基线：**487 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
+三条全绿即通过。当前基线：**513 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
 
 > `ruff format --check .` **可以全仓跑**（CI 也跑）：`protocol.py`/`__init__.py`/`__main__.py`/
 > `tests/test_monitor.py` 这四个历史文件混用引号风格，已由 `[tool.ruff.format] exclude` +
@@ -156,9 +156,9 @@ grep -E 'msi_psu_ocp_available|msi_psu_ocp_pin_point_a' /var/lib/node_exporter/t
 
 ### 2.0.1 风扇配置按 Profile 恢复（daemon）
 
-`[fan] mode` 一旦配置，daemon 每次**打开/重连** PSU 都会重发 41h + F1h 并读回校验
-（MSI Center 接管设备时同样会重新下发 Profile；PSU 的 41h 能熬过休眠但熬不过断电）。
-不配置 `mode` 则永不写电源。
+`[fan] mode` 或 `zero_fan` 一旦配置，daemon 每次**打开/重连** PSU 都会重发 41h + F1h
+（Zero Fan 则 43h + F1h）并读回校验（MSI Center 接管设备时同样会重新下发 Profile；
+PSU 的 41h/43h 能熬过休眠但熬不过断电）。两者都不配置则永不写电源。
 
 ```bash
 cat > /tmp/fan.conf <<'EOF'
@@ -168,11 +168,12 @@ state_dir = /tmp/psu-fan
 [fan]
 mode = customized
 duty = 55
+zero_fan = on
 EOF
 MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor-daemon --config /tmp/fan.conf --iterations 2 2>&1 | grep -i fan
 ```
 
-预期：`Restored the configured fan profile: customized duty 55%`
+预期：`Restored the configured fan profile: Zero Fan on, customized duty 55%`
 （该行只在读回值与写入值一致时才出现；电源拒写则打 warning 而不中断监控）。
 
 > demo 的风扇状态是**进程内**的，所以不要用另起一个 CLI 进程去读回；
@@ -407,4 +408,6 @@ journalctl -u msi-psu-monitor -f
 9. `--ocp` 在 MEG P 系（`0x56D4`/`0xE749`）上输出 1 字节单多轨标志（`per-rail protection`
    或 `single combined-rail`），与 MSI Center 的对应开关一致，不产生 NAK 重试或超时；
 10. `--ocp` 在 MEG Ai1600T（`0xC9EB`）上打印「not available」并 exit 0（两个 `0xC0` 视图
-   都不支持），不产生 NAK 重试或超时。
+   都不支持），不产生 NAK 重试或超时；
+11. `--zero-fan on/off` 写后读回一致（42h byte 4），`F1h` 保存后断电重启仍生效；
+    `--buzzer-off` 在 12+4 OCP 蜂鸣触发时能让蜂鸣停止（C2h 无回读，只看 ACK 与听感）。

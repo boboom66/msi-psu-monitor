@@ -116,24 +116,16 @@ def test_format_blackbox_empty():
     assert format_blackbox([]) == 'No black-box alert records stored.'
 
 
-def test_format_blackbox_orders_newest_first_from_the_records_own_counters():
-    """The header says "newest first"; the slot number cannot be trusted for it.
+def test_format_blackbox_follows_the_rev6_infoid_order():
+    """REV6 p.13: InfoID 1 is the latest record, so slot order is display order.
 
-    Nothing documents which InfoID holds the newest trip, so the order comes from
-    the cumulative uptime/trip count each record carries: the numbers printed on
-    the lines are the order they appear in, which makes it checkable by eye.
+    The old reader sorted on the records' cumulative counters because it believed
+    the slot direction was undocumented. It is documented, and the counters are a
+    weaker signal (they can wrap or reset), so a caller's input order and a
+    contradictory counter must both leave #1 first.
     """
-    older = {
-        'info_id': 1,
-        'pin_set': 2,
-        'status': 1,
-        'run_time': 120,
-        'total_time': 442800,
-        'pins_1_6': [1.0] * 6,
-        'total_count': 1,
-    }
     newer = {
-        'info_id': 2,
+        'info_id': 1,
         'pin_set': 1,
         'status': 2,
         'run_time': 3600,
@@ -141,13 +133,22 @@ def test_format_blackbox_orders_newest_first_from_the_records_own_counters():
         'pins_1_6': [1.0] * 6,
         'total_count': 3,
     }
-    out = format_blackbox([older, newer])
-    assert out.index('#2') < out.index('#1')
+    older = {
+        'info_id': 2,
+        'pin_set': 2,
+        'status': 1,
+        'run_time': 120,
+        'total_time': 442800,
+        'pins_1_6': [1.0] * 6,
+        'total_count': 1,
+    }
+    out = format_blackbox([older, newer])  # deliberately not in slot order
+    assert out.index('#1') < out.index('#2')
     assert out.index('total 5d 04:00') < out.index('total 5d 03:00')
-    # Same counters -> the device's slot order wins (sorted() is stable).
-    tie_a = dict(older, info_id=1)
-    tie_b = dict(older, info_id=2)
-    assert format_blackbox([tie_a, tie_b]).index('#1') < format_blackbox([tie_a, tie_b]).index('#2')
+    # The counters disagree with the slots: the spec's InfoID order must win.
+    contradictory = dict(older, total_time=999999, total_count=99)
+    out2 = format_blackbox([contradictory, newer])
+    assert out2.index('#1') < out2.index('#2')
 
 
 def test_prometheus_carries_alert_metric():

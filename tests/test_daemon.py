@@ -503,6 +503,9 @@ class FanPSU(StubPSU):
         self.saved = 0
         self.mode = 1
         self.duty = 0
+        self.zero_fan = True
+        self.zero_writes = []
+        self.buzzer_requests = 0
 
     def set_fan_mode(self, mode, duty=0):
         self.writes.append((mode, duty))
@@ -514,6 +517,21 @@ class FanPSU(StubPSU):
 
     def read_fan_setting(self):
         return (self.mode, self.duty)
+
+    def set_zero_fan(self, enabled):
+        self.zero_writes.append(enabled)
+        if not self.accept:
+            return False
+        self.zero_fan = enabled
+        self.saved += 1
+        return True
+
+    def read_zero_fan(self):
+        return self.zero_fan
+
+    def silence_buzzer(self):
+        self.buzzer_requests += 1
+        return self.accept
 
 
 def test_no_fan_section_means_the_daemon_never_writes(tmp_path):
@@ -734,3 +752,20 @@ def test_alerts_are_still_polled_when_the_config_does_not_disable_them(tmp_path)
     daemon = make_daemon(tmp_path, stub, no_alerts=False)
     assert daemon.sample()['status'] == 'fan'
     assert stub.alert_reads == 1
+
+
+def test_zero_fan_only_profile_is_restored(tmp_path):
+    psu = FanPSU(sensors=clean_sensors())
+    daemon = make_daemon(tmp_path, psu, fan_zero_fan=True)
+    daemon.sample()
+    assert psu.zero_writes == [True]
+    assert psu.writes == []
+
+
+def test_zero_fan_is_restored_with_the_fan_profile(tmp_path):
+    psu = FanPSU(sensors=clean_sensors())
+    daemon = make_daemon(tmp_path, psu, fan_zero_fan=False, fan_mode='customized', fan_duty=60)
+    daemon.sample()
+    assert psu.zero_writes == [False]
+    assert psu.writes == [(3, 60)]
+    assert psu.saved == 2  # one F1h for Zero Fan, one for the fan setting

@@ -56,3 +56,5 @@ retention_days = 30
 #
 #mode = customized
 #duty = 60
+# Zero Fan switch to re-assert with the profile (43h + F1h). TS models only.
+#zero_fan = on

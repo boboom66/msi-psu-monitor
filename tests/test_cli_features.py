@@ -25,9 +25,19 @@ class StubHID:
 
 
 class StubPSU:
-    """Minimal PSU surface: sensors, alerts, fan read-back."""
+    """Minimal PSU surface: sensors, alerts, fan/Zero Fan/buzzer read-back."""
 
-    def __init__(self, sensors=None, alerts=None, fan_mode=1, fan_duty=30, accept_write=True):
+    def __init__(
+        self,
+        sensors=None,
+        alerts=None,
+        fan_mode=1,
+        fan_duty=30,
+        accept_write=True,
+        zero_fan=True,
+        accept_zero_fan=True,
+        accept_buzzer=True,
+    ):
         self._sensors = sensors if sensors is not None else {}
         self._alerts = alerts
         self.serial = self._sensors.get('serial', 'SN1')
@@ -35,7 +45,12 @@ class StubPSU:
         self.fan_mode = fan_mode
         self.fan_duty = fan_duty
         self.accept_write = accept_write
+        self.zero_fan = zero_fan
+        self.accept_zero_fan = accept_zero_fan
+        self.accept_buzzer = accept_buzzer
         self.writes = []
+        self.zero_fan_writes = []
+        self.buzzer_requests = 0
         self.closed = False
 
     def open(self):
@@ -54,7 +69,22 @@ class StubPSU:
         return self._alerts
 
     def read_fan_state(self):
-        return {'mode': self.fan_mode, 'duty': self.fan_duty, 'zero_fan': True}
+        return {'mode': self.fan_mode, 'duty': self.fan_duty, 'zero_fan': self.zero_fan}
+
+    def read_zero_fan(self):
+        return self.zero_fan
+
+    def set_zero_fan(self, enabled):
+        self.zero_fan_writes.append(enabled)
+        if not self.accept_write:
+            return False
+        if self.accept_zero_fan:
+            self.zero_fan = enabled
+        return True
+
+    def silence_buzzer(self):
+        self.buzzer_requests += 1
+        return self.accept_write and self.accept_buzzer
 
     def read_fan_setting(self):
         return (self.fan_mode, self.fan_duty)
@@ -136,6 +166,11 @@ def run_main(monkeypatch, capsys, stub, argv):
         ['--export', '--from', '2h', '-O', ''],
         ['--config', ''],  # an unset $CONF is not "no --config"
         ['--config', '', '--once'],
+        ['--zero-fan', 'on', '--watch', '1'],
+        ['--zero-fan', 'on', '--ocp'],
+        ['--zero-fan', 'on', '--show-log'],
+        ['--buzzer-off', '--export', '--from', '2h'],
+        ['--buzzer-off', '--dashboard'],
     ],
 )
 def test_conflicting_flags_are_rejected(argv):
@@ -669,3 +704,46 @@ def test_a_closed_stdout_pipe_is_not_a_traceback(tmp_path, argv):
     assert proc.returncode == 0, proc.stderr.decode()
     assert b'BrokenPipeError' not in proc.stderr
     assert b'Traceback' not in proc.stderr
+
+
+def test_zero_fan_write_sets_and_verifies(monkeypatch, capsys):
+    stub = StubPSU(sensors(), zero_fan=True)
+    code, out = run_main(monkeypatch, capsys, stub, ['--zero-fan', 'off'])
+    assert code == EXIT_OK
+    assert stub.zero_fan_writes == [False]
+    assert out.out.strip() == 'Zero Fan: off'
+
+
+def test_zero_fan_readback_mismatch_exits_one(monkeypatch, capsys):
+    stub = StubPSU(sensors(), zero_fan=True, accept_zero_fan=False)
+    code, out = run_main(monkeypatch, capsys, stub, ['--zero-fan', 'off'])
+    assert code == EXIT_ERROR
+    assert len(stub.zero_fan_writes) == 3  # three attempts, like the fan write
+    assert 'Zero Fan' in out.err
+
+
+def test_zero_fan_and_fan_mode_write_together(monkeypatch, capsys):
+    stub = StubPSU(sensors())
+    code, out = run_main(monkeypatch, capsys, stub, ['--zero-fan', 'on', '--fan-duty', '70'])
+    assert code == EXIT_OK
+    assert stub.zero_fan_writes == [True]
+    assert stub.writes == [(3, 70)]
+    assert out.out.strip().splitlines() == [
+        'Zero Fan: on',
+        'Fan mode: customized   Duty: 70%',
+    ]
+
+
+def test_buzzer_off_writes_and_reports(monkeypatch, capsys):
+    stub = StubPSU(sensors())
+    code, out = run_main(monkeypatch, capsys, stub, ['--buzzer-off'])
+    assert code == EXIT_OK
+    assert stub.buzzer_requests == 1
+    assert out.out.strip() == 'Buzzer: silenced'
+
+
+def test_buzzer_off_refused_exits_one(monkeypatch, capsys):
+    stub = StubPSU(sensors(), accept_buzzer=False)
+    code, out = run_main(monkeypatch, capsys, stub, ['--buzzer-off'])
+    assert code == EXIT_ERROR
+    assert 'buzzer-off' in out.err

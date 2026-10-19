@@ -226,3 +226,23 @@ def test_a_utf8_bom_is_tolerated(tmp_path):
     body = '[monitor]' + chr(10) + 'interval = 4' + chr(10)
     conf.write_bytes(bytes([0xEF, 0xBB, 0xBF]) + body.encode('utf-8'))
     assert load_config(str(conf))['interval'] == 4.0
+
+
+@pytest.mark.parametrize(
+    ('raw', 'expected'),
+    [('on', True), ('off', False), ('yes', True), ('0', False), ('true', True)],
+)
+def test_fan_zero_fan_is_parsed(tmp_path, raw, expected):
+    conf = tmp_path / 'psu.conf'
+    body = '[fan]' + chr(10) + 'zero_fan = ' + raw + chr(10)
+    conf.write_text(body, encoding='utf-8')
+    assert load_config(str(conf))['fan_zero_fan'] is expected
+
+
+def test_an_unknown_fan_zero_fan_value_is_reported_and_ignored(tmp_path, caplog):
+    conf = tmp_path / 'psu.conf'
+    conf.write_text('[fan]' + chr(10) + 'zero_fan = maybe' + chr(10), encoding='utf-8')
+    with caplog.at_level(logging.WARNING):
+        cfg = load_config(str(conf))
+    assert cfg['fan_zero_fan'] is None
+    assert 'zero_fan' in caplog.text

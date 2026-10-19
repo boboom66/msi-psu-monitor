@@ -330,21 +330,15 @@ _BLACKBOX_STATUS = {
 def format_blackbox(records):
     """Format C1h black-box records as human-readable text (newest first).
 
-    "Newest" is taken from the record's own cumulative counters, not from the
-    slot number: the firmware's slot order is not documented anywhere we can
-    verify, and the demo used the opposite convention from the reader (the review
-    that found this had three artifacts disagreeing). Every record carries the
-    lifetime uptime and the trip count at the moment it was written, so sorting
-    on them is self-describing -- the numbers printed next to each line are the
-    order they appear in. Ties keep the device's slot order (sorted() is stable).
+    REV6 p.13 defines InfoID 1 as the latest record. Sorting by InfoID keeps the
+    display correct even when a caller hands the records over in another order,
+    and unlike the cumulative counters it cannot be reordered by a wrap, a reset
+    or a device that counts differently -- it is the field the firmware itself
+    uses to define recency.
     """
     if not records:
         return 'No black-box alert records stored.'
-    ordered = sorted(
-        records,
-        key=lambda rec: (rec.get('total_time') or 0, rec.get('total_count') or 0),
-        reverse=True,
-    )
+    ordered = sorted(records, key=lambda rec: rec.get('info_id') or 0)
     lines = ['GPU Safeguard+ alert log (black box, last 10, newest first)', '']
     for record in ordered:
         status = _BLACKBOX_STATUS.get(record.get('status'), f'status {record.get("status")}')
@@ -918,15 +912,66 @@ def apply_fan_setting(psu, mode, duty=None):
     return None
 
 
-def run_fan_write(psu, mode, duty, output=None):
-    """Apply the fan setting and describe the result (stdout or ``-O`` file)."""
-    applied = apply_fan_setting(psu, mode, duty)
-    if applied is None:
-        logger.error('Error: the PSU did not accept the fan setting (read-back mismatch).')
-        return EXIT_ERROR
-    mode, duty = applied
-    duty_text = '' if mode == FAN_MODE_AUTO else f'   Duty: {duty}%'
-    emit(f'Fan mode: {mode}{duty_text}', output)
+def apply_zero_fan_setting(psu, enabled):
+    """Write Zero Fan (43h) + save (F1h) and verify it by read-back (42h byte 4).
+
+    Three attempts, matching the patience apply_fan_setting shows. Returns the
+    applied state, or None when the PSU refused the write or the read-back
+    disagrees (including a model that does not report the field at all).
+    """
+    for _ in range(3):
+        if not psu.set_zero_fan(enabled):
+            continue
+        current = psu.read_zero_fan()
+        if current is not None and bool(current) == enabled:
+            return enabled
+    return None
+
+
+def _write_requested(args):
+    """True when any flag asks for a device write (not a read/export/dashboard)."""
+    return bool(
+        args.fan_mode or args.fan_duty is not None or args.zero_fan is not None or args.buzzer_off
+    )
+
+
+def run_write_controls(psu, args):
+    """Apply every requested control write, then describe the result once.
+
+    Zero Fan goes first: that is the order MSI Center's Cooling Wizard uses
+    (zero fan, then fan mode) and both are persisted by the F1h the protocol
+    methods send. Buzzer silence is a one-shot C2h with no read-back, so success
+    only means the PSU acknowledged it. One emit() at the end keeps ``-O`` from
+    being overwritten by each line.
+    """
+    lines = []
+    if args.zero_fan is not None:
+        enabled = args.zero_fan == 'on'
+        applied = apply_zero_fan_setting(psu, enabled)
+        if applied is None:
+            logger.error(
+                'Error: the PSU did not accept the Zero Fan setting '
+                '(read-back mismatch, or the model does not support it).'
+            )
+            return EXIT_ERROR
+        lines.append(f'Zero Fan: {"on" if applied else "off"}')
+    if args.fan_mode or args.fan_duty is not None:
+        applied = apply_fan_setting(psu, args.fan_mode, args.fan_duty)
+        if applied is None:
+            logger.error('Error: the PSU did not accept the fan setting (read-back mismatch).')
+            return EXIT_ERROR
+        mode, duty = applied
+        duty_text = '' if mode == FAN_MODE_AUTO else f'   Duty: {duty}%'
+        lines.append(f'Fan mode: {mode}{duty_text}')
+    if args.buzzer_off:
+        if not psu.silence_buzzer():
+            logger.error(
+                'Error: the PSU did not accept the buzzer-off command '
+                '(or the model does not support it).'
+            )
+            return EXIT_ERROR
+        lines.append('Buzzer: silenced')
+    emit('\n'.join(lines), args.output)
     return EXIT_OK
 
 
@@ -1140,6 +1185,17 @@ def build_parser():
         help='Custom fan duty in percent (implies --fan-mode customized)',
     )
     parser.add_argument(
+        '--zero-fan',
+        choices=['on', 'off'],
+        default=None,
+        help='Enable or disable Zero Fan (43h + F1h; 12+4 models only)',
+    )
+    parser.add_argument(
+        '--buzzer-off',
+        action='store_true',
+        help='Silence the 12+4 OCP buzzer (C2h; 12+4 models only)',
+    )
+    parser.add_argument(
         '--export',
         action='store_true',
         help='Export the daemon history as CSV',
@@ -1209,12 +1265,11 @@ def _validate_args(parser, args):
         or args.export
         or args.show_log
         or args.dashboard
-        or args.fan_mode
-        or args.fan_duty is not None
+        or _write_requested(args)
     ):
         parser.error(
             '--ocp cannot be combined with --watch, --export, --show-log, '
-            '--dashboard or a fan write'
+            '--dashboard or a control write'
         )
     if args.export and args.watch is not None:
         parser.error('--export cannot be combined with --watch')
@@ -1246,8 +1301,7 @@ def _validate_args(parser, args):
         args.export
         or args.show_log
         or args.watch is not None
-        or args.fan_mode
-        or args.fan_duty is not None
+        or _write_requested(args)
         or args.once
         or args.serial is not None
     ):
@@ -1256,7 +1310,7 @@ def _validate_args(parser, args):
         # labels whichever serial the daemon last sampled).
         parser.error(
             '--dashboard serves the local page only: it cannot be combined with '
-            '--export, --show-log, --watch, --once, --serial or a fan write'
+            '--export, --show-log, --watch, --once, --serial or a control write'
         )
     if args.dashboard and args.format not in (None, 'text'):
         parser.error('--dashboard serves the HTML page; --format does not apply')
@@ -1266,11 +1320,10 @@ def _validate_args(parser, args):
         parser.error('--watch and --once are mutually exclusive')
     if args.watch is not None and args.format not in (None, 'text'):
         parser.error('--watch only supports the text format')
-    if (args.fan_mode or args.fan_duty is not None) and (
-        args.show_log or args.export or args.watch is not None
-    ):
+    if _write_requested(args) and (args.show_log or args.export or args.watch is not None):
         parser.error(
-            '--fan-mode/--fan-duty cannot be combined with --watch, --export or --show-log'
+            'control writes (--fan-mode/--fan-duty/--zero-fan/--buzzer-off) cannot '
+            'be combined with --watch, --export or --show-log'
         )
     if args.fan_mode == FAN_MODE_AUTO and args.fan_duty is not None:
         parser.error('--fan-duty does not apply to --fan-mode auto (the PSU uses its own curve)')
@@ -1399,8 +1452,8 @@ def _main():
         psu.open()
         psu.init()
 
-        if args.fan_mode or args.fan_duty is not None:
-            sys.exit(run_fan_write(psu, args.fan_mode, args.fan_duty, args.output))
+        if _write_requested(args):
+            sys.exit(run_write_controls(psu, args))
         if args.show_log:
             emit(format_blackbox(psu.read_blackbox()), args.output)
             sys.exit(EXIT_OK)

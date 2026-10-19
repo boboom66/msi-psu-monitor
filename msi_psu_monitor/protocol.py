@@ -798,11 +798,10 @@ class MSIPSU:
         """Read C1h black-box logs (InfoID 1..max_records, 26 bytes each).
 
         Returns:
-            List of record dicts in device slot order (InfoID ascending), which
-            is what the register returns; ``format_blackbox`` sorts them newest
-            first using each record's own cumulative counters, because the
-            firmware's slot direction is not documented. Stops at the first
-            missing/short record.
+            List of record dicts in device order (InfoID ascending). REV6 p.13
+            defines InfoID 1 as the latest record, so this is already
+            newest-first and ``format_blackbox`` keeps that order. Stops at the
+            first missing/short record.
         """
         records = []
         for info_id in range(1, max_records + 1):
@@ -898,7 +897,45 @@ class MSIPSU:
         """
         if not self.hid.write_command([REG_FAN_MODE, mode & 0xFF, 0x00, duty & 0xFF]):
             return False
-        return self.hid.write_command([REG_SAVE_SETTING, 0x00])
+        return self.hid.write_command([REG_SAVE_SETTING])
+
+    def set_zero_fan(self, enabled):
+        """Enable/disable Zero Fan (43h) and persist it (F1h).
+
+        REV6 ZERO_FAN_ENABLE is a write-only byte (0 = off, 1 = on); SAVE_SETTING
+        persists it, exactly as MSI Center's SET_ZERO_FAN + SAVE_SETTING sequence
+        (C_PSU.cs:1409-1410). Only the 12+4 models expose the state back on 42h
+        byte 4, so the other variants are refused instead of writing a register
+        whose meaning there is unverified.
+
+        Returns:
+            True when both the write and the save were acknowledged.
+        """
+        if self.variant not in MSIPSU.SEVEN_ZPU_VARIANTS:
+            return False
+        if not self.hid.write_command([REG_ZERO_FAN, 1 if enabled else 0]):
+            return False
+        return self.hid.write_command([REG_SAVE_SETTING])
+
+    def read_zero_fan(self):
+        """Return the Zero Fan state from READ_FANDUTY (42h) byte 4.
+
+        Returns:
+            True/False, or None when the model does not report the field.
+        """
+        duty = self.read_fan_duty()
+        return None if duty is None else duty[3]
+
+    def silence_buzzer(self):
+        """Silence the 12+4 OCP buzzer (C2h, write-only, no payload).
+
+        REV6 gates BUZZER_OFF to the 12+4 models; ``CPSU.cs:1152`` returns false
+        for every MEG PID. There is no read-back, so True only means the device
+        acknowledged the write.
+        """
+        if self.variant not in MSIPSU.SEVEN_ZPU_VARIANTS:
+            return False
+        return self.hid.write_command([REG_BUZZER_OFF])
 
     @property
     def supports_ocp_config(self):

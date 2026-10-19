@@ -108,6 +108,9 @@ class DemoPSU:
         self.fan_mode = 1
         self.fan_duty = 30
         self._alert_warned = False
+        #: Set by --zero-fan; None keeps the load-dependent demo behaviour.
+        self.zero_fan_override = None
+        self.buzzer_silenced = False
 
     # ---- lifecycle -------------------------------------------------------
 
@@ -154,7 +157,7 @@ class DemoPSU:
         total_a = (watts * 0.92) / volts_12v
         pins = self._pin_currents(total_a)
 
-        zero_fan = load < 0.25
+        zero_fan = self._zero_fan_state(load)
         fan_rpm = 0.0 if zero_fan else 700.0 + 1150.0 * load
         uptime = int(self.clock() - self.started)
 
@@ -268,8 +271,14 @@ class DemoPSU:
             'pins_7_12': pins[6:],
         }
 
+    def _zero_fan_state(self, load=None):
+        """Zero Fan state: the explicit override, else the load-dependent default."""
+        if self.zero_fan_override is not None:
+            return self.zero_fan_override
+        return (self._load()[0] if load is None else load) < 0.25
+
     def read_fan_state(self):
-        return {'mode': self.fan_mode, 'duty': self.fan_duty, 'zero_fan': self._load()[0] < 0.25}
+        return {'mode': self.fan_mode, 'duty': self.fan_duty, 'zero_fan': self._zero_fan_state()}
 
     def read_fan_setting(self):
         return (self.fan_mode, self.fan_duty)
@@ -278,11 +287,26 @@ class DemoPSU:
         self.fan_mode, self.fan_duty = mode, duty
         return True
 
+    def set_zero_fan(self, enabled):
+        if self.variant not in MSIPSU.SEVEN_ZPU_VARIANTS:
+            return False
+        self.zero_fan_override = bool(enabled)
+        return True
+
+    def read_zero_fan(self):
+        return self._zero_fan_state()
+
+    def silence_buzzer(self):
+        if self.variant not in MSIPSU.SEVEN_ZPU_VARIANTS:
+            return False
+        self.buzzer_silenced = True
+        return True
+
     def read_blackbox(self, max_records=10):
-        # Slot order, newest first: slot 1 carries the larger lifetime counters,
-        # which is also what `format_blackbox` sorts on. The two used to disagree
-        # (slot 2 held the bigger counters here), so an acceptance run against the
-        # demo trained on an order the real path would never print.
+        # Slot order, newest first: REV6 p.13 defines InfoID 1 as the latest, and
+        # slot 1 also carries the larger lifetime counters. The two used to
+        # disagree (slot 2 held the bigger counters here), so an acceptance run
+        # against the demo trained on an order the real path would never print.
         records = [
             {
                 'info_id': 1,

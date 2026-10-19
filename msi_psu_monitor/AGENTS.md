@@ -8,8 +8,8 @@ runtime imports.
 
 | Module | Role |
 |--------|------|
-| `protocol.py` | HID framing, register map, variant dispatch, `MSIPSU.get_sensors()`, fan/alert/black-box/OCP reads, `HIDDevice` + `flock` |
-| `monitor.py` | CLI: argument validation, three sensor formatters + three `--ocp` formatters, exit codes, fan write, `--export`, `--show-log`, `--ocp`, device selection, `open_psu()` |
+| `protocol.py` | HID framing, register map, variant dispatch, `MSIPSU.get_sensors()`, fan/Zero Fan/buzzer writes, alert/black-box/OCP reads, `HIDDevice` + `flock` |
+| `monitor.py` | CLI: argument validation, three sensor formatters + three `--ocp` formatters, exit codes, fan/Zero Fan/buzzer writes, `--export`, `--show-log`, `--ocp`, device selection, `open_psu()` |
 | `state.py` | `MonitorState` (avg + energy integral), `state.json` atomic persistence, `daily-*.log` history, `--from`/`--columns`/`build_export` |
 | `daemon.py` | Resident sample loop: 1 s alerts, 30 s atomic prometheus incl. the OCP block (`msi_psu_ocp_*` on TS / `msi_psu_multirail_ocp` on MEG P; variant-gated, refreshed every write because C1h is a 5 s rolling average), the same file rewritten with `msi_psu_up 0` + reason on a failed read, 60 s history, rescan after 5 failures |
 | `dashboard.py` | Loopback-only `http.server` reading the history files; charts are hand-drawn `<canvas>` JS |
@@ -24,7 +24,8 @@ runtime imports.
   `0xC0` and `0xC1` are **overloaded addresses** (see Invariants) — the model gate, not the
   payload length, decides which command you are talking to.
 - Registers: `0x10-0x13` ident, `0x20-0x42` sensors, `0x41` fan setting,
-  `0x42` fan duty, `0xC0` multirail **or** 12V-2x6 OCP config (TS only),
+  `0x42` fan duty, `0x43` Zero Fan enable (write-only), `0xC2` buzzer silence,
+  `0xC0` multirail **or** 12V-2x6 OCP config (TS only),
   `0xC1` OCP state (InfoID 0) / alert log (InfoID 1-10), `0xD0/0xD1` control,
   `0xE0` bulk read, `0xE1` alert status, `0xF1` save settings.
 - LINEAR11 call pattern (keep exactly):
@@ -78,10 +79,10 @@ runtime imports.
   flat table, and never name a bit for an unknown model — return `None` and let the
   status read `Unknown`.
 - **The demo must stay opt-in**: `demo.enabled()` reads `MSI_PSU_DEMO`; nothing may
-  import synthetic data on the production path. The black box is part of that: the demo's
-  records must keep slot 1 as the newest trip (larger `total_time`/`total_count`), the way
-  `format_blackbox` sorts them, or an acceptance run trains on an order the real path
-  never prints.
+  import synthetic data on the production path. The black box is part of that: REV6 p.13
+  defines InfoID 1 as the newest trip, so the demo's slot 1 must stay newest and its
+  counters must agree, or an acceptance run trains on an order the real path never
+  prints.
 - **`--watch` is text-only** and flushes each frame (pipes must see every sample).
 - **`[monitor] no_alerts` is honoured by the daemon too**, not only by the CLI: with it
   on, `sample()` sets neither `status` nor `alerts`, so no Status line, no alert metric and
@@ -108,7 +109,10 @@ runtime imports.
   `supports_multirail_ocp` (1 byte, MEG P) are complementary variant checks.
 - Fan writes go through `monitor.apply_fan_setting(psu, mode, duty)` — one place for the
   41h write + F1h save + read-back verify, shared by `--fan-mode` and the daemon's
-  `[fan]` restore. Never add a second write path.
+  `[fan]` restore. Zero Fan uses the matching `apply_zero_fan_setting(psu, enabled)`
+  (43h + F1h + 42h byte-4 read-back); the daemon restores `[fan] zero_fan` with the
+  same helper. Never add a second write path. `silence_buzzer()` is the one-shot C2h
+  with no read-back, gated to the TS models like `CPSU.cs:1152`.
 - `dashboard.py` resolves a request once in `_route()` and both `do_GET`/`do_HEAD`
   consume that tuple: never write a second response path, or HEAD starts lying about
   404s and Content-Length.
@@ -132,7 +136,7 @@ runtime imports.
 ## Verification (no hardware required)
 
 ```bash
-uv run --group dev pytest -q              # 487 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
+uv run --group dev pytest -q              # 513 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
 uv run --group dev ruff check .           # must be clean
 uv run --group dev mypy msi_psu_monitor/  # must be clean
 ```

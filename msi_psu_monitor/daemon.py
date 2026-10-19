@@ -64,6 +64,7 @@ class MonitorDaemon:
         self.retention_days = int(cfg.get('retention_days') or stats.RETENTION_DAYS)
         self.fan_mode = cfg.get('fan_mode') or None
         self.fan_duty = cfg.get('fan_duty')
+        self.fan_zero_fan = cfg.get('fan_zero_fan')
         self.psu_factory = psu_factory or self._open_default
         self.select_device = select_device or self._discover
         self.clock = clock
@@ -142,19 +143,33 @@ class MonitorDaemon:
         rejects the write (an older firmware, or a fan already at that setting).
         """
         psu = psu or self.psu
-        if psu is None or self.fan_mode is None:
+        if psu is None or (self.fan_mode is None and self.fan_zero_fan is None):
             return False
-        try:
-            applied = monitor.apply_fan_setting(psu, self.fan_mode, self.fan_duty)
-        except Exception as exc:  # pragma: no cover - defensive against odd devices
-            logger.warning(f'Fan profile restore failed: {exc}')
+        restored = []
+        if self.fan_zero_fan is not None:
+            try:
+                zero = monitor.apply_zero_fan_setting(psu, self.fan_zero_fan)
+            except Exception as exc:  # pragma: no cover - defensive against odd devices
+                logger.warning(f'Zero Fan profile restore failed: {exc}')
+                zero = None
+            if zero is None:
+                logger.warning('The PSU refused the configured Zero Fan setting; leaving it as is.')
+            else:
+                restored.append(f'Zero Fan {"on" if zero else "off"}')
+        if self.fan_mode is not None:
+            try:
+                applied = monitor.apply_fan_setting(psu, self.fan_mode, self.fan_duty)
+            except Exception as exc:  # pragma: no cover - defensive against odd devices
+                logger.warning(f'Fan profile restore failed: {exc}')
+                applied = None
+            if applied is None:
+                logger.warning('The PSU refused the configured fan profile; leaving it as is.')
+            else:
+                mode, duty = applied
+                restored.append(f'{mode}' + ('' if duty is None else f' duty {duty}%'))
+        if not restored:
             return False
-        if applied is None:
-            logger.warning('The PSU refused the configured fan profile; leaving it as is.')
-            return False
-        mode, duty = applied
-        detail = f'{mode}' + ('' if duty is None else f' duty {duty}%')
-        logger.info(f'Restored the configured fan profile: {detail}')
+        logger.info(f'Restored the configured fan profile: {", ".join(restored)}')
         return True
 
     def _drop_psu(self):

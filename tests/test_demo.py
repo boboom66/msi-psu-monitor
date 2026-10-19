@@ -343,3 +343,19 @@ def test_an_alert_the_model_does_report_is_still_forced(monkeypatch):
     status = demo.DemoPSU().read_alert_status()
     assert status['fan'] is True
     assert sum(status.values()) == 1
+
+
+def test_zero_fan_override_and_buzzer_round_trip():
+    psu = demo.DemoPSU(clock=Clock())
+    assert psu.set_zero_fan(False) is True
+    assert psu.read_zero_fan() is False
+    assert psu.read_fan_state()['zero_fan'] is False
+    assert psu.get_sensors()['zero_fan'] is False
+    assert psu.silence_buzzer() is True
+    assert psu.buzzer_silenced is True
+
+
+def test_zero_fan_and_buzzer_are_refused_on_a_meg_model():
+    psu = demo.DemoPSU(clock=Clock(), variant='ai1300p')
+    assert psu.set_zero_fan(True) is False
+    assert psu.silence_buzzer() is False

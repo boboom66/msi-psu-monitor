@@ -9,7 +9,7 @@
 | 🧪 待真机 | 代码完成、单测覆盖，但结论必须样机复核（见 [`verify.md`](verify.md) §8） |
 | ⏸ 冻结 | 明确留待后续批准批次，本轮不做 |
 
-> 回归命令：`uv run --group dev pytest -q` → **487 passed**（20 个测试模块）。
+> 回归命令：`uv run --group dev pytest -q` → **513 passed**（20 个测试模块）。
 > 无硬件全链路自检见 [`verify.md`](verify.md)。
 
 ---
@@ -86,8 +86,10 @@
 | 需求 | 实现位置 | 测试 | 状态 |
 |------|----------|------|------|
 | 風扇自動/自訂切換與轉速寫入（`--fan-mode` + `--fan-duty 0-100`，超限電源自行鉗制，寫完讀回驗證） | `monitor.apply_fan_setting()`、`protocol.set_fan_mode()` | `test_cli_features.py` | 🧪 待真机 |
-| 風扇設定儲存（`[0x50 0xF1 0x00]`） | `set_fan_mode()` 内联发 `REG_SAVE_SETTING` | `test_cli_features.py` | 🧪 待真机 |
-| 風扇配置按 Profile 恢復 | `daemon.restore_fan_profile()`（每次打開/重連重發 41h + F1h）；`[fan] mode/duty` opt-in | `test_daemon.py`（7 例）、`test_config.py`（7 例） | 🧪 待真机 |
+| 風扇設定儲存（`[0x50 0xF1]`，REV6 0 數據字節） | `set_fan_mode()` 内联发 `REG_SAVE_SETTING` | `test_cli_features.py` | 🧪 待真机 |
+| 風扇配置按 Profile 恢復 | `daemon.restore_fan_profile()`（每次打開/重連重發 41h + F1h，並按 `[fan] zero_fan` 重發 43h + F1h）；`[fan] mode/duty/zero_fan` opt-in | `test_daemon.py`、`test_config.py` | 🧪 待真机 |
+| Zero Fan 開關（43h + F1h，讀回 42h byte 4） | `MSIPSU.set_zero_fan()`、`monitor.apply_zero_fan_setting()`、`--zero-fan`；daemon 依 `[fan] zero_fan` 恢復 | `test_set_zero_fan_*`、`test_zero_fan_*`、`test_zero_fan_only_profile_is_restored` | 🧪 待真机 |
+| 蜂鳴器靜音（C2h，只寫無回讀） | `MSIPSU.silence_buzzer()`、`monitor.run_write_controls()`、`--buzzer-off` | `test_silence_buzzer_*`、`test_buzzer_off_*` | 🧪 待真机 |
 | OCP 閾值檢視（一期只讀：單針 12 A、針差 5 A、觸發 20 s、警告 180 s） | `protocol.read_ocp_thresholds()`（0xC0 8 B）、`read_ocp_state()`（0xC1 42 B）、`monitor.run_ocp()`；daemon 每個 prom 週期一併導出（C1 是 5 s 滾動平均，不快取） | `test_ocp.py`、`test_daemon.py` | 🧪 待真机 |
 | 單多軌模式檢視（二期只讀，`==2` 為多軌） | `protocol.read_multirail_ocp()`（0xC0 1 B）、`monitor.format_multirail_*()` | `test_ocp.py`、`test_demo.py` | 🧪 待真机（**提前落地**） |
 | OCP 閾值設定（三期專批，8 B + `0xF1`，鉗制 10-14 A / 4-8 A / 5-30 s / 30-240 s） | — | — | ⏸ 冻结 |
@@ -107,8 +109,8 @@
 ## 7. 无硬件可覆盖的验证方式
 
 所有 🧪 项在无样机时的最大覆盖：`bash scripts/smoke.sh` 一条命令跑完全链路（CI 也跑），`MSI_PSU_DEMO=1` 合成电源（`MSI_PSU_DEMO_MODEL` 可切
-全部 5 机型、`MSI_PSU_DEMO_ALERT` 可卡任意告警位），配合 487 个单测覆盖解析、告警、
-落盘、导出的全部分支。**每一条待真机项的判定标准与命令见 [`verify.md`](verify.md) §8（共 11 项）。**
+全部 5 机型、`MSI_PSU_DEMO_ALERT` 可卡任意告警位），配合 513 个单测覆盖解析、告警、
+落盘、导出的全部分支。**每一条待真机项的判定标准与命令见 [`verify.md`](verify.md) §8（共 12 项）。**
 
 ## 非需求交付物（如实标注）
 
