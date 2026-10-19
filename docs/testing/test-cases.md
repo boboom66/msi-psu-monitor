@@ -1,7 +1,7 @@
 # 测试用例（第二阶段）
 
 - 基线提交：`650076a`；当前修复后工作树：Phase 2（见 git log）。
-- 全量自动化用例由 `pytest --collect-only` 收集，当前 **612** 个；本文件记录本轮新增/关键用例、
+- 全量自动化用例由 `pytest --collect-only` 收集，当前 **616** 个；本文件记录本轮新增/关键用例、
   人工 E2E 用例和仍无法执行的真机/root 用例。
 - 状态：PASS 已实际执行且符合预期；FAIL 已实际执行且不符合；BLOCKED 环境/权限/硬件限制；
   NOT RUN 尚未执行；N/A 不适用。
@@ -35,6 +35,7 @@
 | TEST-030 | FUNC-190 | 源码 `.deb` | `bash scripts/build_deb.sh`（smoke 内） | 产物存在、权限 0644、config 存在 | 通过 | PASS |
 | TEST-031 | FUNC-191 | 自包含 tar.gz | `ALLOW_NEWER_GLIBC=1 bash scripts/build_binary.sh` | 产物、clean-env `--version/--once`、新命令 smoke | 通过（本机 glibc 2.39） | PASS（本机）/22.04 B |
 | TEST-032 | FUNC-192 | 零 Python `.deb` | `bash scripts/build_deb_binary.sh` + `dpkg-deb -f` | `Depends` 仅 libc6/zlib1g | 通过 | PASS（本机） |
+| TEST-036 | FUNC-193/196 | 硬件验收 kit | `build_hardware_kit.sh`；提取后 `setup.sh`（二进制/源码）+ `acceptance.sh --demo` | kit 打包、安装命名空间、demo 验收、证据 tar | 通过 | PASS |
 | TEST-033b | FUNC-193 | 安装/卸载（用户命名空间） | unshare + 临时 /etc/var/lib + fake systemctl/udevadm | 配置保留、`--purge` 删除、unit/udev 安装 | 通过 | PASS |
 | TEST-033 | FUNC-196 | SBOM | `python3 scripts/build_sbom.py ...` | CycloneDX 1.5、产物哈希、9 组件 | 通过 | PASS |
 | TEST-034 | FUNC-197 | release workflow | 静态审查 + `tests/test_release_security.py` | SBOM/上传/校验和存在 | 通过（未实际发版） | PARTIAL |
@@ -56,6 +57,6 @@
 
 ## D. 已有自动化覆盖
 
-原有 612 个 pytest 用例（含本文件列出的新增项）由 `tests/` 直接执行；逐项结果以
+原有 616 个 pytest 用例（含本文件列出的新增项）由 `tests/` 直接执行；逐项结果以
 `pytest -q` 的实际输出为准，不在此重复伪造逐条结果。测试模块与覆盖范围见
 [test-plan.md](test-plan.md) §4 和 [test-report.md](test-report.md)。

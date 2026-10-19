@@ -8,7 +8,7 @@ Protocol rules live in `msi_psu_monitor/AGENTS.md` (auto-loaded via `opencode.js
 
 ```bash
 uv sync --group dev                                  # py>=3.10, dev toolchain (pytest/ruff/mypy), zero runtime deps
-uv run --group dev pytest -q                         # 612 tests, no hardware needed
+uv run --group dev pytest -q                         # 616 tests, no hardware needed
 uv run --group dev pytest -q tests/test_state.py     # single file
 uv run --group dev ruff check .                      # must be clean
 uv run --group dev mypy msi_psu_monitor/             # must be clean
@@ -25,6 +25,7 @@ msi-psu-monitor --dashboard --port 8899              # loopback charts over the 
 bash scripts/build_deb.sh                            # dev/CI source .deb into dist/
 bash scripts/build_binary.sh                          # self-contained tarball (build group)
 bash scripts/build_deb_binary.sh                      # zero-Python .deb from the binaries
+bash scripts/build_hardware_kit.sh                    # test-machine kit (binary + source fallback)
 sudo ./scripts/install.sh                            # package + systemd daemon unit
 ```
 

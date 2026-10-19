@@ -37,7 +37,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq shellcheck
-          shellcheck -S warning scripts/*.sh
+          shellcheck -S warning scripts/*.sh scripts/hardware/*.sh
       - name: Pytest
         run: uv run --group dev pytest -q
       - name: Coverage (branch)

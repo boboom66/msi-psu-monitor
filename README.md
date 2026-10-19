@@ -364,6 +364,24 @@ chain, `.deb` construction, and the list of items that still require a real PSU.
 line of the requirements document to the code, the test that covers it and the
 verification method, so acceptance can be ticked off item by item.
 
+## Hardware test kit
+
+When the sample machine arrives, build the ready-to-run kit (self-contained
+binaries + source fallback + setup and acceptance scripts):
+
+```bash
+bash scripts/build_hardware_kit.sh
+# copy dist/msi-psu-monitor-hardware-kit-*.tar.gz to the test machine
+```
+
+On the test machine: unpack, `sudo ./setup.sh`, connect the PSU USB data cable, then
+`sudo ./acceptance.sh` (read-only) or `sudo ./acceptance.sh --writes`. It writes a
+report and evidence tarball under `/var/log/msi-psu-acceptance/`. See
+[`docs/hardware-acceptance.md`](docs/hardware-acceptance.md) for the full step-by-step
+guide, including the 22.04 glibc fallback and troubleshooting. The OS install
+checklist (Ubuntu ISO/USB, native vs VM, offline) is in
+[`docs/machine-setup.md`](docs/machine-setup.md).
+
 ## Kernel Module
 
 **Not usable yet — the patch in `kernel/` is an unbuilt draft.** Jack Doan's

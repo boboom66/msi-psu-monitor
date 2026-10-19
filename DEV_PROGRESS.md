@@ -272,7 +272,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 612 passed
+uv run --group dev pytest -q                     → 616 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 34 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
@@ -289,7 +289,7 @@ bash scripts/smoke.sh                            → 58 项全过（三种格式
 - `ast.parse(feature_version=(3, 10))`：全部 `.py` 通过 3.10 语法校验（静态兜底）。
 - **3.12 与 3.10 矩阵真跑过**（turn8 重跑）：`uv venv --python /usr/bin/python3.12` 与
   `uv venv --python 3.10` 各建裸环境（只装 dev 组 pytest，不装本包），把工作树复制一份、
-  不带 `.venv`，直接跑 `python3 -m pytest`：**3.12.3 → 612 通过**、**3.10.21 → 612 通过**。
+  不带 `.venv`，直接跑 `python3 -m pytest`：**3.12.3 → 616 通过**、**3.10.21 → 616 通过**。
   3.10 这条以前根本跑不起来：两个测试模块 `import tomllib`（3.11+），CI 的 3.10 矩阵会在
   收集阶段就红；本轮加 `tomli>=2; python_version < '3.11'`（dev 组）并 try/except 回退。
   `bash scripts/smoke.sh`（**58 项全过**）在 3.12 裸环境重跑过（turn10）。
@@ -341,7 +341,7 @@ turn7 留下的 11 条已逐条修完；每条都补了「改回旧行为就会�
    测试文件都有行。顺带修正文件名正则不收数字的问题：`test_protocol_lin11.py` 之前根本不在
    两条文档校验的覆盖范围内。测试：`test_the_coverage_table_names_real_test_functions`。
 8. **[P2] turn7 留下的裸计数不在护栏里**：`TEST_COUNT_RE` 补 `通过|通過`。那个未受护栏保护的旧通过数已按裸环境实跑对齐：
-   3.12.3 与 3.10.21 各 **612 通过**（细节见上节「质量门禁」）。
+   3.12.3 与 3.10.21 各 **616 通过**（细节见上节「质量门禁」）。
 9. **[P2] 零依赖探针漏了 `__main__.py`**：`SHIPPED_MODULES` 元组补 `__main__`，并新增
    `test_the_probe_covers_every_shipped_module`，把元组与 `msi_psu_monitor/*.py` 精确对齐。
 10. **[P2] `test_pid_consistency.py` 比的是 `bulk_size` 而不是真正的门限 `payload_size`**：README
@@ -661,7 +661,7 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
   Dashboard CPU/GPU 曲线 + 1 s `/api/live`、`--fan-mode performance` 别名。
 - 安全：systemd 地址族/能力/Proc 收敛、设备字符串与 Prometheus 标签清洗、写操作审计行、
   SBOM 生成 + release 集成、SECURITY/support/incident-response 文档。
-- 测试 612（新增 VIN/AlertLog/live/rail/性能/清洗/发布安全）；smoke 58 不变；
+- 测试 616（新增 VIN/AlertLog/live/rail/性能/清洗/发布安全）；smoke 58 不变；
   3.10/3.12 裸环境与 ruff/mypy 在本轮末尾复跑。
 - 变更控制：官网零 Python 覆盖 01 的「源码 .deb 依赖 python3」冻结；8 字节 OCP 阈值写仍冻结，
   多轨 1 字节写仅显式 `--set-rail`，需真机验证。
@@ -676,5 +676,5 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
 - 新增 daemon 300 次迭代 fd 泄漏检查；修复 shellcheck DEF-001 的误判（命令字符串不能加引号）。
 - 覆盖率进入 dev 依赖与 CI（`coverage report --fail-under=90`）；release workflow 补 ruff/format/mypy/smoke 门禁。
 - 冻结二进制 smoke 增加 performance/多轨/AlertLog/VIN 检查。
-- 当前 **612 passed**，smoke **58**，源语句覆盖率 **92%**；本地重建二进制通过。
+- 当前 **616 passed**，smoke **58**，源语句覆盖率 **92%**；本地重建二进制通过。
 - 仍 BLOCKED：真实 PSU、root/systemd/udev、22.04/arm64、浏览器、长稳、真实发版。

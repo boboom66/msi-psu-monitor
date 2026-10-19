@@ -9,7 +9,7 @@
 | 条件 | 状态 | 证据/原因 |
 |---|---|---|
 | 代码构建 | PASS（本机 x86_64/24.04） | 源码 `.deb`、tar.gz、二进制 `.deb`、SBOM 均构建成功 |
-| 自动化测试 | PASS | 612 passed；ruff/mypy/compileall 通过 |
+| 自动化测试 | PASS | 616 passed；ruff/mypy/compileall 通过 |
 | smoke | PASS | 58 passed，0 failed |
 | 覆盖率门禁 | PASS | 源语句 92%，CI fail-under=90 |
 | 真实 PSU 通信 | **BLOCKED（P1）** | 无 `/dev/hidraw*`、无样机 |
@@ -19,7 +19,8 @@
 | arm64 产物/运行 | **BLOCKED（P1）** | 无 arm64 环境；arm runner 未验证 |
 | 真实浏览器 Dashboard | **NOT RUN（P2）** | 无浏览器自动化；仅 HTTP/JS 语法 |
 | 长稳/内存/fd | PARTIAL | 300 次 fd 检查通过；24h/72h 未跑 |
-| 安装/卸载/升级/回滚 | **NOT RUN（P2）** | 未在 root/容器中执行 |
+| 安装/卸载/升级/回滚 | **PARTIAL（P2）** | 用户命名空间 install/uninstall/`--purge` 通过；真实 root 未跑 |
+| 硬件验收 kit | **PASS（软件层）** | kit 构建、setup（二进制/源码）、acceptance demo、证据打包通过 |
 | 正式 tag 发布/下载 | **NOT RUN（P2）** | 未 push tag |
 
 ## 阻塞项
