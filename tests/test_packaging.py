@@ -250,7 +250,11 @@ def test_the_release_workflow_covers_both_arches_and_publishes_checksums():
     assert 'python-version' in text
     assert 'SHA256SUMS' in text
     assert 'gh release create' in text
-    assert 'dist/*.tar.gz' in text and 'dist/*.deb' in text
+    # The release tarball must be matched narrowly: dist/*.tar.gz also matches
+    # the hardware kit and then the explicit kit glob passes it twice to
+    # gh release create.
+    assert 'dist/msi-psu-monitor_*.tar.gz' in text and 'dist/*.deb' in text
+    assert 'dist/*.tar.gz' not in text
 
 
 def test_the_release_doc_states_the_no_python_glibc_contract():
