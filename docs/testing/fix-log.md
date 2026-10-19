@@ -2,7 +2,7 @@
 
 - 项目：msi-psu-monitor
 - 更新时间：2026-10-19
-- 当前测试：636 passed；源语句覆盖率 92%；smoke 58
+- 当前测试：645 passed；源语句覆盖率 92%；smoke 58
 - 约定：只有真实执行并通过的回归测试才记为“已验证”。
 
 ## 已修复缺陷
@@ -32,3 +32,14 @@
 ## 修复规则
 
 1. 先复现并记录旧行为；2. 修改源码而非测试断言；3. 加回归测试；4. 跑单模块 + 全量；5. 更新本台账和 test-report。
+
+## 第二轮追加（2026-10-19）
+
+| ID | 修改文件 | 回归测试 |
+|---|---|---|
+| DEF-017 | `msi_psu_monitor/daemon.py` | daemon unexpected parser/enrichment/open/history/prom tests |
+| DEF-018 | `msi_psu_monitor/monitor.py` | `test_a_zero_watt_sample_still_counts_in_the_average` |
+| DEF-019 | `msi_psu_monitor/state.py` | `test_state_dir_falls_back_when_the_default_path_is_a_regular_file` |
+| DEF-020 | `msi_psu_monitor/monitor.py` | `--serial ''` parser test |
+
+| DEF-021 | `msi_psu_monitor/monitor.py` | `test_serial_discovery_skips_an_unexpected_parser_error` |

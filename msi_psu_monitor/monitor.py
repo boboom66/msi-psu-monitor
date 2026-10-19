@@ -718,9 +718,15 @@ def _valid_sample(sensors):
     """Return (watts, efficiency) when both readings are usable, else None."""
     power = _value(sensors.get('power_total'))
     efficiency = _value(sensors.get('efficiency'))
-    if not power or not efficiency:
+    # Zero is a valid reading: at idle a PSU can report 0 W and must still count
+    # as a sample (skipping it biases the average and the sample count). Only
+    # missing/malformed values are not usable.
+    if power is None or efficiency is None:
         return None
-    return float(power), float(efficiency)
+    try:
+        return float(power), float(efficiency)
+    except (TypeError, ValueError):
+        return None
 
 
 def apply_stats(sensors, monitor_state):
@@ -773,6 +779,11 @@ def resolve_device(serial):
         except (OSError, DeviceBusyError) as exc:
             blocked.append(path)
             logger.warning(f'Skipping {path}: {exc}')
+            continue
+        except Exception as exc:
+            # A malformed/parser-bug device must not crash serial discovery.
+            blocked.append(path)
+            logger.warning(f'Skipping {path}: unexpected error: {exc}')
             continue
         finally:
             if psu is not None:
@@ -1455,6 +1466,10 @@ def _validate_args(parser, args):
         # Same class: `--config "$CONF"` with CONF unset silently searched the
         # default paths and ran on the built-in defaults.
         parser.error('--config requires a path')
+    if args.serial is not None and not args.serial:
+        # `--serial "$SERIAL"` with SERIAL unset must not become a search for
+        # the literal empty serial; the other path-like flags reject this too.
+        parser.error('--serial requires a value')
     if (args.from_spec is not None or args.columns is not None) and not args.export:
         parser.error('--from and --columns are only valid together with --export')
     # A non-positive or non-finite interval would busy-loop or raise inside

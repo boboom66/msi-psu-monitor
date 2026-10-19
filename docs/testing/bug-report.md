@@ -59,7 +59,7 @@ Phase 2 会把上表映射为 TEST-xxx，并在 `test-cases.md` 中记录前置�
 | DEF-010 | P2 | 已修复 | daemon `open()` 成功、`init()` 失败时未关闭已打开的 hidraw fd | `test_a_failed_init_closes_the_already_open_device` | 持续发现失败时每轮泄漏一个 fd | `_ensure_psu` 失败路径关闭 psu |
 | DEF-011 | P3 | 已修复 | Dashboard `/api/export` 用 `",".join` 拼 CSV，值含逗号/引号时错列 | `test_export_endpoint_quotes_a_comma_in_a_value` | 手工编辑的历史文件可让导出列错位 | 改用 `csv.writer`（与 CLI 一致） |
 
-回归命令：`uv run --group dev pytest -q` → 636 passed；覆盖率 92%；`ruff check`/`mypy`/`smoke` 见 test-report。
+回归命令：`uv run --group dev pytest -q` → 645 passed；覆盖率 92%；`ruff check`/`mypy`/`smoke` 见 test-report。
 
 ## 6. Phase 3 补充：响应式与长稳验证
 
@@ -85,3 +85,14 @@ Phase 2 会把上表映射为 TEST-xxx，并在 `test-cases.md` 中记录前置�
 |---|---|---|---|---|---|---|
 | DEF-015 | P2 | 已修复 | `--export -O` 直接写目标文件；中途 OSError 会留下被截断的旧导出 | `test_export_preserves_an_existing_file_when_the_write_fails`（旧实现会把 `old export` 覆盖成 partial） | 数据导出损坏/不可恢复 | 普通文件改为 scratch + fsync + `os.replace`；FIFO/字符设备保留直接写 |
 | DEF-016 | P2 | 已修复 | `-f/--format` 在 export/控制写中被接受但静默忽略；`--serial` 在 export 中被忽略；配置文件 format 在固定输出模式中也被静默忽略 | 新增参数化 `test_flags_that_would_be_silently_ignored_are_rejected`、`test_a_config_format_is_ignored_with_a_warning_in_fixed_format_modes` | 调用方以为得到 JSON/选了设备，实际不是 | 不兼容组合 argparse exit 2；配置 format 在固定格式模式给出 warning 并回落 text |
+
+## 9. 2026-10-19 第三轮缺陷修复
+
+| ID | 严重度 | 状态 | 描述 | 证据 | 影响 | 处理 |
+|---|---|---|---|---|---|---|
+| DEF-017 | P2 | 已修复 | daemon 的设备 read/open/enrichment/history/prometheus 出现非 OSError 异常时直接向上抛，systemd 会重启循环；异常解析数据可能杀死常驻进程 | 新增 `test_an_unexpected_parser_exception_is_a_counted_read_failure`、`test_an_unexpected_enrichment_error_is_a_counted_failure`、`test_an_unexpected_history_error_does_not_stop_the_daemon`、`test_an_unexpected_prometheus_error_does_not_stop_the_daemon`、`test_an_unexpected_open_error_is_retried_not_fatal` | 监控中断/反复重启 | 失败计为 read failure/记录日志；设备打开失败按 discovery throttle 重试 |
+| DEF-018 | P3 | 已修复 | `_valid_sample` 用 `if not power or not efficiency`，0 W/0% 的合法样本被跳过，样本数和均值被偏置 | `test_a_zero_watt_sample_still_counts_in_the_average` | 空闲功率/计数不准确 | 只把 `None`/不可转换视为无效，零值正常统计 |
+| DEF-019 | P3 | 已修复 | `default_state_dir` 在默认路径是普通文件但可写时仍返回该文件，后续 state/history 写失败 | `test_state_dir_falls_back_when_the_default_path_is_a_regular_file` | 异常部署下监控不可用 | 默认路径必须是目录才采用，否则回退 XDG |
+| DEF-020 | P3 | 已修复 | `--serial ""`（未设置变量）被接受，变成搜索空 serial，而不是参数错误 | 新增 `['--serial', '']` 到 CLI 参数校验用例 | 脚本报错难诊断 | argparse exit 2，`--serial requires a value` |
+
+| DEF-021 | P3 | 已修复 | `--serial` 发现过程中设备 `open/init` 抛非 OSError 时 traceback；CLI 崩溃 | `test_serial_discovery_skips_an_unexpected_parser_error` | 一个坏设备阻断整次按序列号发现 | `resolve_device` 将意外异常记为 blocked 并继续扫描 |

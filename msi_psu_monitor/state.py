@@ -85,7 +85,7 @@ def default_state_dir():
     systemd_dir = os.environ.get('STATE_DIRECTORY')
     if systemd_dir:
         return Path(systemd_dir.split(':')[0])
-    if os.access(DEFAULT_STATE_DIR, os.W_OK) or (
+    if (DEFAULT_STATE_DIR.is_dir() and os.access(DEFAULT_STATE_DIR, os.W_OK)) or (
         not DEFAULT_STATE_DIR.exists() and os.access(DEFAULT_STATE_DIR.parent, os.W_OK)
     ):
         return DEFAULT_STATE_DIR

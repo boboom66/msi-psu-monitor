@@ -2,6 +2,7 @@
 
 import csv
 import io
+import logging
 import os
 import pathlib
 import subprocess
@@ -184,6 +185,7 @@ def run_main(monkeypatch, capsys, stub, argv):
         ['--export', '--from', '2h', '-O', ''],
         ['--config', ''],  # an unset $CONF is not "no --config"
         ['--config', '', '--once'],
+        ['--serial', ''],  # an unset $SERIAL is not a serial filter
         ['--zero-fan', 'on', '--watch', '1'],
         ['--zero-fan', 'on', '--ocp'],
         ['--zero-fan', 'on', '--show-log'],
@@ -920,3 +922,29 @@ def test_a_config_format_is_ignored_with_a_warning_in_fixed_format_modes(
     assert code == EXIT_OK
     assert captured.out.strip() == 'Fan mode: auto'
     assert 'fixed output format' in captured.err
+
+
+def test_serial_discovery_skips_an_unexpected_parser_error(monkeypatch, caplog):
+    """A malformed device must be reported blocked, not crash --serial discovery."""
+
+    class BadPSU:
+        serial = ''
+
+        def open(self):
+            return self
+
+        def init(self):
+            raise ValueError('bad identification payload')
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(protocol, 'detect_devices', lambda: ['/dev/hidraw9'])
+    monkeypatch.setattr(monitor, 'HIDDevice', lambda _path: StubHID())
+    monkeypatch.setattr(monitor, 'MSIPSU', lambda _hid: BadPSU())
+    with caplog.at_level(logging.WARNING, logger='msi_psu.monitor'):
+        path, available, blocked = monitor.resolve_device('SN123')
+    assert path is None
+    assert available == []
+    assert blocked == ['/dev/hidraw9']
+    assert 'unexpected error' in caplog.text

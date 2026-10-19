@@ -6,6 +6,7 @@ import time
 
 import pytest
 
+from msi_psu_monitor import monitor
 from msi_psu_monitor import state as stats
 from msi_psu_monitor.config import DEFAULTS
 from msi_psu_monitor.daemon import EXIT_ERROR, RESCAN_AFTER_FAILURES, MonitorDaemon
@@ -860,3 +861,82 @@ def test_a_failed_init_closes_the_already_open_device(tmp_path):
     assert daemon._ensure_psu() is None
     assert psu.closed is True
     assert daemon.device_path is None
+
+
+def test_an_unexpected_parser_exception_is_a_counted_read_failure(tmp_path, caplog):
+    """A malformed payload bug must not kill the resident daemon."""
+
+    class BrokenPSU(StubPSU):
+        def get_sensors(self):
+            raise ValueError('malformed bulk payload')
+
+    daemon = make_daemon(tmp_path, BrokenPSU(clean_sensors()))
+    with caplog.at_level(logging.WARNING, logger='msi_psu.daemon'):
+        assert daemon.tick() is True
+    assert daemon.failures == 1
+    assert daemon.samples == 0
+    assert any('Unexpected error while reading' in record.message for record in caplog.records)
+
+
+def test_an_unexpected_enrichment_error_is_a_counted_failure(tmp_path, monkeypatch, caplog):
+    daemon = make_daemon(tmp_path, StubPSU(clean_sensors()))
+
+    def explode(_sensors, _state):
+        raise ValueError('enrichment bug')
+
+    monkeypatch.setattr(monitor, 'apply_stats', explode)
+    with caplog.at_level(logging.WARNING, logger='msi_psu.daemon'):
+        assert daemon.tick() is True
+    assert daemon.failures == 1
+    assert daemon.samples == 0
+    assert any('Unexpected error while enriching' in record.message for record in caplog.records)
+
+
+def test_an_unexpected_history_error_does_not_stop_the_daemon(tmp_path, caplog):
+    daemon = make_daemon(tmp_path, StubPSU(clean_sensors()))
+
+    def explode(_sensors):
+        raise ValueError('history bug')
+
+    daemon.record_history = explode
+    with caplog.at_level(logging.ERROR, logger='msi_psu.daemon'):
+        assert daemon.tick() is True
+    assert 'Unexpected error while writing history' in caplog.text
+
+
+def test_an_unexpected_prometheus_error_does_not_stop_the_daemon(tmp_path, caplog):
+    daemon = make_daemon(tmp_path, StubPSU(clean_sensors()))
+
+    def explode(_sensors):
+        raise ValueError('prom bug')
+
+    daemon.write_prometheus = explode
+    with caplog.at_level(logging.ERROR, logger='msi_psu.daemon'):
+        assert daemon.tick() is True
+    assert 'Unexpected error while writing' in caplog.text
+
+
+def test_an_unexpected_open_error_is_retried_not_fatal(tmp_path, caplog):
+    class BrokenOpen(StubPSU):
+        def open(self):
+            raise ValueError('broken device object')
+
+    psu = BrokenOpen(clean_sensors())
+    daemon = make_daemon(tmp_path, psu)
+    with caplog.at_level(logging.WARNING, logger='msi_psu.daemon'):
+        assert daemon.tick() is True
+    assert daemon.psu is None
+    assert any('Unexpected error while opening' in record.message for record in caplog.records)
+
+
+def test_a_zero_watt_sample_still_counts_in_the_average(tmp_path):
+    """0 W idle is a real sample; skipping it biased count/average."""
+    sensors = clean_sensors()
+    sensors['power_total'] = (0.0, 'W')
+    sensors['efficiency'] = (0.0, '%')
+    daemon = make_daemon(tmp_path, StubPSU(sensors))
+    sample = daemon.sample()
+    assert sample is not None
+    assert daemon.state.count == 1
+    assert sample['power_avg'] == (0.0, 'W')
+    assert sample['efficiency_avg'] == (0.0, '%')

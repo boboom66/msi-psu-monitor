@@ -137,6 +137,17 @@ class MonitorDaemon:
             self.device_path = None
             self._next_discovery = self.clock() + DISCOVERY_RETRY_S
             return None
+        except Exception as exc:
+            # A malformed device object/parser bug must not kill the daemon.
+            if psu is not None:
+                try:
+                    psu.close()
+                except Exception:  # pragma: no cover - best effort
+                    pass
+            logger.warning(f'Unexpected error while opening {self.device_path}: {exc}')
+            self.device_path = None
+            self._next_discovery = self.clock() + DISCOVERY_RETRY_S
+            return None
         self.psu = psu
         logger.info(f'Opened {self.device_path}: {getattr(psu, "product", "unknown")}')
         self.restore_fan_profile(psu)
@@ -223,6 +234,11 @@ class MonitorDaemon:
             # An unplugged PSU raises ENODEV out of a read; that is a failure to
             # count towards the rescan, never a reason to die.
             return self._read_failed(str(exc))
+        except Exception as exc:
+            # A malformed payload/parser bug must not kill the resident daemon:
+            # count it as a failed read so the rescan/restart path can recover.
+            logger.warning(f'Unexpected error while reading the PSU: {exc}')
+            return self._read_failed(f'unexpected read error: {exc}')
         if 'error' in sensors:
             return self._read_failed(str(sensors['error']))
         if not monitor.has_readings(sensors):
@@ -248,7 +264,12 @@ class MonitorDaemon:
             self._record_alerts(fired, self.engine.take_cleared())
             sensors['alerts'] = active
             sensors['status'] = monitor.status_from(active, have_e1h)
-        monitor.apply_stats(sensors, self.state)
+        try:
+            monitor.apply_stats(sensors, self.state)
+        except Exception as exc:
+            # A malformed reading must not kill the resident daemon either.
+            logger.warning(f'Unexpected error while enriching the sample: {exc}')
+            return self._read_failed(f'sample enrichment error: {exc}')
         if self.live_snapshot:
             stats.write_live_snapshot(self.state_dir, sensors, ts=self.wall_clock())
         self.samples += 1
@@ -427,6 +448,8 @@ class MonitorDaemon:
                 self.write_prometheus(sensors)
             except OSError as exc:
                 logger.error(f'Cannot write {self.prom_path}: {exc}')
+            except Exception as exc:
+                logger.error(f'Unexpected error while writing {self.prom_path}: {exc}')
             self._next_prom = now + self.prom_interval
 
         if now >= self._next_history:
@@ -434,6 +457,8 @@ class MonitorDaemon:
                 self.record_history(sensors)
             except OSError as exc:
                 logger.error(f'Cannot write history: {exc}')
+            except Exception as exc:
+                logger.error(f'Unexpected error while writing history: {exc}')
             self._next_history = now + self.history_interval
 
         if now >= self._next_prune:
