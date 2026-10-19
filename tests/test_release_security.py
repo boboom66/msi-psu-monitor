@@ -43,7 +43,10 @@ def test_the_release_workflow_generates_and_publishes_an_sbom():
     assert 'scripts/build_sbom.py' in text
     assert 'SBOM-${{ matrix.arch }}.json' in text
     assert 'dist/SBOM-*.json' in text
-    assert 'sha256sum *.tar.gz *.deb SBOM-*.json' in text
+    assert (
+        'sha256sum msi-psu-monitor_*.tar.gz msi-psu-monitor_*_amd64.deb '
+        'msi-psu-monitor_*_arm64.deb SBOM-*.json'
+    ) in text
 
 
 def test_the_sbom_generator_emits_cyclonedx_with_artifact_hashes(tmp_path):
