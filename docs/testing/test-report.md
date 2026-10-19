@@ -1,0 +1,159 @@
+# msi-psu-monitor 基线测试报告（第一阶段）
+
+- 执行时间：2026-10-19 10:01–10:05（Asia/Shanghai）
+- 提交：`650076a263d9f6126c58508c60963102116ec4f2`
+- 工作树：干净（`git status --porcelain` 空）
+- 环境：Ubuntu 24.04 LTS / WSL2 6.18 / glibc 2.39 / Python 3.12.3 / systemd 255 / x86_64
+- 硬件：无 `/dev/hidraw*`、无 `/sys/class/hidraw`；普通用户，无免密 sudo
+
+## 1. 自动化测试
+
+```bash
+$ uv run --group dev pytest -q
+569 passed in 15.87s
+```
+
+- 测试收集：`569 tests collected`。
+- 本阶段实测 Python：3.10.21（裸环境）→ 569 passed；3.12.3（裸环境）→ 569 passed；
+  3.12.3（项目 venv）→ 569 passed。3.13 由 CI/历史记录覆盖，本阶段未重跑。
+- 测试模块 21 个；各模块用例数：
+
+| 模块 | 用例 |
+|---|---:|
+| test_cli_features.py | 94 |
+| test_state.py | 65 |
+| test_psu_sensors.py | 63 |
+| test_ocp.py | 56 |
+| test_demo.py | 49 |
+| test_daemon.py | 46 |
+| test_dashboard.py | 36 |
+| test_config.py | 32 |
+| test_protocol_lin11.py | 18 |
+| test_packaging.py | 17 |
+| test_protocol_discovery.py | 16 |
+| test_cli_alerts.py / test_alerts.py | 13 / 13 |
+| test_monitor_format.py / test_docs_consistency.py | 11 / 11 |
+| test_protocol.py | 8 |
+| test_pid_consistency.py | 6 |
+| test_release_security.py | 5 |
+| test_monitor.py | 4 |
+| test_stdlib_only.py / test_schema.py | 3 / 3 |
+
+## 2. 静态检查
+
+```bash
+$ uv run --group dev ruff check .
+All checks passed!
+$ uv run --group dev ruff format --check .
+40 files already formatted
+$ uv run --group dev mypy msi_psu_monitor/
+Success: no issues found in 10 source files
+$ python3 -m compileall -q msi_psu_monitor scripts/build_sbom.py
+compileall-ok
+$ shellcheck -S warning scripts/*.sh
+exit 0（warning 级别无输出）
+$ systemd-analyze verify systemd/msi-psu-monitor.service
+exit 0
+```
+
+补充：默认级别 `shellcheck scripts/*.sh` 退出 1，内容全是 info/style，包括
+`scripts/smoke.sh` 的 SC2015（A && B || C）和 SC2086（`$MONITOR` 未加引号）。
+CI 使用 `-S warning`，因此当前门禁通过；这些是 P3 测试脚本质量问题，不是产品故障。
+
+## 3. 覆盖率（一次性测量，不写回项目）
+
+```bash
+$ uv run --with coverage coverage run --branch -m pytest -q
+569 passed
+$ uv run --with coverage coverage report -m
+```
+
+| 源模块 | 语句覆盖率 |
+|---|---:|
+| `msi_psu_monitor/alerts.py` | 96.81% |
+| `config.py` | 92.48% |
+| `daemon.py` | 89.50% |
+| `dashboard.py` | 93.83% |
+| `demo.py` | 98.31% |
+| `monitor.py` | 91.42% |
+| `protocol.py` | 91.06% |
+| `state.py` | 92.65% |
+| `__init__.py` | 100% |
+| **源合计** | **语句 93.02% / 分支 89.20%** |
+
+说明：`coverage` 是用 `uv run --with` 临时提供的，不写入 `pyproject.toml`；
+`__main__.py`、安装/构建 shell 脚本、内嵌浏览器 JS 不在这份覆盖率里。
+
+## 4. 无硬件冒烟
+
+```bash
+$ bash scripts/smoke.sh
+结果: 58 passed, 0 failed
+```
+
+覆盖：三种格式、告警 exit 2 与按机型告警名、黑盒、OCP、风扇/Zero Fan/蜂鸣器写、
+daemon→Prometheus+历史、dashboard HTTP、`.deb` 内容/权限、3.10 语法。
+
+## 5. 构建产物（本地 x86_64）
+
+```bash
+$ ALLOW_NEWER_GLIBC=1 bash scripts/build_binary.sh
+[INFO] Release: dist/msi-psu-monitor_1.0.0_linux_x86_64.tar.gz
+$ bash scripts/build_deb_binary.sh
+$ dpkg-deb -f dist/msi-psu-monitor_1.0.0_amd64.deb Depends
+libc6 (>= 2.35), zlib1g
+$ python3 scripts/build_sbom.py --dist dist --output dist/SBOM-x86_64.json --arch x86_64
+wrote dist/SBOM-x86_64.json (9 components)
+```
+
+- tar.gz 包含 `install.sh`/`uninstall.sh`/unit/udev/config/README/LICENSE/SECURITY/docs/SHA256SUMS。
+- 二进制 clean-env：`env -i PATH=/usr/bin:/bin HOME=/tmp MSI_PSU_DEMO=1 ... --version`
+  → `msi-psu-monitor 1.0.0`；`--once` 输出 demo 读数。
+- `ldd`（clean env）只显示 libdl/libz/libpthread/libc，无 libpython。
+- **限制**：本机 glibc 2.39，构建脚本必须 `ALLOW_NEWER_GLIBC=1`；这不是 22.04 官方产物。
+
+## 6. 端到端行为抽样
+
+```text
+MSI_PSU_DEMO=1 --once                         exit 0，文本读数
+MSI_PSU_DEMO=1 -f json                        exit 0，json.tool 可解析
+MSI_PSU_DEMO=1 -f prometheus                  31 条 msi_psu_* 指标
+--fan-mode performance                        Fan mode: performance，exit 0
+--zero-fan off                                Zero Fan: off，exit 0
+--buzzer-off                                  Buzzer: silenced，exit 0
+--set-rail multi (ai1300p)                    Rail mode: multi，exit 0
+--set-rail multi (TS)                         exit 1，read-back/机型拒绝
+--ocp (TS)                                    exit 0，8B 阈值视图
+--ocp (ai1300p)                               exit 0，multirail 视图
+--show-log                                    exit 0，黑盒头
+--show-alert-log（空）                        exit 0，No alert log records stored.
+--no-alerts + 注入告警                        exit 0，无 ALERT 行
+注入 ocp_pin1                                 exit 2，stderr ALERT 行
+daemon --iterations 2                          state.json/daily/latest.json/psu.prom 落盘
+--export --from 2h --columns temp,fan          9 列表头 + 1 行数据
+Dashboard / /api/history /api/state /api/live /api/export → 200；/nope → 404
+daemon + alert 注入                              alerts-YYYYMMDD.log 写入，--show-alert-log 可读
+```
+
+## 7. 失败、阻塞、未执行
+
+| 项目 | 状态 | 原因 |
+|---|---|---|
+| 569 自动化测试 | PASS | 全部实际执行 |
+| smoke 58 | PASS | 实际执行 |
+| 静态检查/覆盖率/构建 | PASS（有环境限制） | 见上 |
+| 真实 hidraw/PSU 通信 | BLOCKED | 无 `/dev/hidraw*` |
+| root/udev/systemd 实际启停 | BLOCKED | 普通用户，sudo 需密码 |
+| 安装/卸载脚本实际执行 | NOT RUN | 需要 root 与 systemd |
+| Ubuntu 22.04/glibc 2.35 构建 | BLOCKED | 本机 24.04/2.39 |
+| arm64 构建/运行 | BLOCKED | 无 arm64 环境 |
+| Dashboard 真实浏览器 | NOT RUN | 无浏览器自动化 |
+| 长稳/内存/fd 泄漏 | NOT RUN | 未设计长时间测试 |
+| HID 负向/模糊测试 | NOT RUN | 现有假帧单测不足以称 fuzz |
+| release workflow 实际发版 | NOT RUN | 未 push tag |
+
+## 8. 结论
+
+软件层自动化基线健康：569/569、静态门禁通过、冒烟 58/58、源码语句覆盖 93%。
+但本报告不能证明真实 PSU、真实 systemd/udev、22.04/arm64 发布产物或浏览器端行为；
+这些必须在后续阶段明确保留为 BLOCKED/NOT RUN，不能写成 PASS。
