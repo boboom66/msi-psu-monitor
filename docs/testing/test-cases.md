@@ -73,3 +73,5 @@
 | TEST-054 | FUNC-022 | AlertLog limit=0 | `iter_alert_log(limit=0)` 有记录时 | 返回 [] | 通过 | PASS |
 | TEST-055 | FUNC-130/137 | daemon 初始化失败资源 | open 成功、init 抛 OSError | 返回 None 且 psu.closed=True | 通过 | PASS |
 | TEST-056 | FUNC-160 | Dashboard CSV 引号 | 历史值含逗号时 `/api/export` | 单元格被 `"..."` 引用，列数不变 | 通过 | PASS |
+
+| TEST-057 | FUNC-158/159 | 真实 headless Chromium Dashboard | Playwright 打开 `/`，等待数据；检查标题/product/8 canvas、CSV/PNG 下载、console/page error、外部请求 | 页面有数据、CSV/PNG 有效、无错误/外部请求 | 通过（本机 headless） | PASS |

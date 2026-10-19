@@ -217,3 +217,13 @@ systemd-analyze verify                 exit 0
 
 仍以 [bug-report.md](bug-report.md) 的 RISK-001..012 为准；最重要的 P1 仍是**无真实 PSU** 与**未在 22.04/arm64 构建运行**。
 本轮修复只覆盖软件层可复现缺陷，不能替代真机验收。
+
+### 10.5 真实 headless Chromium Dashboard 验证（2026-10-19）
+
+- 浏览器：Playwright 1.64.1 + `chromium_headless_shell-1248`（Linux x86_64）。
+- 数据：demo daemon 写入 `/tmp/psu-dash-state`，dashboard 用 `MSI_PSU_STATE_DIR` 指向同一目录。
+- 结果：`title=MSI PSU Monitor`；正文包含 `MPG Ai1600TS` 与 `12.09 V`；8 个 `<canvas>`；
+  `Export CSV` 下载 235B、首行 `time,`；图表 `PNG` 下载 3409B 且 PNG 签名有效；
+  `pageerror=[]`、`console error=[]`、外部请求 `[]`。
+- 截图证据：[evidence-dashboard-headless.png](evidence-dashboard-headless.png)。
+- 限制：这是 headless shell，不是桌面 Firefox/Chrome；Playwright 未进项目依赖/CI，不能当作发布环境全浏览器矩阵。

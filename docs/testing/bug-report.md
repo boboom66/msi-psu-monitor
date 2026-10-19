@@ -23,7 +23,7 @@
 | RISK-002 | P1（阻塞发布） | 构建环境 | 本机 glibc 2.39 构建的二进制不能代表 22.04/2.35 官方产物 | 本地需 `ALLOW_NEWER_GLIBC=1` | 在 CI `ubuntu-22.04` 构建并执行 clean-env 测试 |
 | RISK-003 | P2 | 发布门禁 | release workflow 已补 ruff/format/mypy/smoke，但仍未跑 shellcheck；arm64 仍仅 release 时构建，且可绕过 CI 状态发布 | `.github/workflows/release.yml` | 继续把 CI 作为 release 的 needs 或加同样门禁 |
 | RISK-004 | P2 | 安装 | 用户命名空间内 install/uninstall/`--purge` 已实际通过（fake systemctl/udevadm）；真实 systemd/udev 启停未跑 | `tests/test_install_namespace.py` | 在真实 root 容器/机器复验 |
-| RISK-005 | P2 | 前端 | Dashboard JS 只用 HTTP/源码断言，无真实浏览器测试 | 无浏览器自动化 | 用 Playwright/Chromium 跑页面加载、图表、PNG/CSV、1s live |
+| RISK-005 | P2 | 前端 | Dashboard 已用本机 headless Chromium 跑页面/图表/CSV/PNG；该验证依赖本地 Playwright，未进 CI，也未覆盖真实桌面浏览器 | `docs/testing/evidence-dashboard-headless.png`、test-report §10.5 | 把 Playwright 浏览器 smoke 纳入可选 CI 或发布前手工执行 |
 | RISK-006 | P2 | 安全 | Dashboard Host/CSP 已修复；仍建议真实浏览器验证 CSP 不影响 PNG/CSV 下载 | 421 + CSP 测试已加 | 浏览器端复测 |
 | RISK-007 | P2 | 数据 | `state.json`/日志/串口标签可能被本机其他用户读取，序列号属于可识别信息 | unit 无 UMask，文件默认 0644 | 做权限/数据分类评审，决定 0640+组或脱敏 |
 | RISK-008 | P2 | 兼容 | arm64、Ubuntu 22.04、真实 systemd 沙箱未验证 | 仅 x86_64/24.04 | 增加构建/运行矩阵或明确发布限制 |
