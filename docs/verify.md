@@ -3,7 +3,7 @@
 > 没有真机也能验证 CLI、告警、daemon、历史落盘、prometheus 与 dashboard 全链路。
 > 下面每条命令都已在 `.venv`（Python 3.13.15）实跑通过；测试套件另在**裸环境**复核过
 > 3.12.3 与 3.10.21 两遍（把工作树复制一份、不带 `.venv`、不装本包，直接
-> `python3 -m pytest`，各 **513 通过**；`smoke.sh` 的 **58 项**在 3.12 裸环境跑过）。
+> `python3 -m pytest`，各 **521 通过**；`smoke.sh` 的 **58 项**在 3.12 裸环境跑过）。
 > 3.10 另有静态兜底——ruff `target-version = "py310"`、mypy
 > `python_version = "3.10"`（按 3.10 typeshed 分析）、smoke 里对每个 `.py` 的
 > `ast.parse(feature_version=(3, 10))`。
@@ -87,7 +87,7 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。当前基线：**513 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
+三条全绿即通过。当前基线：**521 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
 
 > `ruff format --check .` **可以全仓跑**（CI 也跑）：`protocol.py`/`__init__.py`/`__main__.py`/
 > `tests/test_monitor.py` 这四个历史文件混用引号风格，已由 `[tool.ruff.format] exclude` +
@@ -329,7 +329,9 @@ MSI_PSU_DEMO=1 timeout 3 .venv/bin/msi-psu-monitor --watch 1 -O /tmp/frames.log
 
 约定：`0` 正常 / `1` 程序或参数错误 / `2` 告警或参数冲突（argparse 用法错误）。
 
-## 7. 打包
+## 7. 打包与发布
+
+下面两个是**开发/CI 用**的源码包（`Depends: python3`）；官网下载用 §7.1 的自包含产物。
 
 ```bash
 bash scripts/build_deb.sh
@@ -381,6 +383,30 @@ daemon 被显式喂了一个不存在的 `--config` 时只打一行 `Error: ...`
 ```bash
 msi-psu-monitor-daemon --config /nonexistent.conf; echo $?   # 一行错误，exit 1
 ```
+
+### 7.1 自包含二进制（官网下载形态）
+
+官网发布物不要求目标机安装 Python。构建机必须是 Ubuntu 22.04（glibc 2.35）；在更新的
+系统上构建会被 `build_binary.sh` 拒绝（`ALLOW_NEWER_GLIBC=1` 仅供本地烟测）：
+
+```bash
+uv sync --group dev --group build
+bash scripts/build_binary.sh
+bash scripts/build_deb_binary.sh
+tar tzf dist/msi-psu-monitor_1.0.0_linux_x86_64.tar.gz | head
+sha256sum -c dist/msi-psu-monitor_1.0.0_linux_x86_64.tar.gz.sha256
+env -i PATH=/usr/bin:/bin HOME=/tmp MSI_PSU_DEMO=1 \
+  ./dist/bin/linux-x86_64/msi-psu-monitor --once
+dpkg-deb -f dist/msi-psu-monitor_1.0.0_amd64.deb Depends
+# 期望：libc6 (>= 2.35), zlib1g —— 没有 python3
+ldd ./dist/bin/linux-x86_64/msi-psu-monitor   # 不应出现 libpython
+```
+
+`env -i` 是关键：它证明二进制没有借用开发机的 `.venv` 或 PATH 里的 Python。tarball 内的
+`install.sh` 只做 `install -m 755` + udev/systemd，不调用 python3/pip；`uninstall.sh`
+默认保留配置与 `/var/lib/msi-psu-monitor`，`--purge` 才删除。正式发布由
+`.github/workflows/release.yml` 在 `ubuntu-22.04` / `ubuntu-22.04-arm` 上构建并上传
+`SHA256SUMS`；详细矩阵见 [release.md](release.md)。
 
 ## 8. 真机到达后（唯一待补）
 

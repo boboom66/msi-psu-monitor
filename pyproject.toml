@@ -45,6 +45,10 @@ include = ["msi_psu_monitor*"]
 # tomli is the stdlib tomllib backport for the 3.10 CI leg: two test modules parse
 # pyproject.toml, and tomllib only exists from 3.11. Runtime dependencies stay [].
 dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10", "tomli>=2; python_version < '3.11'"]
+# Build-only: freezes the self-contained release binaries. Never a runtime
+# dependency -- the shipped binary bundles CPython, the package itself stays
+# stdlib-only (tests/test_stdlib_only.py enforces that).
+build = ["pyinstaller==6.16.0"]
 
 [tool.ruff]
 line-length = 100

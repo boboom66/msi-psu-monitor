@@ -32,6 +32,8 @@ Python standard library only — no third-party runtime dependencies.
   every time it (re)opens the PSU, so a custom curve survives AC loss (`[fan]` in the
   config file).
 - **No-hardware demo mode** — exercise the whole pipeline with `MSI_PSU_DEMO=1`, including every supported model via `MSI_PSU_DEMO_MODEL` (`ai1300p`, `meg_ai1600`, ...).
+- **No Python on the target machine** — the official tarball and `.deb` contain
+  self-contained executables (x86_64 + arm64), built on Ubuntu 22.04 for glibc 2.35+.
 
 ## Supported Hardware
 
@@ -52,19 +54,45 @@ PID, so a re-badged device with a known product name still parses correctly.
 
 ## Install
 
-```bash
-# Debian/Ubuntu package (installs the CLI, the daemon, the udev rule and the unit)
-bash scripts/build_deb.sh
-sudo apt install ./dist/msi-psu-monitor_*_all.deb
+The official download is **self-contained: the target machine needs no Python**.
 
-# Or from source (this fork; the upstream base is linked under Attribution)
+```bash
+tar xzf msi-psu-monitor_<version>_linux_x86_64.tar.gz
+cd msi-psu-monitor_<version>_linux_x86_64
+sudo ./install.sh
+```
+
+The tarball ships the CLI and daemon executables, the udev rule, the systemd unit,
+the config example and the docs; `install.sh` copies the executables to
+`/usr/local/bin`, installs the unit/udev rule and starts the daemon. arm64 tarballs
+are published too. Check the download with the adjacent checksum:
+
+```bash
+sha256sum -c msi-psu-monitor_<version>_linux_x86_64.tar.gz.sha256
+```
+
+Prefer apt? The `.deb` is built from the same executables and does **not** depend
+on `python3`:
+
+```bash
+sudo apt install ./msi-psu-monitor_<version>_amd64.deb
+```
+
+Building the release artifacts yourself (developers; Python 3.10+ on the build
+host only):
+
+```bash
 git clone <this repository>
 cd msi-psu-monitor
-pip install -e .
-
-# Or a dev checkout with the test/lint toolchain
-uv sync --group dev && uv run --group dev pytest -q
+uv sync --group dev --group build
+uv run --group dev pytest -q
+bash scripts/build_binary.sh      # self-contained tarball + checksums
+bash scripts/build_deb_binary.sh  # zero-Python .deb
 ```
+
+See [docs/release.md](docs/release.md) for the build matrix (Ubuntu 22.04 /
+glibc 2.35, x86_64 + arm64), checksums and signing status. `pip install -e .`
+still works for development; it is not the official download.
 
 ## Quick start
 

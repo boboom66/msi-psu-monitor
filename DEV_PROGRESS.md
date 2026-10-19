@@ -272,7 +272,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 513 passed
+uv run --group dev pytest -q                     → 521 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 34 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
@@ -289,7 +289,7 @@ bash scripts/smoke.sh                            → 58 项全过（三种格式
 - `ast.parse(feature_version=(3, 10))`：全部 `.py` 通过 3.10 语法校验（静态兜底）。
 - **3.12 与 3.10 矩阵真跑过**（turn8 重跑）：`uv venv --python /usr/bin/python3.12` 与
   `uv venv --python 3.10` 各建裸环境（只装 dev 组 pytest，不装本包），把工作树复制一份、
-  不带 `.venv`，直接跑 `python3 -m pytest`：**3.12.3 → 513 通过**、**3.10.21 → 513 通过**。
+  不带 `.venv`，直接跑 `python3 -m pytest`：**3.12.3 → 521 通过**、**3.10.21 → 521 通过**。
   3.10 这条以前根本跑不起来：两个测试模块 `import tomllib`（3.11+），CI 的 3.10 矩阵会在
   收集阶段就红；本轮加 `tomli>=2; python_version < '3.11'`（dev 组）并 try/except 回退。
   `bash scripts/smoke.sh`（**58 项全过**）在 3.12 裸环境重跑过（turn10）。
@@ -341,7 +341,7 @@ turn7 留下的 11 条已逐条修完；每条都补了「改回旧行为就会�
    测试文件都有行。顺带修正文件名正则不收数字的问题：`test_protocol_lin11.py` 之前根本不在
    两条文档校验的覆盖范围内。测试：`test_the_coverage_table_names_real_test_functions`。
 8. **[P2] turn7 留下的裸计数不在护栏里**：`TEST_COUNT_RE` 补 `通过|通過`。那个未受护栏保护的旧通过数已按裸环境实跑对齐：
-   3.12.3 与 3.10.21 各 **513 通过**（细节见上节「质量门禁」）。
+   3.12.3 与 3.10.21 各 **521 通过**（细节见上节「质量门禁」）。
 9. **[P2] 零依赖探针漏了 `__main__.py`**：`SHIPPED_MODULES` 元组补 `__main__`，并新增
    `test_the_probe_covers_every_shipped_module`，把元组与 `msi_psu_monitor/*.py` 精确对齐。
 10. **[P2] `test_pid_consistency.py` 比的是 `bulk_size` 而不是真正的门限 `payload_size`**：README
@@ -405,6 +405,24 @@ turn7 留下的 11 条已逐条修完；每条都补了「改回旧行为就会�
 - **测试**：513（新增 26 条：协议帧、CLI 读回/组合/冲突、demo、config、daemon 恢复）。
 - **真机验收**：verify.md §8 增加第 12 项（Zero Fan 读回 + 断电保持、buzzer 实际静音），
   两份清单同步为 12 项。
+### 官网分发（turn11）：自包含二进制 + 零 Python .deb
+
+目标改成「官网直接下载、目标机不装 Python」；源码 `.deb` 仅保留给开发/CI。
+
+- **build 依赖组**：`pyinstaller==6.16.0`（仅构建期；`[project]` 仍无 runtime 依赖）。
+- **`scripts/build_binary.sh`**：两个 onefile（CLI/daemon），Ubuntu 22.04/glibc 2.35 基线，
+  产出 x86_64/aarch64 tar.gz + `BUILD-INFO` + `SHA256SUMS`；打包前对冻结产物跑
+  `--version` / demo `--once` / daemon 1 次 / `--zero-fan` / `--buzzer-off` 烟测。
+- **`scripts/build_deb_binary.sh`**：从同一二进制产出 `.deb`，`Depends` 只有
+  `libc6 (>= 2.35), zlib1g`，没有 `python3`。
+- **`scripts/install_binary.sh` / `uninstall_binary.sh`**：目标机零 Python；不覆盖用户配置；
+  uninstall 默认保留 state/config，`--purge` 才删。
+- **CI**：`ci.yml` 新增 `freeze` job（ubuntu-22.04，每次 push 构建并断言 Depends 无 python）；
+  `release.yml`（tag `v*`）在 ubuntu-22.04 / ubuntu-22.04-arm 双架构构建并发布 GitHub Release
+  + 合并 `SHA256SUMS`。
+- 本机 24.04/glibc 2.39 只能用 `ALLOW_NEWER_GLIBC=1` 做本地烟测；正式包必须 22.04。
+  已在本机用 `env -i` 跑通打包后的二进制（无 python、无 libpython）。
+- **测试**：521（新增 8 条发布链路静态回归）。
 ### 外部阻塞
 
 - **Q6 EPS 数量**：等 MSI 回函；未回前按 2×EPS 处理。

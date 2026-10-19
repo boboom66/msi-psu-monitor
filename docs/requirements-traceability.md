@@ -9,7 +9,7 @@
 | 🧪 待真机 | 代码完成、单测覆盖，但结论必须样机复核（见 [`verify.md`](verify.md) §8） |
 | ⏸ 冻结 | 明确留待后续批准批次，本轮不做 |
 
-> 回归命令：`uv run --group dev pytest -q` → **513 passed**（20 个测试模块）。
+> 回归命令：`uv run --group dev pytest -q` → **521 passed**（20 个测试模块）。
 > 无硬件全链路自检见 [`verify.md`](verify.md)。
 
 ---
@@ -39,7 +39,8 @@
 | 輸出重導向到檔案（三格式皆可） | `-O/--output` + `emit()` | `test_cli_features.py` | ✅ 已实现 |
 | 單常駐 daemon（替代 timer） | `daemon.MonitorDaemon`（flock 獨占、1 s 判警、30 s 原子寫 prom、60 s 追加 history、1 h 輪轉） | `test_daemon.py` | ✅ 已实现 |
 | Linux 維運鏈路（node_exporter → Prometheus → Grafana；告警只走 stderr + exit 2） | `write_prometheus()`、`alerts.format_alert_line()` | `test_daemon.py`、`test_alerts.py`、`test_cli_alerts.py` | ✅ 已实现 |
-| 打包 `.deb` + `Depends: python3 (>=3.10)` | `scripts/build_deb.sh`（含 postinst/prerm、systemd unit、udev rule、doc） | CI 步骤 `Build the .deb` | ✅ 已实现 |
+| 官方分发：自包含 tar.gz + 零 Python 依赖 `.deb`（x86_64/arm64） | `scripts/build_binary.sh` / `scripts/build_deb_binary.sh`（PyInstaller onefile，构建基线 Ubuntu 22.04 / glibc 2.35） | CI `freeze` job + `tests/test_packaging.py` | ✅ 已实现（待真机安装验证） |
+| 开发/CI 源码 `.deb`（`Depends: python3 >= 3.10`，非官网下载） | `scripts/build_deb.sh`（含 postinst/prerm、systemd unit、udev rule、doc） | CI 步骤 `Build the .deb` | ✅ 仅开发 |
 | 桌面彈窗 / 顯卡功耗連動下調 | — | — | ⏸ 明确不做 |
 
 ## 3. 一期功能（已凍結，全做）
@@ -109,7 +110,7 @@
 ## 7. 无硬件可覆盖的验证方式
 
 所有 🧪 项在无样机时的最大覆盖：`bash scripts/smoke.sh` 一条命令跑完全链路（CI 也跑），`MSI_PSU_DEMO=1` 合成电源（`MSI_PSU_DEMO_MODEL` 可切
-全部 5 机型、`MSI_PSU_DEMO_ALERT` 可卡任意告警位），配合 513 个单测覆盖解析、告警、
+全部 5 机型、`MSI_PSU_DEMO_ALERT` 可卡任意告警位），配合 521 个单测覆盖解析、告警、
 落盘、导出的全部分支。**每一条待真机项的判定标准与命令见 [`verify.md`](verify.md) §8（共 12 项）。**
 
 ## 非需求交付物（如实标注）

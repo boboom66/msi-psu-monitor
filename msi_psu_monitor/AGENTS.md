@@ -99,7 +99,10 @@ runtime imports.
 
 ## Anti-patterns
 
-- Do NOT add pip runtime dependencies.
+- Do NOT add pip runtime dependencies, and never make the official download depend on
+  Python: the release tarball/.deb are frozen with PyInstaller (`build` group) and
+  `scripts/install_binary.sh` must not call `python3`/`pip`. `tests/test_packaging.py`
+  enforces both.
 - Do NOT touch `BULK_*` for non-TS variants.
 - `protocol.py` (and the other three legacy files) are listed in
   `[tool.ruff.format] exclude` with `force-exclude = true`, so the formatter cannot
@@ -136,7 +139,7 @@ runtime imports.
 ## Verification (no hardware required)
 
 ```bash
-uv run --group dev pytest -q              # 513 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
+uv run --group dev pytest -q              # 521 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
 uv run --group dev ruff check .           # must be clean
 uv run --group dev mypy msi_psu_monitor/  # must be clean
 ```

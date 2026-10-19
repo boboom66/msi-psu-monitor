@@ -1,0 +1,77 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: x86_64
+            deb_arch: amd64
+          - runner: ubuntu-22.04-arm
+            arch: aarch64
+            deb_arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check the tag matches pyproject.toml
+        run: |
+          VERSION=$(python3 -c "import pathlib, tomllib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          test "v$VERSION" = "${{ github.ref_name }}" || {
+            echo "tag ${{ github.ref_name }} does not match v$VERSION"; exit 1; }
+      - name: Install dependencies
+        run: uv sync --group dev --group build
+      - name: Test
+        run: uv run --group dev pytest -q
+      - name: Build the self-contained binaries
+        run: bash scripts/build_binary.sh
+      - name: Build the zero-Python .deb
+        run: bash scripts/build_deb_binary.sh
+      - name: Assert the package does not require Python
+        run: |
+          ! dpkg-deb -f dist/msi-psu-monitor_*_${{ matrix.deb_arch }}.deb Depends | grep -q python
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.arch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+            dist/*.deb
+            dist/*.deb.sha256
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Generate the combined checksums
+        run: |
+          cd dist
+          sha256sum *.tar.gz *.deb > SHA256SUMS
+          cat SHA256SUMS
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            dist/*.tar.gz dist/*.deb dist/SHA256SUMS \
+            --repo "${{ github.repository }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes

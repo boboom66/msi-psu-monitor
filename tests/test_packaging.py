@@ -20,6 +20,14 @@ UNIT = ROOT / 'systemd' / 'msi-psu-monitor.service'
 EXAMPLE = ROOT / 'docs' / 'msi-psu-monitor.conf.example'
 INSTALL_SH = ROOT / 'scripts' / 'install.sh'
 BUILD_DEB_SH = ROOT / 'scripts' / 'build_deb.sh'
+BUILD_BINARY_SH = ROOT / 'scripts' / 'build_binary.sh'
+BUILD_DEB_BINARY_SH = ROOT / 'scripts' / 'build_deb_binary.sh'
+INSTALL_BINARY_SH = ROOT / 'scripts' / 'install_binary.sh'
+UNINSTALL_BINARY_SH = ROOT / 'scripts' / 'uninstall_binary.sh'
+RELEASE_DOC = ROOT / 'docs' / 'release.md'
+CI_YML = ROOT / '.github' / 'workflows' / 'ci.yml'
+RELEASE_YML = ROOT / '.github' / 'workflows' / 'release.yml'
+PYPROJECT = ROOT / 'pyproject.toml'
 README = ROOT / 'README.md'
 
 #: Where the daemon looks for a config when --config is not given.
@@ -161,3 +169,87 @@ def test_the_unit_keeps_the_hardening_baseline_without_breaking_hidraw():
         assert active.get(name) == value, f'{name} must be {value}'
     assert 'PrivateDevices' not in active
     assert 'UMask' not in active
+
+
+def test_the_release_is_a_self_contained_onefile_freeze():
+    """The official download must not need a Python installation."""
+    text = BUILD_BINARY_SH.read_text(encoding='utf-8')
+    assert '--onefile' in text and '--strip' in text
+    assert 'uv run --frozen --group build pyinstaller' in text
+    assert 'GLIBC_FLOOR=2.35' in text
+    for name in ('msi-psu-monitor', 'msi-psu-monitor-daemon'):
+        assert name in text
+    assert 'sha256sum' in text
+    assert 'BUILD-INFO' in text
+    assert 'MSI_PSU_DEMO=1' in text  # the freeze is smoke-tested before packaging
+
+
+def test_pyinstaller_is_a_pinned_build_only_dependency():
+    text = PYPROJECT.read_text(encoding='utf-8')
+    groups = text.split('[dependency-groups]', 1)[1].split('[tool.', 1)[0]
+    assert re.search(r'build\s*=\s*\["pyinstaller==[0-9.]+"\]', groups)
+    # PyInstaller is build-only; it must not leak into [project].
+    project = text.split('[project]', 1)[1].split('[project.scripts]', 1)[0]
+    assert 'pyinstaller' not in project
+
+
+def test_the_tarball_installer_never_requires_python():
+    text = INSTALL_BINARY_SH.read_text(encoding='utf-8')
+    for forbidden in ('python3', 'pip install', 'uv run', 'python -m'):
+        assert forbidden not in text, forbidden
+    assert 'PREFIX=' in text
+    assert 'install -m 755' in text
+    assert '99-msi-psu.rules' in text
+    assert 'msi-psu-monitor.service' in text
+    assert 'msi-psu-monitor.conf.example' in text
+    # The user's edited config is never overwritten.
+    assert 'if [ -e "$CONFIG" ]' in text
+
+
+def test_the_binary_uninstaller_keeps_data_until_purge():
+    text = UNINSTALL_BINARY_SH.read_text(encoding='utf-8')
+    assert '--purge' in text
+    purge_branch = text.index('"$PURGE" = "--purge"')
+    assert text.index('rm -rf "$STATE"') > purge_branch
+    assert 'rm -f "$CONFIG"' in text[purge_branch:]
+
+
+def test_the_binary_deb_has_no_python_dependency():
+    text = BUILD_DEB_BINARY_SH.read_text(encoding='utf-8')
+    control = (
+        text.split('cat > "$STAGE/DEBIAN/control"', 1)[1].split('<<EOF', 1)[1].split('EOF', 1)[0]
+    )
+    depends = next(line for line in control.splitlines() if line.startswith('Depends:'))
+    assert depends == 'Depends: libc6 (>= 2.35), zlib1g'
+    assert 'python' not in depends.lower()
+    assert 'Architecture: $DEB_ARCH' in control
+    assert 'dpkg-deb --build --root-owner-group' in text
+    for name in ('msi-psu-monitor', 'msi-psu-monitor-daemon'):
+        assert name in text
+
+
+def test_ci_builds_and_checks_the_frozen_release_on_2204():
+    text = CI_YML.read_text(encoding='utf-8')
+    assert 'freeze:' in text
+    assert 'runs-on: ubuntu-22.04' in text
+    assert 'scripts/build_binary.sh' in text
+    assert 'scripts/build_deb_binary.sh' in text
+    assert 'grep -q python' in text
+
+
+def test_the_release_workflow_covers_both_arches_and_publishes_checksums():
+    text = RELEASE_YML.read_text(encoding='utf-8')
+    assert 'ubuntu-22.04' in text
+    assert 'ubuntu-22.04-arm' in text
+    assert 'python-version' in text
+    assert 'SHA256SUMS' in text
+    assert 'gh release create' in text
+    assert 'dist/*.tar.gz' in text and 'dist/*.deb' in text
+
+
+def test_the_release_doc_states_the_no_python_glibc_contract():
+    text = RELEASE_DOC.read_text(encoding='utf-8')
+    assert 'no Python' in text
+    assert 'glibc 2.35' in text
+    assert 'SHA256SUMS' in text
+    assert 'ubuntu-22.04-arm' in text

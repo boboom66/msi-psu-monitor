@@ -46,3 +46,35 @@ jobs:
         run: bash scripts/smoke.sh
       - name: Build the .deb
         run: bash scripts/build_deb.sh
+
+  freeze:
+    # The official download is a self-contained binary. Build it on the oldest
+    # glibc we support (Ubuntu 22.04 = 2.35) and prove it needs no Python.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the build toolchain
+        run: uv sync --group dev --group build
+      - name: Build the self-contained binaries
+        run: bash scripts/build_binary.sh
+      - name: Build the zero-Python .deb
+        run: bash scripts/build_deb_binary.sh
+      - name: Prove the release needs no Python
+        run: |
+          ! dpkg-deb -f dist/msi-psu-monitor_*_amd64.deb Depends | grep -q python
+          env -i PATH=/usr/bin:/bin HOME=/tmp MSI_PSU_DEMO=1 \
+            ./dist/bin/linux-x86_64/msi-psu-monitor --once >/dev/null
+      - name: Upload the release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-x86_64
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+            dist/*.deb
+            dist/*.deb.sha256
+          if-no-files-found: error

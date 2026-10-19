@@ -8,7 +8,7 @@ Protocol rules live in `msi_psu_monitor/AGENTS.md` (auto-loaded via `opencode.js
 
 ```bash
 uv sync --group dev                                  # py>=3.10, dev toolchain (pytest/ruff/mypy), zero runtime deps
-uv run --group dev pytest -q                         # 513 tests, no hardware needed
+uv run --group dev pytest -q                         # 521 tests, no hardware needed
 uv run --group dev pytest -q tests/test_state.py     # single file
 uv run --group dev ruff check .                      # must be clean
 uv run --group dev mypy msi_psu_monitor/             # must be clean
@@ -18,7 +18,9 @@ sudo msi-psu-monitor --once                          # one-shot; hidraw needs ro
 sudo msi-psu-monitor --watch 1                       # continuous, 1s poll
 sudo msi-psu-monitor -f prometheus -O /var/lib/node_exporter/msi-psu.prom
 msi-psu-monitor --dashboard --port 8899              # loopback charts over the daemon history
-bash scripts/build_deb.sh                            # .deb into dist/
+bash scripts/build_deb.sh                            # dev/CI source .deb into dist/
+bash scripts/build_binary.sh                          # self-contained tarball (build group)
+bash scripts/build_deb_binary.sh                      # zero-Python .deb from the binaries
 sudo ./scripts/install.sh                            # package + systemd daemon unit
 ```
 
@@ -123,6 +125,12 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12/3.13.
 - **Text IO is locale-independent**: config/state/history read `utf-8-sig` and write
   `utf-8`; systemd can inherit `LC_ALL=C`. `state.atomic_write_text` fsyncs the scratch
   file and the directory, so a power cut cannot leave an empty `state.json` behind.
+- **Official releases are self-contained**: `scripts/build_binary.sh` freezes two
+  PyInstaller onefile executables (pinned `build` group; never a runtime dependency),
+  built on Ubuntu 22.04/glibc 2.35 for x86_64 + arm64. The tarball installer and the
+  binary `.deb` must never mention `python3`/`pip`; `tests/test_packaging.py` checks
+  the dependency line and the scripts. Onefile extracts under `/tmp`, so the unit's
+  `PrivateTmp=yes` is required (never add `PrivateDevices`).
 - **Line endings**: `.gitattributes` enforces LF; CRLF breaks the shell scripts.
 - **`kernel/` patch is out-of-tree** (Proxmox 7.0 headers unavailable) — never build it
   here; the userspace tool is the supported path.
