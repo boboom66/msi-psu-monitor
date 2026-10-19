@@ -80,3 +80,6 @@
 | TEST-059 | FUNC-137 | 加速长稳 | demo daemon 20,000 样本，5s 采样 RSS/fd/state/prom/history | RSS 稳定、fd 不增长、无 traceback、正常退出 | 通过（约 200s） | PASS（加速）/24h NOT RUN |
 
 | TEST-060 | FUNC-191/192 | Ubuntu 22.04 本地构建 | 22.04 rootfs + userns chroot + PyInstaller 6.16.0；chroot 内运行 + 冻结 smoke | 22.04 内 `--version/--once/--show-alert-log` 通过；deb 依赖仅 libc6>=2.35/zlib1g | 通过（本地 chroot） | PASS（本地）/CI NOT RUN |
+
+| TEST-061 | FUNC-191/197 | CI release | push tag v1.0.0；build x86_64 + ubuntu-22.04-arm + publish | 两个 build success、release 发布、SHA256SUMS 覆盖全部资产 | 通过（run 39208968894） | PASS |
+| TEST-062 | FUNC-191/192 | 发布不含 source deb | 检查 release 资产与 SHA256SUMS | 无 `_all.deb`（Depends python3），仅自包含 amd64/arm64 deb | 通过 | PASS（DEF-013） |

@@ -691,4 +691,6 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
   320px 视口发现并修复图表网格横向溢出（DEF-012）。
 - Ubuntu 22.04.5 rootfs + userns chroot 已构建 PyInstaller 6.16.0 二进制，并在 22.04 内运行/冻结 smoke 通过；
   本地 tar/deb 已切换为 22.04/glibc 2.35 产物；CI 与 arm64 仍未跑。
+- GitHub Actions 已发布 v1.0.0：ubuntu-22.04 x86_64 + ubuntu-22.04-arm aarch64 build/publish success；
+  release 资产/SBOM/kit/SHA256SUMS 已核对，无 source `_all.deb`；CI release 又暴露并修复 DEF-013/014。
 - demo daemon 20,000 样本加速长稳：RSS 约 16.6MB 稳定、fd=3、prom 稳定；24h/72h 仍未跑。

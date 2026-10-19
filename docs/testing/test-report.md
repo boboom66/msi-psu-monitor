@@ -161,7 +161,7 @@ daemon + alert 注入                              alerts-YYYYMMDD.log 写入，
 
 ## 9. Phase 2 增量（2026-10-19）
 
-- 当前提交：Phase 2 修复（见 git log），测试 **630 passed**（3.10.21 / 3.12.3 裸环境与 3.12.3 venv）。
+- 当前提交：Phase 3 修复（见 git log），测试 **630 passed**（3.10.21 / 3.12.3 裸环境与 3.12.3 venv）。
 - 覆盖率：源语句 **92%**（`coverage report` 8 个模块；`__main__.py` 未覆盖）；CI 的门限为 90%。
 - 新增测试：真实 console 子进程 E2E、Host/CSP、JS 语法、HID 短/垃圾帧、daemon fd 泄漏、
   `--iterations` 边界、AlertLog `-O`、release/CI 门禁静态检查；
@@ -254,3 +254,14 @@ systemd-analyze verify                 exit 0
 - `.deb` 解包后同样在 22.04 内运行 `--version/--once` 通过；硬件 kit 的 `acceptance.sh --demo` 26 PASS/0 FAIL。
 - 复现步骤：[build-2204-chroot.md](build-2204-chroot.md)；证据：[evidence-2204-build.txt](evidence-2204-build.txt)。
 - **限制**：这是本地 chroot，不是 GitHub Actions 的 `ubuntu-22.04` runner；arm64 仍未构建。
+
+### 10.9 GitHub Actions 22.04/arm64 release（2026-10-19）
+
+- Release: <https://github.com/boboom66/msi-psu-monitor/releases/tag/v1.0.0>
+- Run: <https://github.com/boboom66/msi-psu-monitor/actions/runs/39208968894>
+- 提交：`e3ab7ae827943c86584880a9f040659e85bab928`（tag `v1.0.0`）。
+- Jobs：`build (ubuntu-22.04, x86_64, amd64)` success、`build (ubuntu-22.04-arm, aarch64, arm64)` success、`publish` success。
+- 资产：x86_64/aarch64 tar.gz、amd64/arm64 `.deb`、SBOM、两架构 hardware kit、`SHA256SUMS`；
+  `SHA256SUMS` 覆盖 kit，**不含** smoke 生成的 `_all.deb`；API digest 与 `SHA256SUMS` 全部一致。
+- 两个 tar 的 `BUILD-INFO` 均为 `build_glibc=2.35`；aarch64 二进制经 `file` 确认为 ARM aarch64。
+- 证据：[evidence-ci-release.txt](evidence-ci-release.txt)。
