@@ -399,7 +399,9 @@ msi-psu-monitor-daemon --config /nonexistent.conf; echo $?   # 一行错误，ex
 ### 7.1 自包含二进制（官网下载形态）
 
 官网发布物不要求目标机安装 Python。构建机必须是 Ubuntu 22.04（glibc 2.35）；在更新的
-系统上构建会被 `build_binary.sh` 拒绝（`ALLOW_NEWER_GLIBC=1` 仅供本地烟测）：
+系统上构建会被 `build_binary.sh` 拒绝（`ALLOW_NEWER_GLIBC=1` 仅供本地烟测）。Phase 3 已用
+Ubuntu 22.04 rootfs/chroot 构建并在 22.04 内运行通过（见 `docs/testing/test-report.md` §10.8）；
+官方发布仍须 CI provenance：
 
 ```bash
 uv sync --group dev --group build

@@ -111,6 +111,7 @@ wrote dist/SBOM-x86_64.json (10 components; hardware-kit artifact included)
   → `msi-psu-monitor 1.0.0`；`--once` 输出 demo 读数。
 - `ldd`（clean env）只显示 libdl/libz/libpthread/libc，无 libpython。
 - **限制**：本机 glibc 2.39，构建脚本必须 `ALLOW_NEWER_GLIBC=1`；这不是 22.04 官方产物。
+  Phase 3 已用 Ubuntu 22.04 rootfs/chroot 构建并在 22.04 内运行通过（见 §10.8）；CI provenance 仍未生成。
 
 ## 6. 端到端行为抽样
 
@@ -145,7 +146,7 @@ daemon + alert 注入                              alerts-YYYYMMDD.log 写入，
 | 真实 hidraw/PSU 通信 | BLOCKED | 无 `/dev/hidraw*` |
 | root/udev/systemd 实际启停 | BLOCKED | 普通用户，sudo 需密码 |
 | 安装/卸载脚本实际执行 | NOT RUN | 需要 root 与 systemd |
-| Ubuntu 22.04/glibc 2.35 构建 | BLOCKED | 本机 24.04/2.39 |
+| Ubuntu 22.04/glibc 2.35 构建 | PASS（本地 chroot）/CI NOT RUN | Phase 3 §10.8；本机 24.04/2.39 仅用于开发烟测 |
 | arm64 构建/运行 | BLOCKED | 无 arm64 环境 |
 | Dashboard 真实浏览器 | NOT RUN | 无浏览器自动化 |
 | 长稳/内存/fd 泄漏 | NOT RUN | 未设计长时间测试 |
@@ -243,3 +244,12 @@ systemd-analyze verify                 exit 0
 - 结果：RSS 约 16.6MB 稳定、fd=3 恒定、prom 约 4.4KB 稳定、history 1,164 行；
   无 traceback，正常 `Stopped after 20000 samples`。
 - 证据：[evidence-soak-20k.tsv](evidence-soak-20k.tsv)。**24h/72h 仍未跑**。
+
+### 10.8 Ubuntu 22.04 / glibc 2.35 本地 chroot 构建（2026-10-19）
+
+- 使用 `ubuntu-base-22.04.5-base-amd64.tar.gz` + userns chroot；系统 Python 3.10.12，PyInstaller 6.16.0。
+- 产物在 22.04 chroot 内实际执行：`--version`、`--once`、`--show-alert-log` 均通过。
+- 冻结 smoke 8 项：once / zero-fan / buzzer / performance / rail / alertlog / VIN / clean-env 全 PASS。
+- 本地 `.deb`：`msi-psu-monitor_1.0.0_amd64.deb`，`Depends: libc6 (>= 2.35), zlib1g`。
+- 证据：[evidence-2204-build.txt](evidence-2204-build.txt)。
+- **限制**：这是本地 chroot，不是 GitHub Actions 的 `ubuntu-22.04` runner；arm64 仍未构建。

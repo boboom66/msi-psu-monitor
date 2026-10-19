@@ -686,7 +686,9 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
   Dashboard CSV 错列。
 - 新增回归：输出路径/`/dev/full` 三类入口、配置边界、解析边界、daemon 资源、Dashboard CSV。
 - 全量 630 tests、ruff/format/mypy、smoke 58、shellcheck、systemd-analyze；覆盖率 92%。
-- 仍未改变 P1：真实 PSU、22.04/arm64、真实 systemd/udev、真实桌面浏览器、24h/72h、正式发版。
+- 仍未改变 P1：真实 PSU、CI 22.04/arm64、真实 systemd/udev、真实桌面浏览器、24h/72h、正式发版。
 - Playwright headless Chromium：range 切换、7 CSV/7 PNG、8 canvas、无 console/page error、无外部请求；
   320px 视口发现并修复图表网格横向溢出（DEF-012）。
+- Ubuntu 22.04.5 rootfs + userns chroot 已构建 PyInstaller 6.16.0 二进制，并在 22.04 内运行/冻结 smoke 通过；
+  本地 tar/deb 已切换为 22.04/glibc 2.35 产物；CI 与 arm64 仍未跑。
 - demo daemon 20,000 样本加速长稳：RSS 约 16.6MB 稳定、fd=3、prom 稳定；24h/72h 仍未跑。

@@ -33,7 +33,7 @@
 | ID | FUNC | 目的 | 命令 | 预期 | 实际 | 状态 |
 |---|---|---|---|---|---|---|
 | TEST-030 | FUNC-190 | 源码 `.deb` | `bash scripts/build_deb.sh`（smoke 内） | 产物存在、权限 0644、config 存在 | 通过 | PASS |
-| TEST-031 | FUNC-191 | 自包含 tar.gz | `ALLOW_NEWER_GLIBC=1 bash scripts/build_binary.sh` | 产物、clean-env `--version/--once`、新命令 smoke | 通过（本机 glibc 2.39） | PASS（本机）/22.04 B |
+| TEST-031 | FUNC-191 | 自包含 tar.gz | Phase 3：22.04 chroot 构建；clean-env `--version/--once`、新命令 smoke | 产物可运行、无 libpython、冻结 smoke 通过 | 通过（本地 chroot） | PASS（本地）/CI NOT RUN |
 | TEST-032 | FUNC-192 | 零 Python `.deb` | `bash scripts/build_deb_binary.sh` + `dpkg-deb -f` | `Depends` 仅 libc6/zlib1g | 通过 | PASS（本机） |
 | TEST-036 | FUNC-193/196 | 硬件验收 kit | `build_hardware_kit.sh`；提取后 `setup.sh`（二进制/源码）+ `acceptance.sh --demo` | kit 打包、安装命名空间、demo 验收、证据 tar | 通过 | PASS |
 | TEST-033b | FUNC-193 | 安装/卸载（用户命名空间） | unshare + 临时 /etc/var/lib + fake systemctl/udevadm | 配置保留、`--purge` 删除、unit/udev 安装 | 通过 | PASS |
@@ -49,7 +49,7 @@
 | TEST-041 | FUNC-060–079 | 真实 E0/E1/C0/C1/黑盒/风扇/VIN | 无 PSU 硬件 | BLOCKED |
 | TEST-042 | FUNC-090–096 | 真实风扇/Zero Fan/蜂鸣器/多轨写 | 无 PSU + 写入安全确认 | BLOCKED |
 | TEST-043 | FUNC-193/194/195 | 安装/卸载/udev/systemd 实际启停 | 无免密 sudo/root | BLOCKED |
-| TEST-044 | FUNC-191/192 | Ubuntu 22.04/glibc 2.35 构建 | 本机 24.04/2.39 | BLOCKED |
+| TEST-044 | FUNC-191/192 | Ubuntu 22.04/glibc 2.35 构建 | 22.04.5 rootfs + userns chroot + PyInstaller 6.16.0 | 22.04 内运行、冻结 smoke、deb 依赖通过 | 通过（本地 chroot） | PASS（本地）/CI NOT RUN |
 | TEST-045 | FUNC-191/192 | arm64 构建/运行 | 无 arm64 环境 | BLOCKED |
 | TEST-046 | FUNC-158/159 | 真实浏览器图表/PNG/CSV/1s live | 无浏览器自动化 | NOT RUN |
 | TEST-047 | FUNC-139 | 24h/72h 长稳/内存 | 未运行长测 | NOT RUN |
@@ -78,3 +78,5 @@
 
 | TEST-058 | FUNC-158 | Dashboard 窄视口 | Playwright 320/768/1920px；检查 `scrollWidth`、8 canvas | 320 无横向溢出；图表仍渲染 | 通过（headless） | PASS |
 | TEST-059 | FUNC-137 | 加速长稳 | demo daemon 20,000 样本，5s 采样 RSS/fd/state/prom/history | RSS 稳定、fd 不增长、无 traceback、正常退出 | 通过（约 200s） | PASS（加速）/24h NOT RUN |
+
+| TEST-060 | FUNC-191/192 | Ubuntu 22.04 本地构建 | 22.04 rootfs + userns chroot + PyInstaller 6.16.0；chroot 内运行 + 冻结 smoke | 22.04 内 `--version/--once/--show-alert-log` 通过；deb 依赖仅 libc6>=2.35/zlib1g | 通过（本地 chroot） | PASS（本地）/CI NOT RUN |

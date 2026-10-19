@@ -301,7 +301,7 @@ Dashboard 链:
 ## 7. 主要风险与不确定项
 
 1. 无 `hidraw` 设备：所有真实 PSU 通信、权限、root 行为、型号差异无法验证。
-2. 本机 glibc 2.39，官方要求 22.04/glibc 2.35；本地二进制构建需 `ALLOW_NEWER_GLIBC=1`，不能作为发布产物。
+2. 本机 glibc 2.39；Phase 3 已用 22.04 rootfs/chroot 构建并在 22.04 内运行通过（见 test-report §10.8），但 CI 仍须复跑。
 3. 无 arm64 环境；release workflow 的 arm runner 未验证。
 4. Dashboard JS 没有真实浏览器测试；只验证 HTTP 与页面源码。
 5. 安装/卸载、systemd 启停、udev uaccess 没有实际执行（无 sudo）。

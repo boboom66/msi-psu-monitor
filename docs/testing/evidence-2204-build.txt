@@ -1,0 +1,14 @@
+22.04 chroot build evidence (2026-10-19)
+=========================================
+Base: Ubuntu 22.04.5 LTS amd64 (ubuntu-base-22.04.5-base-amd64.tar.gz)
+Python: 3.10.12
+PyInstaller: 6.16.0
+Build command: pyinstaller --onefile --clean --noconfirm --strip --paths /src ...
+
+Artifact: /tmp/u2204/out/msi-psu-monitor (6.4M, ELF x86-64, stripped)
+Bootloader GLIBC version needs: GLIBC_2.2.5/2.3/2.3.4/2.4/2.7/2.14
+Host runs: --version / --once / --show-alert-log (demo)
+Inside 22.04 chroot runs: --version / --once / --show-alert-log (demo)
+Frozen smoke on package binaries: once/zero-fan/buzzer/performance/rail/alertlog/VIN all PASS
+.deb: msi-psu-monitor_1.0.0_amd64.deb, Depends: libc6 (>= 2.35), zlib1g
+Note: local chroot build, not GitHub Actions; arm64 still not built/verified.
