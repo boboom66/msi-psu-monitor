@@ -720,3 +720,14 @@ def test_iter_alert_log_zero_limit_returns_nothing(tmp_path):
     """limit=0 is an empty result, not the Python [-0:] full-list trap."""
     stats.append_alert_log(tmp_path, 'one', ts=1000.0)
     assert stats.iter_alert_log(tmp_path, limit=0) == []
+
+
+def test_state_dir_falls_back_when_the_default_path_is_a_regular_file(monkeypatch, tmp_path):
+    """A stray /var/lib/msi-psu-monitor file must not become a state directory."""
+    monkeypatch.delenv('MSI_PSU_STATE_DIR', raising=False)
+    monkeypatch.delenv('STATE_DIRECTORY', raising=False)
+    blocker = tmp_path / 'state-file'
+    blocker.write_text('not a directory', encoding='utf-8')
+    monkeypatch.setattr(stats, 'DEFAULT_STATE_DIR', blocker)
+    monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'xdg'))
+    assert stats.default_state_dir() == tmp_path / 'xdg' / 'msi-psu-monitor'

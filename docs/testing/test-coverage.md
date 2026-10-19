@@ -1,6 +1,6 @@
 # 测试覆盖与限制（Test Coverage）
 
-- 测试：636 passed；Python 3.10/3.12/3.13；源语句覆盖率 92%（branch 统计见 CI）。
+- 测试：645 passed；Python 3.10/3.12/3.13；源语句覆盖率 92%（branch 统计见 CI）。
 - smoke：58 passed；硬件 kit demo acceptance：26 PASS / 0 FAIL / 3 MANUAL。
 - 浏览器：Playwright headless Chromium 页面/CSV/PNG 已实际通过。
 
@@ -21,7 +21,7 @@
 
 | 类别 | 状态 |
 |---|---|
-| CLI/配置/状态/daemon/dashboard 软件行为 | PASS（636 tests） |
+| CLI/配置/状态/daemon/dashboard 软件行为 | PASS（645 tests） |
 | 打包/安装（用户命名空间）/CI release | PASS（本地 + GitHub Actions） |
 | 真实 PSU 读取/告警/写入 | BLOCKED（无样机） |
 | root/systemd/udev 实际启停 | PARTIAL/BLOCKED |

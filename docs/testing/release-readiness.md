@@ -9,7 +9,7 @@
 | 条件 | 状态 | 证据/原因 |
 |---|---|---|
 | 代码构建 | PASS（CI 22.04 + 本机） | CI x86_64/arm64 tar.gz/.deb/SBOM/kit 构建成功 |
-| 自动化测试 | PASS | 636 passed；ruff/mypy/compileall 通过 |
+| 自动化测试 | PASS | 645 passed；ruff/mypy/compileall 通过 |
 | smoke | PASS | 58 passed，0 failed |
 | 覆盖率门禁 | PASS | 源语句 92%，CI fail-under=90 |
 | 真实 PSU 通信 | **BLOCKED（P1）** | 无 `/dev/hidraw*`、无样机 |
@@ -30,8 +30,8 @@
 3. root 安装/udev/systemd 未执行：安装脚本只能算静态审查。
 4. 24h/72h 长稳、真实桌面浏览器仍未跑。
 
-Phase 3 已修复 10 类软件缺陷（输出错误/配置边界/CSV/资源泄漏/响应式等，见
-[bug-report.md](bug-report.md) DEF-005..016），并已拿到 CI 22.04 与 arm64 构建产物；软件层通过不等于真机验收。
+Phase 3 已修复 15 类软件缺陷（输出错误/配置边界/CSV/资源泄漏/响应式等，见
+[bug-report.md](bug-report.md) DEF-005..021），并已拿到 CI 22.04 与 arm64 构建产物；软件层通过不等于真机验收。
 
 ## 解除条件
 

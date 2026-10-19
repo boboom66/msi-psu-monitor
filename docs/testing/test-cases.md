@@ -1,7 +1,7 @@
 # 测试用例（第二阶段）
 
 - 基线提交：`650076a`；当前修复后工作树：Phase 2（见 git log）。
-- 全量自动化用例由 `pytest --collect-only` 收集，当前 **636** 个；本文件记录本轮新增/关键用例、
+- 全量自动化用例由 `pytest --collect-only` 收集，当前 **645** 个；本文件记录本轮新增/关键用例、
   人工 E2E 用例和仍无法执行的真机/root 用例。
 - 状态：PASS 已实际执行且符合预期；FAIL 已实际执行且不符合；BLOCKED 环境/权限/硬件限制；
   NOT RUN 尚未执行；N/A 不适用。
@@ -57,7 +57,7 @@
 
 ## D. 已有自动化覆盖
 
-原有 636 个 pytest 用例（含本文件列出的新增项）由 `tests/` 直接执行；逐项结果以
+原有 645 个 pytest 用例（含本文件列出的新增项）由 `tests/` 直接执行；逐项结果以
 `pytest -q` 的实际输出为准，不在此重复伪造逐条结果。测试模块与覆盖范围见
 [test-plan.md](test-plan.md) §4 和 [test-report.md](test-report.md)。
 
@@ -87,3 +87,10 @@
 | TEST-063 | FUNC-025 | export 原子写 | 目标已有文件，`_write_csv` 写一半抛 ENOSPC | 目标仍是旧内容、scratch 被清理 | 通过 | PASS（DEF-015） |
 | TEST-064 | FUNC-001/026 | 被忽略参数拒绝 | export + `-f json`/`--serial`；控制写 + `-f json` | argparse exit 2，错误说明 does not apply | 通过 | PASS（DEF-016） |
 | TEST-065 | FUNC-023 | 配置 format 固定模式 | 配置 `format=json` + `--fan-mode auto` | 文本输出 + warning | 通过 | PASS（DEF-016） |
+
+| TEST-066 | FUNC-130/137 | daemon 非 OSError 异常 | 注入 get_sensors/open/apply_stats/history/prom ValueError | 记录错误、计为失败/重试，不杀进程 | 通过 | PASS（DEF-017） |
+| TEST-067 | FUNC-024 | 0 W 样本 | demo 样本 power=0/efficiency=0 | count 增加、avg=0 | 通过 | PASS（DEF-018） |
+| TEST-068 | FUNC-023 | 默认 state dir 是文件 | DEFAULT_STATE_DIR=普通文件 + XDG | 回退 XDG，不使用文件 | 通过 | PASS（DEF-019） |
+| TEST-069 | FUNC-001 | 空 serial | `--serial ''` | argparse exit 2 | 通过 | PASS（DEF-020） |
+
+| TEST-070 | FUNC-044 | serial 发现异常设备 | fake MSIPSU.init 抛 ValueError | path=None、blocked 含设备、无 traceback | 通过 | PASS（DEF-021） |
