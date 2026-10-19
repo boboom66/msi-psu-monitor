@@ -253,8 +253,14 @@ def test_the_release_workflow_covers_both_arches_and_publishes_checksums():
     # The release tarball must be matched narrowly: dist/*.tar.gz also matches
     # the hardware kit and then the explicit kit glob passes it twice to
     # gh release create.
-    assert 'dist/msi-psu-monitor_*.tar.gz' in text and 'dist/*.deb' in text
+    assert 'dist/msi-psu-monitor_*.tar.gz' in text
+    assert 'dist/msi-psu-monitor_*_amd64.deb' in text
+    assert 'dist/msi-psu-monitor_*_arm64.deb' in text
+    assert 'dist/*.deb' not in text
     assert 'dist/*.tar.gz' not in text
+    # The smoke test builds a source .deb (Depends: python3); the release must
+    # drop it instead of uploading it next to the self-contained binaries.
+    assert 'Drop the source .deb' in text
 
 
 def test_the_release_doc_states_the_no_python_glibc_contract():
