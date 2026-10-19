@@ -9,7 +9,7 @@
 | 条件 | 状态 | 证据/原因 |
 |---|---|---|
 | 代码构建 | PASS（本机 x86_64/24.04） | 源码 `.deb`、tar.gz、二进制 `.deb`、SBOM 均构建成功 |
-| 自动化测试 | PASS | 616 passed；ruff/mypy/compileall 通过 |
+| 自动化测试 | PASS | 629 passed；ruff/mypy/compileall 通过 |
 | smoke | PASS | 58 passed，0 failed |
 | 覆盖率门禁 | PASS | 源语句 92%，CI fail-under=90 |
 | 真实 PSU 通信 | **BLOCKED（P1）** | 无 `/dev/hidraw*`、无样机 |
@@ -28,6 +28,9 @@
 1. 无真实 PSU：所有硬件读取、告警、写入、VIN/多轨/蜂鸣器语义均不能判定 PASS。
 2. 本机不是发布基线：必须用 CI `ubuntu-22.04` / `ubuntu-22.04-arm` 的产物复验。
 3. root 安装/udev/systemd 未执行：安装脚本只能算静态审查。
+
+Phase 3 已修复 7 类软件缺陷（输出错误/配置边界/CSV/资源泄漏等，见
+[bug-report.md](bug-report.md) DEF-005..011），但**没有改变**上述 P1 阻塞结论；软件层通过不等于真机/发布环境通过。
 
 ## 解除条件
 

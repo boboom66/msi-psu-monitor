@@ -103,7 +103,7 @@ $ bash scripts/build_deb_binary.sh
 $ dpkg-deb -f dist/msi-psu-monitor_1.0.0_amd64.deb Depends
 libc6 (>= 2.35), zlib1g
 $ python3 scripts/build_sbom.py --dist dist --output dist/SBOM-x86_64.json --arch x86_64
-wrote dist/SBOM-x86_64.json (9 components)
+wrote dist/SBOM-x86_64.json (10 components; hardware-kit artifact included)
 ```
 
 - tar.gz 包含 `install.sh`/`uninstall.sh`/unit/udev/config/README/LICENSE/SECURITY/docs/SHA256SUMS。
@@ -160,7 +160,7 @@ daemon + alert 注入                              alerts-YYYYMMDD.log 写入，
 
 ## 9. Phase 2 增量（2026-10-19）
 
-- 当前提交：Phase 2 修复（见 git log），测试 **616 passed**（3.10.21 / 3.12.3 裸环境与 3.12.3 venv）。
+- 当前提交：Phase 2 修复（见 git log），测试 **629 passed**（3.10.21 / 3.12.3 裸环境与 3.12.3 venv）。
 - 覆盖率：源语句 **92%**（`coverage report` 8 个模块；`__main__.py` 未覆盖）；CI 的门限为 90%。
 - 新增测试：真实 console 子进程 E2E、Host/CSP、JS 语法、HID 短/垃圾帧、daemon fd 泄漏、
   `--iterations` 边界、AlertLog `-O`、release/CI 门禁静态检查；
@@ -173,4 +173,47 @@ daemon + alert 注入                              alerts-YYYYMMDD.log 写入，
 - 仍 BLOCKED/NOT RUN：真实 hidraw/PSU、root/systemd/udev、安装卸载、22.04/arm64、真实浏览器、
   24h/72h 长稳、真实 tag 发布。
 
-> Phase 1 段落中的 569 是当时基线，保留作历史记录；当前以本节 616 为准。
+> Phase 1 段落中的 569 是当时基线，保留作历史记录；当前以本节 629 为准。
+
+## 10. Phase 3 全量审计增量（2026-10-19）
+
+### 10.1 实际执行证据
+
+```text
+pytest -q                              629 passed in 17.9s
+ruff check .                           All checks passed!
+ruff format --check .                  50 files already formatted
+mypy msi_psu_monitor/                  Success: no issues found in 10 source files
+coverage run --branch -m pytest -q     629 passed
+coverage report                        TOTAL 92% (statement)
+bash scripts/smoke.sh                  58 passed, 0 failed
+shellcheck -S warning scripts/*.sh scripts/hardware/*.sh   exit 0
+systemd-analyze verify                 exit 0
+```
+
+### 10.2 Phase 3 确认并修复的缺陷
+
+- **DEF-005（P2）输出错误处理**：`--show-alert-log -O` 曾 traceback；`--once -O`/`--ocp -O` 误报 “Run as root”；stdout 写满时 exit 120。
+  修复：`OutputError` + main 的 OSError 处理 + stdout 清理；回归覆盖 4 类入口。
+- **DEF-006（P2）配置 interval**：`[monitor] interval` 非正未校验；裸 `--watch` 忙循环/异常。修复为回落 2.0。
+- **DEF-007（P3）performance duty**：performance 模式仍保留 duty，改为与 auto 一样清理。
+- **DEF-008（P3）`--columns all,typo`**：先遇到 all 就静默全选；改为先校验所有 token。
+- **DEF-009（P3）`iter_alert_log(limit=0)`**：Python `[-0:]` 返回全部；改为返回空。
+- **DEF-010（P2）daemon 初始化失败 fd 泄漏**：open 成功、init 失败未 close；修复失败路径关闭。
+- **DEF-011（P3）Dashboard CSV 拼列**：`
+.join` 改为 `csv.writer`，含逗号/引号的值不再错列。
+
+### 10.3 状态统计
+
+| 状态 | 数量/说明 |
+|---|---|
+| PASS | 629 个自动化测试 + 静态检查 + smoke 58 |
+| FAIL | 0（本轮修复后） |
+| BLOCKED | 真实 hidraw/PSU、root/systemd/udev、22.04/arm64、真实浏览器、长稳、正式发版 |
+| NOT RUN | 24h/72h、真实 release 下载/升级/回滚、真实浏览器 PNG/CSV |
+| MANUAL | 真机 VIN/多轨/buzzer/告警/风扇主观项 |
+
+### 10.4 残余风险
+
+仍以 [bug-report.md](bug-report.md) 的 RISK-001..012 为准；最重要的 P1 仍是**无真实 PSU** 与**未在 22.04/arm64 构建运行**。
+本轮修复只覆盖软件层可复现缺陷，不能替代真机验收。

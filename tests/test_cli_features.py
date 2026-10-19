@@ -829,3 +829,44 @@ def test_successful_writes_leave_an_audit_line(monkeypatch, capsys, caplog):
     assert 'write fan mode=customized duty=60 verified=true' in caplog.text
     assert 'write buzzer=silenced verified=false' in caplog.text
     assert 'SN1' not in caplog.text
+
+
+def test_once_reports_an_unwritable_output_as_an_output_error(monkeypatch, capsys, tmp_path):
+    """A bad -O path must not be reported as "Permission denied. Run as root."
+
+    The output error used to be raised as PermissionError and swallowed by the
+    handler that is meant for the PSU device, which sent the user to sudo for a
+    path typo.
+    """
+    stub = StubPSU(sensors())
+    blocker = tmp_path / 'blocker'
+    blocker.write_text('not a directory')
+    target = blocker / 'once.out'
+    code, captured = run_main(monkeypatch, capsys, stub, ['--once', '-O', str(target)])
+    assert code == EXIT_ERROR
+    assert 'cannot write' in captured.err
+    assert 'Run as root' not in captured.err
+
+
+def test_show_alert_log_reports_an_unwritable_output(monkeypatch, capsys, tmp_path):
+    """--show-alert-log ran before the PSU try/except and used to traceback on -O."""
+    blocker = tmp_path / 'blocker'
+    blocker.write_text('not a directory')
+    target = blocker / 'alerts.log'
+    code, captured = run_main(
+        monkeypatch, capsys, StubPSU(), ['--show-alert-log', '-O', str(target)]
+    )
+    assert code == EXIT_ERROR
+    assert 'cannot write' in captured.err
+    assert 'Traceback' not in captured.err
+
+
+def test_show_log_reports_an_unwritable_output(monkeypatch, capsys, tmp_path):
+    stub = StubPSU(sensors())
+    stub.read_blackbox = lambda: []
+    blocker = tmp_path / 'blocker'
+    blocker.write_text('not a directory')
+    target = blocker / 'log.out'
+    code, captured = run_main(monkeypatch, capsys, stub, ['--show-log', '-O', str(target)])
+    assert code == EXIT_ERROR
+    assert 'cannot write' in captured.err

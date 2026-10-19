@@ -846,3 +846,17 @@ def test_daemon_rejects_zero_or_negative_iterations():
         with pytest.raises(SystemExit) as excinfo:
             parser.parse_args(['--iterations', value])
         assert excinfo.value.code == 2
+
+
+def test_a_failed_init_closes_the_already_open_device(tmp_path):
+    """open() then init() failing must not leak the hidraw descriptor."""
+
+    class FailingInit(StubPSU):
+        def init(self):
+            raise OSError('init handshake failed')
+
+    psu = FailingInit(clean_sensors())
+    daemon = make_daemon(tmp_path, psu)
+    assert daemon._ensure_psu() is None
+    assert psu.closed is True
+    assert daemon.device_path is None

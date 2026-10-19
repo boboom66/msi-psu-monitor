@@ -274,6 +274,8 @@ def test_parse_columns_order_dedup_and_all():
     with pytest.raises(ValueError):
         stats.parse_columns('wattage')
     with pytest.raises(ValueError):
+        stats.parse_columns('all,wattage')  # all must not swallow a typo
+    with pytest.raises(ValueError):
         stats.parse_columns('')  # an empty spec quietly meant "all columns"
 
 
@@ -712,3 +714,9 @@ def test_a_missing_or_corrupt_live_snapshot_reads_as_none(tmp_path):
     assert stats.read_live_snapshot(tmp_path) is None
     stats.live_path(tmp_path).write_text('not json', encoding='utf-8')
     assert stats.read_live_snapshot(tmp_path) is None
+
+
+def test_iter_alert_log_zero_limit_returns_nothing(tmp_path):
+    """limit=0 is an empty result, not the Python [-0:] full-list trap."""
+    stats.append_alert_log(tmp_path, 'one', ts=1000.0)
+    assert stats.iter_alert_log(tmp_path, limit=0) == []

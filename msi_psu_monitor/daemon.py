@@ -117,11 +117,20 @@ class MonitorDaemon:
             if self.device_path is None:
                 logger.debug('No MSI PSU found yet; retrying shortly.')
                 return None
+        psu = None
         try:
             psu = self.psu_factory(self.device_path)
             psu.open()
             psu.init()
         except (OSError, DeviceBusyError) as exc:
+            # open() succeeded but init() failed: the fd is live, so close it
+            # before dropping the object. Without this a persistent init failure
+            # leaks one descriptor per discovery attempt.
+            if psu is not None:
+                try:
+                    psu.close()
+                except Exception:  # pragma: no cover - best effort on a dying device
+                    pass
             logger.warning(f'Cannot open {self.device_path}: {exc}')
             # Forget the path so the retry goes through the discovery throttle
             # above: keeping it made the next tick reopen (and warn) every second.

@@ -264,3 +264,17 @@ def test_live_snapshot_defaults_on_and_can_be_disabled(tmp_path):
     disabled = tmp_path / 'live-disabled.conf'
     disabled.write_text('[daemon]' + chr(10) + 'live_snapshot = no' + chr(10), encoding='utf-8')
     assert load_config(str(disabled))['live_snapshot'] is False
+
+
+@pytest.mark.parametrize('value', ['0', '-2', '-0.5'])
+def test_a_non_positive_monitor_interval_falls_back(tmp_path, value):
+    """A bare --watch uses [monitor] interval; 0 busy-loops and <0 raises in sleep."""
+    conf = _write(tmp_path, f'[monitor]\ninterval = {value}\n')
+    assert load_config(str(conf))['interval'] == DEFAULTS['interval']
+
+
+def test_performance_mode_drops_a_configured_duty(tmp_path):
+    """performance is the PSU curve; a duty does not apply."""
+    cfg = _fan_conf(tmp_path, 'mode = performance\nduty = 60\n')
+    assert cfg['fan_mode'] == 'performance'
+    assert cfg['fan_duty'] is None

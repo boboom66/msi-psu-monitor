@@ -1,7 +1,7 @@
 # 测试用例（第二阶段）
 
 - 基线提交：`650076a`；当前修复后工作树：Phase 2（见 git log）。
-- 全量自动化用例由 `pytest --collect-only` 收集，当前 **616** 个；本文件记录本轮新增/关键用例、
+- 全量自动化用例由 `pytest --collect-only` 收集，当前 **629** 个；本文件记录本轮新增/关键用例、
   人工 E2E 用例和仍无法执行的真机/root 用例。
 - 状态：PASS 已实际执行且符合预期；FAIL 已实际执行且不符合；BLOCKED 环境/权限/硬件限制；
   NOT RUN 尚未执行；N/A 不适用。
@@ -57,6 +57,19 @@
 
 ## D. 已有自动化覆盖
 
-原有 616 个 pytest 用例（含本文件列出的新增项）由 `tests/` 直接执行；逐项结果以
+原有 629 个 pytest 用例（含本文件列出的新增项）由 `tests/` 直接执行；逐项结果以
 `pytest -q` 的实际输出为准，不在此重复伪造逐条结果。测试模块与覆盖范围见
 [test-plan.md](test-plan.md) §4 和 [test-report.md](test-report.md)。
+
+## E. Phase 3 新增回归用例（2026-10-19）
+
+| ID | FUNC | 目的 | 输入/步骤 | 预期 | 实际 | 状态 |
+|---|---|---|---|---|---|---|
+| TEST-049 | FUNC-001/004 | 输出路径失败诊断 | `--show-alert-log -O <blocker>/x`；`--once -O <blocker>/x`；`--show-log -O ...` | exit 1、stderr 含 cannot write、不含 Run as root/Traceback | 通过 | PASS |
+| TEST-050 | FUNC-001/004 | stdout ENOSPC | `--show-alert-log` / `--export` / `--once` > `/dev/full` | exit 1、无 Traceback/Exception ignored、stderr 说明 | 通过 | PASS |
+| TEST-051 | FUNC-023 | 非正 interval | `[monitor] interval = 0/-2/-0.5` 后裸 `--watch` | 回落 2.0，不忙循环/不抛 sleep | 通过 | PASS |
+| TEST-052 | FUNC-012 | performance 配置语义 | `[fan] mode=performance duty=60` | fan_mode=performance、fan_duty=None | 通过 | PASS |
+| TEST-053 | FUNC-026 | `--columns all` 拼写错误 | `parse_columns('all,wattage')` 与 CLI | ValueError / exit 1 | 通过 | PASS |
+| TEST-054 | FUNC-022 | AlertLog limit=0 | `iter_alert_log(limit=0)` 有记录时 | 返回 [] | 通过 | PASS |
+| TEST-055 | FUNC-130/137 | daemon 初始化失败资源 | open 成功、init 抛 OSError | 返回 None 且 psu.closed=True | 通过 | PASS |
+| TEST-056 | FUNC-160 | Dashboard CSV 引号 | 历史值含逗号时 `/api/export` | 单元格被 `"..."` 引用，列数不变 | 通过 | PASS |

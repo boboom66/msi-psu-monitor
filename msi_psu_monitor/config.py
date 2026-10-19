@@ -112,6 +112,10 @@ def load_config(path=None):
     monitor = parser['monitor'] if parser.has_section('monitor') else {}
     alerts = parser['alerts'] if parser.has_section('alerts') else {}
     cfg['interval'] = _as_float(monitor.get('interval'), cfg['interval'])
+    if cfg['interval'] <= 0:
+        # A bare --watch uses this value; 0 is a busy loop and a negative value
+        # raises in time.sleep instead of running the text stream.
+        cfg['interval'] = DEFAULTS['interval']
     cfg['format'] = monitor.get('format', cfg['format'])
     cfg['output'] = monitor.get('output', cfg['output'])
     cfg['verbose'] = _as_bool(monitor.get('verbose'), cfg['verbose'])
@@ -152,7 +156,7 @@ def load_config(path=None):
     if mode in FAN_MODES:
         cfg['fan_mode'] = mode
         cfg['fan_duty'] = _as_int(fan.get('duty'), DEFAULTS['fan_duty'])
-        if cfg['fan_mode'] == 'auto' or cfg['fan_duty'] is None:
+        if cfg['fan_mode'] in ('auto', 'performance') or cfg['fan_duty'] is None:
             cfg['fan_duty'] = None  # auto is a mode, not a duty
         else:
             cfg['fan_duty'] = min(100, max(0, cfg['fan_duty']))

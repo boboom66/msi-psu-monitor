@@ -1,6 +1,7 @@
 """Tests for the local dashboard HTTP endpoints (no hardware, no network egress)."""
 
 import contextlib
+import csv
 import io
 import json
 import os
@@ -569,3 +570,24 @@ def test_the_embedded_javascript_is_syntactically_valid(tmp_path):
     target.write_text(script, encoding='utf-8')
     result = subprocess.run([node, '--check', str(target)], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_export_endpoint_quotes_a_comma_in_a_value(tmp_path):
+    """A hand-edited history value with a comma must not shift the CSV columns."""
+    path = stats.history_path(tmp_path)
+    with path.open('w', newline='', encoding='utf-8') as handle:
+        writer = csv.writer(handle, lineterminator='\n')
+        writer.writerow(stats.HISTORY_COLUMNS)
+        writer.writerow(['2026-01-01T00:00:00+00:00', 'a,b'] + [''] * 9)
+    httpd = dashboard.make_server('127.0.0.1', 0, tmp_path)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        _, body = _get(f'http://127.0.0.1:{httpd.server_port}/api/export?from=all&columns=12v')
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=5)
+    lines = body.splitlines()
+    assert lines[0] == 'time,12v'
+    assert lines[1].endswith('"a,b"')

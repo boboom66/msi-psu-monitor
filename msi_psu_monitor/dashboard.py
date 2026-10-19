@@ -21,6 +21,8 @@ missing-file failure mode) and the server is one file to audit.
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import logging
 import os
@@ -576,10 +578,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     self._since_ts(),
                     self._columns(),
                 )
-                lines = [','.join(str(cell) for cell in row) for row in [header] + rows]
+                # Use the csv module, exactly like the CLI exporter: a value a
+                # hand-edited history file contains may hold a comma or quote,
+                # and naive ','.join() would shift every later column.
+                buffer = io.StringIO()
+                writer = csv.writer(buffer, lineterminator='\n')
+                writer.writerow(header)
+                writer.writerows(rows)
                 return (
                     200,
-                    '\n'.join(lines) + '\n',
+                    buffer.getvalue(),
                     'text/csv; charset=utf-8',
                     (('Content-Disposition', 'attachment; filename="msi-psu.csv"'),),
                 )

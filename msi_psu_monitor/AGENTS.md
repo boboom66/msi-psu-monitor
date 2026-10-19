@@ -153,7 +153,7 @@ runtime imports.
 ## Verification (no hardware required)
 
 ```bash
-uv run --group dev pytest -q              # 616 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
+uv run --group dev pytest -q              # 629 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
 uv run --group dev ruff check .           # must be clean
 uv run --group dev mypy msi_psu_monitor/  # must be clean
 uv run --group dev coverage run --branch -m pytest -q

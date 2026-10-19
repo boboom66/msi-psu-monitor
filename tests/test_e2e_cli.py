@@ -90,3 +90,26 @@ def test_no_demo_no_hardware_is_a_clean_error(tmp_path):
     assert result.returncode == 1
     assert 'MSI PSU not found' in result.stderr
     assert 'Traceback' not in result.stderr
+
+
+@pytest.mark.skipif(not Path('/dev/full').exists(), reason='/dev/full not available')
+@pytest.mark.parametrize('args', [['--show-alert-log'], ['--export', '--from', '2h'], ['--once']])
+def test_a_full_stdout_is_a_clean_exit_one(args, tmp_path):
+    """ENOSPC on stdout must not produce a traceback / exit 120."""
+    env = os.environ.copy()
+    env['MSI_PSU_STATE_DIR'] = str(tmp_path)
+    env['MSI_PSU_DEMO'] = '1'
+    with open('/dev/full', 'w', encoding='utf-8') as sink:
+        result = subprocess.run(
+            [sys.executable, '-m', 'msi_psu_monitor', *args],
+            cwd=ROOT,
+            env=env,
+            stdout=sink,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=20,
+        )
+    assert result.returncode == 1, result.stderr
+    assert 'Traceback' not in result.stderr
+    assert 'Exception ignored' not in result.stderr
+    assert 'cannot write output' in result.stderr

@@ -670,6 +670,8 @@ def iter_alert_log(state_dir, limit=None):
         except (OSError, UnicodeDecodeError) as exc:
             logger.warning(f'Skipping unreadable alert log {path.name}: {exc}')
     if limit is not None:
+        if limit <= 0:
+            return []
         lines = lines[-limit:]
     return lines
 
@@ -778,12 +780,14 @@ def parse_columns(spec):
     if spec is None:
         return list(EXPORT_COLUMNS)
     selected = []
+    select_all = False
     for token in spec.split(','):
         token = token.strip().lower()
         if not token:
             continue
         if token == 'all':
-            return list(EXPORT_COLUMNS)
+            select_all = True
+            continue
         if token not in EXPORT_COLUMNS:
             raise ValueError(
                 f'invalid --columns value {token!r}: choose from '
@@ -791,6 +795,8 @@ def parse_columns(spec):
             )
         if token not in selected:
             selected.append(token)
+    if select_all:
+        return list(EXPORT_COLUMNS)
     if not selected:
         raise ValueError('--columns needs at least one column name')
     return [name for name in EXPORT_COLUMNS if name in selected]

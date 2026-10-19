@@ -790,19 +790,36 @@ def _state_dir(cfg):
 # ---- modes --------------------------------------------------------------
 
 
+class OutputError(Exception):
+    """The requested output path could not be written (not a PSU failure)."""
+
+
 def emit(output, output_path):
     """Write ``output`` to stdout, or replace ``output_path`` atomically."""
     if not output_path:
         # flush: a closed pipe must fail here, inside main()'s handler, not during
         # the interpreter's shutdown flush (which would exit 120).
-        print(output, flush=True)
+        try:
+            print(output, flush=True)
+        except BrokenPipeError:
+            raise
+        except OSError as exc:
+            # ENOSPC/EIO on stdout: one normal fault, not the interpreter's 120.
+            _redirect_stdout_to_devnull()
+            raise OutputError(f'cannot write output: {exc}') from exc
         return
-    if os.path.exists(output_path) and not os.path.isfile(output_path):
-        # A fifo or /dev/stdout cannot be replaced, only written into.
-        with open(output_path, 'w', encoding='utf-8') as handle:
-            handle.write(output + '\n')
-        return
-    stats.atomic_write_text(output_path, output + '\n')
+    try:
+        if os.path.exists(output_path) and not os.path.isfile(output_path):
+            # A fifo or /dev/stdout cannot be replaced, only written into.
+            with open(output_path, 'w', encoding='utf-8') as handle:
+                handle.write(output + '\n')
+            return
+        stats.atomic_write_text(output_path, output + '\n')
+    except OSError as exc:
+        # A failed output path used to escape as PermissionError and be reported
+        # as "Run as root" (the catch for the PSU device), or as a raw traceback
+        # from --show-alert-log. Name the output path and keep it a normal fault.
+        raise OutputError(f'cannot write {output_path}: {exc}') from exc
 
 
 def run_once(psu, args, cfg, monitor_state, engine):
@@ -1131,11 +1148,15 @@ def _run_ocp_12v2x6(psu, product, args):
 def run_show_alert_log(args, cfg):
     """Print the local alert log (MSI Center's ViewLog equivalent, text only)."""
     lines = stats.iter_alert_log(_state_dir(cfg), limit=200)
-    if not lines:
-        emit('No alert log records stored.', args.output)
+    try:
+        if not lines:
+            emit('No alert log records stored.', args.output)
+            return EXIT_OK
+        emit('\n'.join(lines), args.output)
         return EXIT_OK
-    emit('\n'.join(lines), args.output)
-    return EXIT_OK
+    except OutputError as exc:
+        logger.error(f'Error: {exc}')
+        return EXIT_ERROR
 
 
 def run_export(args, cfg):
@@ -1487,10 +1508,24 @@ def main():
             sys.stdout.reconfigure(line_buffering=True)
         except (OSError, ValueError):  # pragma: no cover - detached stdout
             pass
+
+    def report_output_error(exc):
+        # stderr can be a full disk too; never let the report itself traceback.
+        try:
+            print(f'Error: cannot write output: {exc}', file=sys.stderr, flush=True)
+        except OSError:
+            pass
+        _redirect_stdout_to_devnull()
+
     try:
         _main()
     except BrokenPipeError:
         _redirect_stdout_to_devnull()
+    except OSError as exc:
+        # ENOSPC/EIO on stdout (e.g. > /dev/full): report one line and use the
+        # documented exit code 1 instead of the interpreter's 120/traceback.
+        report_output_error(exc)
+        sys.exit(EXIT_ERROR)
     finally:
         # --help/--version exit through argparse's SystemExit before _main()'s
         # own handler, so a closed pipe can only surface at this final flush.
@@ -1498,6 +1533,9 @@ def main():
             sys.stdout.flush()
         except BrokenPipeError:
             _redirect_stdout_to_devnull()
+        except OSError as exc:
+            report_output_error(exc)
+            sys.exit(EXIT_ERROR)
 
 
 def _main():
@@ -1591,6 +1629,9 @@ def _main():
         if args.watch is not None:
             sys.exit(run_watch(psu, args, cfg, monitor_state, engine))
         sys.exit(run_once(psu, args, cfg, monitor_state, engine))
+    except OutputError as exc:
+        logger.error(f'Error: {exc}')
+        sys.exit(EXIT_ERROR)
     except DeviceBusyError:
         logger.error('Error: the PSU is busy (the daemon or another run holds it).')
         sys.exit(EXIT_ERROR)

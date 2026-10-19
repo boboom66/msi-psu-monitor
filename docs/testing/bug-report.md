@@ -13,7 +13,7 @@
 
 **DEF-001 已审查排除**：`MONITOR="$PY -m msi_psu_monitor"` 是命令字符串，给 `$MONITOR` 加引号会变成单个可执行文件名并 exit 127；SC2086 是 info，CI 的 `-S warning` 门禁通过。保留这种写法，smoke 58 项已验证。
 
-基线未发现可复现的 P0/P1/P2 软件功能缺陷；这不等于不存在缺陷，硬件与浏览器/安装路径仍未测。
+基线未发现可复现的 P0/P1 软件功能缺陷；Phase 3 又确认并修复了 7 类 P2/P3 软件缺陷（见 §5）。这不等于不存在缺陷，硬件与浏览器/安装路径仍未测。
 
 ## 2. 发布/测试风险
 
@@ -46,3 +46,17 @@
 
 每个确认缺陷修复时必须补充回归测试；每个风险转为结论时必须附命令与输出。
 Phase 2 会把上表映射为 TEST-xxx，并在 `test-cases.md` 中记录前置条件、输入、预期和实际结果。
+
+## 5. Phase 3 新增确认缺陷（2026-10-19）
+
+| ID | 严重度 | 状态 | 描述 | 证据 | 影响 | 处理 |
+|---|---|---|---|---|---|---|
+| DEF-005 | P2 | 已修复 | 输出路径错误被误报为“Run as root”；`--show-alert-log -O` traceback；stdout 写满（ENOSPC）exit 120 且有异常输出 | 复现：`--show-alert-log -O /no/such/x`、`--once -O /no/such/x`、`--once >/dev/full`；修复后 exit 1 + “cannot write” / 无 traceback | 误导 root 诊断、脚本收到错误退出码、日志被污染 | `emit()` 增加 `OutputError`；main 捕获 OutputError/OSError 并清理 stdout；3 个回归测试通过 |
+| DEF-006 | P2 | 已修复 | `[monitor] interval = 0/-1` 未校验；裸 `--watch` 会忙循环或 `time.sleep(-1)` 抛异常 | `test_a_non_positive_monitor_interval_falls_back` | 无提示的忙循环/崩溃 | `load_config` 回落默认 2.0 |
+| DEF-007 | P3 | 已修复 | `[fan] mode=performance` 仍保留 duty，与 performance=PSU 曲线语义不符 | `test_performance_mode_drops_a_configured_duty` | 配置语义混乱，日志显示无意义 duty | performance 与 auto 一样清空 duty |
+| DEF-008 | P3 | 已修复 | `--columns all,wattage` 先遇到 all 就返回全部，拼写错误被静默吞掉 | `test_parse_columns_order_dedup_and_all` 新增 `all,wattage` ValueError 断言 | 用户以为选了指定列，实际导出全部 | 先校验全部 token，再决定 all |
+| DEF-009 | P3 | 已修复 | `iter_alert_log(limit=0)` 因 Python `[-0:]` 返回全部而不是空 | `test_iter_alert_log_zero_limit_returns_nothing` | 边界 API 语义错误 | limit<=0 返回 [] |
+| DEF-010 | P2 | 已修复 | daemon `open()` 成功、`init()` 失败时未关闭已打开的 hidraw fd | `test_a_failed_init_closes_the_already_open_device` | 持续发现失败时每轮泄漏一个 fd | `_ensure_psu` 失败路径关闭 psu |
+| DEF-011 | P3 | 已修复 | Dashboard `/api/export` 用 `",".join` 拼 CSV，值含逗号/引号时错列 | `test_export_endpoint_quotes_a_comma_in_a_value` | 手工编辑的历史文件可让导出列错位 | 改用 `csv.writer`（与 CLI 一致） |
+
+回归命令：`uv run --group dev pytest -q` → 629 passed；覆盖率 92%；`ruff check`/`mypy`/`smoke` 见 test-report。
