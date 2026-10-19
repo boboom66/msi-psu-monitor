@@ -148,6 +148,11 @@ def _is_truncated_ts_name(product):
     return any(f'AI{model}T' in name for model in ('1300', '1600'))
 
 
+def _clean_identity(value):
+    """Keep printable ASCII from an untrusted device string, capped in length."""
+    return ''.join(char for char in value if ' ' <= char <= '~')[:64]
+
+
 def lin11_to_int(v16, scale=1000, signed=False):
     """Convert SMBus LINEAR11 encoded value to integer.
 
@@ -425,14 +430,14 @@ class MSIPSU:
         # Init handshake: [0xFA, 0x51] returns product name
         resp = self.hid.send_command([PSU_INIT, 0x51])
         if resp:
-            self.product = (
+            self.product = _clean_identity(
                 bytes(resp).rstrip(b"\x00").decode("ascii", errors="replace").strip()
             )
 
         # Read vendor string
         resp = self.hid.read_register(REG_VEND_STR)
         if resp:
-            self.vendor = (
+            self.vendor = _clean_identity(
                 bytes(resp).rstrip(b"\x00").decode("ascii", errors="replace").strip()
             )
 
@@ -450,7 +455,9 @@ class MSIPSU:
                 self.fw_revision = f"{chr(revision[0])}.{chr(revision[1])}"
             else:
                 # Anything else is passed through instead of turned into a guess.
-                self.fw_revision = revision.decode("ascii", errors="replace").strip()
+                self.fw_revision = _clean_identity(
+                    revision.decode("ascii", errors="replace").strip()
+                )
 
         # Read serial number (REV6 MFR_SERIAL: Byte1 = length prefix)
         resp = self.hid.read_register(REG_SERIAL)
@@ -458,7 +465,9 @@ class MSIPSU:
             body = bytes(resp)
             if body[0] < 0x20 and 1 + body[0] <= len(body):
                 body = body[1 : 1 + body[0]]
-            self.serial = body.rstrip(b"\x00").decode("ascii", errors="replace").strip()
+            self.serial = _clean_identity(
+                body.rstrip(b"\x00").decode("ascii", errors="replace").strip()
+            )
 
         # A name that lost its trailing "S" is a short read, not another model:
         # decoded as a MEG it would yield wrong bytes with no error at all.
@@ -733,7 +742,31 @@ class MSIPSU:
                 "RPM",
             )
 
+        vin = self.read_vin()
+        if vin is not None:
+            sensors["vin"] = vin
+
         return sensors
+
+    def read_vin(self):
+        """Read AC input voltage from VIN (0x20).
+
+        MSI Center's GET_VIN refuses the MPG TS models and decodes ValueCalc
+        directly as volts (CPSU.cs:540-549); the register is therefore tried on
+        the MEG models and simply omitted when the PSU NAKs it (the Ai1600T may
+        not implement it). REV6 removed VIN from its command table, so this is an
+        MSI-compatible extra rather than a spec requirement.
+
+        Returns:
+            (volts, 'V') or None when unsupported/unanswered.
+        """
+        if self.variant is None or self.variant in MSIPSU.SEVEN_ZPU_VARIANTS:
+            return None
+        data = self.hid.read_register(REG_IN_VOLTS)
+        if data is None or len(data) < 2:
+            return None
+        raw = struct.unpack("<H", bytes(data[:2]))[0]
+        return (round(lin11_to_int(raw, 1, False), 1), "V")
 
     @property
     def alert_names(self):
@@ -1004,3 +1037,23 @@ class MSIPSU:
         if data is None or len(data) < 1:
             return None
         return data[0] == 2
+
+    def set_multirail_ocp(self, enabled):
+        """Switch the MEG P 12V rail protection mode (C0h, 1 byte) and save it.
+
+        2 enables per-rail (multi-rail) protection, 1 falls back to one combined
+        rail; MSI Center exposes this as DC Output -> Multi Rail / Single Rail and
+        sends SET_MULTIRAIL_OCP + SAVE_SETTING (C_PSU.cs:1392). Only the
+        Ai1000P/Ai1300P answer this one-byte form of 0xC0; on the MPG TS models
+        the same address is the 8-byte 12V-2x6 configuration, and the Ai1600T
+        answers neither, so those are refused instead of writing a register with
+        another meaning.
+
+        Returns:
+            True when both the write and the save were acknowledged.
+        """
+        if self.variant not in self.MULTIRAIL_VARIANTS:
+            return False
+        if not self.hid.write_command([REG_MULTIRAIL, 2 if enabled else 1]):
+            return False
+        return self.hid.write_command([REG_SAVE_SETTING])

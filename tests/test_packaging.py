@@ -165,6 +165,12 @@ def test_the_unit_keeps_the_hardening_baseline_without_breaking_hidraw():
         ('LockPersonality', 'yes'),
         ('RestrictRealtime', 'yes'),
         ('RestrictNamespaces', 'yes'),
+        ('RestrictAddressFamilies', 'AF_UNIX AF_NETLINK'),
+        ('SystemCallArchitectures', 'native'),
+        ('ProtectProc', 'invisible'),
+        ('ProcSubset', 'pid'),
+        ('PrivateIPC', 'yes'),
+        ('CapabilityBoundingSet', ''),
     ):
         assert active.get(name) == value, f'{name} must be {value}'
     assert 'PrivateDevices' not in active

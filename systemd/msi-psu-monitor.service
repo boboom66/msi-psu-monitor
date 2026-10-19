@@ -38,6 +38,16 @@ RestrictSUIDSGID=yes
 LockPersonality=yes
 RestrictRealtime=yes
 RestrictNamespaces=yes
+# The daemon has no network surface: it reads hidraw and writes files/journald.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+SystemCallArchitectures=native
+ProtectProc=invisible
+ProcSubset=pid
+PrivateIPC=yes
+# Root is required for /dev/hidraw*, but no capability is: the device node is
+# root-owned and the state directory is created by systemd. Do not re-add a
+# capability just to "make root work" -- this is the least-privilege check.
+CapabilityBoundingSet=
 
 # Alerts are written to stderr, which journald records:
 #   journalctl -u msi-psu-monitor -f

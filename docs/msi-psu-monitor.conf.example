@@ -44,6 +44,13 @@ prom_interval = 30
 history_interval = 60
 # Daily buckets and daily-*.log files older than this are pruned.
 retention_days = 30
+# Append alert edges/recoveries to alerts-YYYYMMDD.log in the state directory
+# (rotated at 5 MiB, pruned with retention_days). The MSI Center equivalent is
+# AlertLog_MM_dd_yyyy.log; set to no to keep alerts on stderr/journald only.
+#alert_log = yes
+# Write latest.json every sample for the dashboard's 1 s live charts.
+# Set to no on a write-sensitive disk; the dashboard then updates per minute.
+live_snapshot = yes
 
 [fan]
 # Re-assert a fan profile every time the daemon (re)opens the PSU, the way MSI

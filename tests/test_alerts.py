@@ -126,3 +126,20 @@ def test_the_pin_mirror_trips_at_the_threshold_not_above_it():
     # 6 A across the two connectors, but only 1 A inside either one.
     per_connector = [13.0, 13.0, 13.0, 13.0, 13.0, 13.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0]
     assert not evaluate_pin_alerts(per_connector)['pin_imbalance']
+
+
+def test_a_recovery_is_reported_once_and_reset():
+    engine = AlertEngine(consecutive_required=1)
+    engine.update({'ocp_pin1': True})
+    assert engine.take_cleared() == []
+    engine.update({'ocp_pin1': False})
+    cleared = engine.take_cleared()
+    assert [alert.name for alert in cleared] == ['ocp_pin1']
+    assert engine.take_cleared() == []
+
+
+def test_a_model_swap_is_not_a_recovery():
+    engine = AlertEngine(consecutive_required=1)
+    engine.update({'ocp_pin1': True})
+    engine.retain(set())
+    assert engine.take_cleared() == []

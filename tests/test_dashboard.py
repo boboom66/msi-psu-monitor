@@ -489,3 +489,32 @@ def test_an_unexpected_handler_error_keeps_its_traceback(tmp_path, caplog):
 
 def test_an_idle_connection_cannot_pin_a_thread_forever():
     assert 0 < dashboard.DashboardHandler.timeout <= 60
+
+
+def test_the_power_chart_has_cpu_and_gpu_series(live_server):
+    status, body = _get(live_server + '/')
+    assert status == 200
+    assert "['cpu_w'" in body and "['gpu_w'" in body
+    assert "['eff','#6ea8fe','%']" in body
+    assert 'loadLive' in body
+    assert "fetch('/api/live')" in body
+    assert 'setInterval(loadLive, 1000)' in body
+
+
+def test_live_endpoint_serves_a_fresh_snapshot(live_server, tmp_path):
+    sensors = _sensors()
+    sensors['iout_12v_rails'] = ([10.0, 20.0, 15.0, 5.0, 0.0], 'A')
+    sensors['vout_12v_rails'] = ([12.1, 12.1, 12.1, 12.1, 12.1], 'V')
+    stats.write_live_snapshot(tmp_path, sensors, ts=time.time())
+    status, body = _get(live_server + '/api/live')
+    assert status == 200
+    payload = json.loads(body)
+    assert payload['vout_12v'] == 12.1
+    assert payload['cpu_w'] == 242.0
+    assert 'serial' not in payload
+
+
+def test_live_endpoint_is_503_without_a_fresh_snapshot(live_server):
+    with pytest.raises(HTTPError) as excinfo:
+        _get(live_server + '/api/live')
+    assert excinfo.value.code == 503

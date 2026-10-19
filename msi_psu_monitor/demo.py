@@ -107,6 +107,7 @@ class DemoPSU:
         self.serial = DEMO_SERIAL
         self.fan_mode = 1
         self.fan_duty = 30
+        self.multirail_enabled = True
         self._alert_warned = False
         #: Set by --zero-fan; None keeps the load-dependent demo behaviour.
         self.zero_fan_override = None
@@ -185,6 +186,8 @@ class DemoPSU:
         if self.variant in MSIPSU.MULTIRAIL_VARIANTS:
             sensors['vout_12v_rails'] = ([round(volts_12v, 3)] * 5, 'V')
             sensors['iout_12v_rails'] = (self._rail_currents(total_a), 'A')
+        if self.variant not in MSIPSU.SEVEN_ZPU_VARIANTS:
+            sensors['vin'] = (230.0, 'V')
         return sensors
 
     # ---- control surface -------------------------------------------------
@@ -228,6 +231,13 @@ class DemoPSU:
         """Report the fixture's per-rail protection state for the MEG P models."""
         if not self.supports_multirail_ocp:
             return None
+        return self.multirail_enabled
+
+    def set_multirail_ocp(self, enabled):
+        """Switch the emulated MEG P rail mode; non-P models refuse it."""
+        if not self.supports_multirail_ocp:
+            return False
+        self.multirail_enabled = bool(enabled)
         return True
 
     def read_ocp_thresholds(self):

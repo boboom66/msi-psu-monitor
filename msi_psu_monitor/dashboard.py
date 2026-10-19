@@ -97,7 +97,8 @@ const CHARTS = [
   {id:'total', title:'12V total current', unit:'A',   keys:[['total_a','#8f7ce0']]},
   {id:'temp',  title:'Temperature',       unit:'\\u00b0C', keys:[['temp','#e0a25c']]},
   {id:'fan',   title:'Fan speed',         unit:'RPM', keys:[['fan','#5ce09b']]},
-  {id:'power', title:'Power / efficiency',unit:'W / %', keys:[['power','#e05cc9'],['eff','#6ea8fe']]},
+  {id:'power', title:'Power / efficiency',unit:'W / %', keys:[
+    ['power','#e05cc9','W'],['cpu_w','#f2a65a','W'],['gpu_w','#8f7ce0','W'],['eff','#6ea8fe','%']]},
 ];
 let range = '7d', rows = [];
 // Injected by the server (see PAGE_SUBSTITUTIONS): a Python constant is not
@@ -201,7 +202,7 @@ function render() {
     const range2 = draw(canvas, all, true);
     const last = all.map(s => s.pts.length ? s.pts[s.pts.length - 1][2] : null);
     document.getElementById('last-' + c.id).textContent = last
-      .map((v, i) => v === null ? '--' : v.toFixed(c.id === 'fan' ? 0 : 2) + ' ' + (c.keys[i][0] === 'eff' ? '%' : c.unit))
+      .map((v, i) => v === null ? '--' : v.toFixed(c.id === 'fan' ? 0 : 2) + ' ' + (c.keys[i][2] || c.unit))
       .join('   ');
     const pts = all.reduce((n, s) => n + s.pts.length, 0);
     document.getElementById('meta-' + c.id).textContent =
@@ -320,7 +321,26 @@ document.querySelector('.bar').addEventListener('click', e => {
 window.addEventListener('resize', render);
 buildCards();
 load();
+// The daemon replaces latest.json every sample; poll it once a second so the
+// charts move between the one-minute history writes. A 503 means the daemon is
+// stopped or [daemon] live_snapshot is off: keep the last history frame.
+async function loadLive() {
+  try {
+    const live = await fetch('/api/live').then(okJson);
+    const stamp = new Date(live.ts * 1000).toISOString();
+    live.time = stamp;
+    const last = rows[rows.length - 1];
+    if (last && Date.parse(last.time) >= Date.parse(stamp)) return;
+    rows.push(live);
+    if (rows.length > ROW_LIMIT) rows.shift();
+    render();
+  } catch (err) {
+    // The history poll already reports an unavailable daemon.
+  }
+}
 setInterval(load, __REFRESH_MS__);
+setInterval(loadLive, 1000);
+loadLive();
 </script>
 </body>
 </html>
@@ -490,6 +510,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     # kWh / 200" as a daemon that never ran, and the operator has
                     # no way to tell the two apart. The CLI can: it fails loudly.
                     return 503, f'{problem}\n', 'text/plain; charset=utf-8', ()
+            if route == '/api/live':
+                payload = stats.read_live_snapshot(self.state_dir)
+                if payload is None:
+                    return (
+                        503,
+                        'no fresh live sample from the daemon\n',
+                        'text/plain; charset=utf-8',
+                        (),
+                    )
+                return 200, json.dumps(payload), 'application/json', ()
             if route == '/api/history':
                 payload = _history_payload(self.state_dir, self._from_spec())
                 return 200, json.dumps(payload), 'application/json', ()

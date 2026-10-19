@@ -3,7 +3,7 @@
 > 没有真机也能验证 CLI、告警、daemon、历史落盘、prometheus 与 dashboard 全链路。
 > 下面每条命令都已在 `.venv`（Python 3.13.15）实跑通过；测试套件另在**裸环境**复核过
 > 3.12.3 与 3.10.21 两遍（把工作树复制一份、不带 `.venv`、不装本包，直接
-> `python3 -m pytest`，各 **521 通过**；`smoke.sh` 的 **58 项**在 3.12 裸环境跑过）。
+> `python3 -m pytest`，各 **569 通过**；`smoke.sh` 的 **58 项**在 3.12 裸环境跑过）。
 > 3.10 另有静态兜底——ruff `target-version = "py310"`、mypy
 > `python_version = "3.10"`（按 3.10 typeshed 分析）、smoke 里对每个 `.py` 的
 > `ast.parse(feature_version=(3, 10))`。
@@ -63,6 +63,7 @@ uv run --group dev ruff format --check .
 | `tests/test_pid_consistency.py` | 五处 USB PID 列表 + README 载荷双数字（`test_readme_payload_sizes_match_the_parser`） |
 | `tests/test_stdlib_only.py` | `python -I` 子进程导入全部模块（零第三方依赖；`test_the_probe_covers_every_shipped_module`） |
 | `tests/test_docs_consistency.py` | 文档里的用例数、测试文件名、§1.1 覆盖表函数名、CLI 参数清单、版本号双重来源不得与事实不符（`test_quoted_test_counts_are_accurate`） |
+| `tests/test_release_security.py` | SBOM/CycloneDX 与产物哈希、SECURITY/support/incident 文档、release workflow 发布 SBOM（`test_the_sbom_generator_emits_cyclonedx_with_artifact_hashes`、`test_the_release_workflow_generates_and_publishes_an_sbom`） |
 
 `tests/test_docs_consistency.py` 是「文档防伪」：文档里写下的数字与文件名，都由测试去核对一遍。
 
@@ -87,7 +88,7 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。当前基线：**521 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
+三条全绿即通过。当前基线：**569 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
 
 > `ruff format --check .` **可以全仓跑**（CI 也跑）：`protocol.py`/`__init__.py`/`__main__.py`/
 > `tests/test_monitor.py` 这四个历史文件混用引号风格，已由 `[tool.ruff.format] exclude` +
@@ -406,7 +407,9 @@ ldd ./dist/bin/linux-x86_64/msi-psu-monitor   # 不应出现 libpython
 `install.sh` 只做 `install -m 755` + udev/systemd，不调用 python3/pip；`uninstall.sh`
 默认保留配置与 `/var/lib/msi-psu-monitor`，`--purge` 才删除。正式发布由
 `.github/workflows/release.yml` 在 `ubuntu-22.04` / `ubuntu-22.04-arm` 上构建并上传
-`SHA256SUMS`；详细矩阵见 [release.md](release.md)。
+`SHA256SUMS` 与 `SBOM-<arch>.json`；详细矩阵见 [release.md](release.md)，安全/支持/
+应急流程见 [SECURITY.md](../SECURITY.md)、[support.md](support.md)、
+[incident-response.md](incident-response.md)。
 
 ## 8. 真机到达后（唯一待补）
 
@@ -436,4 +439,18 @@ journalctl -u msi-psu-monitor -f
 10. `--ocp` 在 MEG Ai1600T（`0xC9EB`）上打印「not available」并 exit 0（两个 `0xC0` 视图
    都不支持），不产生 NAK 重试或超时；
 11. `--zero-fan on/off` 写后读回一致（42h byte 4），`F1h` 保存后断电重启仍生效；
-    `--buzzer-off` 在 12+4 OCP 蜂鸣触发时能让蜂鸣停止（C2h 无回读，只看 ACK 与听感）。
+    `--buzzer-off` 在 12+4 OCP 蜂鸣触发时能让蜂鸣停止（C2h 无回读，只看 ACK 与听感）；
+    再执行一次，确认它是「静音」还是 MSI 命名的「switch」（第二次是否会重新响）；
+12. `--set-rail multi` / `--set-rail single` 在 MEG Ai1300P（`0x56D4`）上读回一致，
+    断电重启后模式保持；Ai1000P（`0xE749`）同样验证；MPG TS 和 Ai1600T 应拒绝并
+    exit 1（机型门），且不产生错误寄存器写入；
+13. `--set-rail` 切换前后 `--ocp` 的 multirail 标志与读回一致；切换后的 OCP 行为
+    （单轨总电流 vs 各轨独立限流）与 MSI Center 的 Multi Rail/Single Rail 一致；
+14. MEG Ai1300P 上 `AC Input`（0x20）接近市电电压（220-240 V），MPG TS 上不出现该行
+    且不产生 NAK 重试；Ai1600T 若 NAK 则自然省略，不算失败；
+15. 触发一次真实告警并恢复：`alerts-YYYYMMDD.log` 先出现 `ALERT` 行、恢复后出现
+    `RECOVERED` 行，`--show-alert-log` 能原样打印；5 MiB 轮转与 30 天清理不丢当天文件；
+16. daemon 运行时 dashboard 的曲线每秒前进（`/api/live` 200），停 daemon 后 10 s 内
+    `/api/live` 变 503、页面显示 stale；`[daemon] live_snapshot = no` 时回落到分钟级；
+17. `systemd-analyze security msi-psu-monitor` 无 PrivateDevices、无多余 capability，
+    `CapabilityBoundingSet` 为空时 hidraw 仍能打开。

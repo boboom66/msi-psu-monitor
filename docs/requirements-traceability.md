@@ -9,7 +9,7 @@
 | 🧪 待真机 | 代码完成、单测覆盖，但结论必须样机复核（见 [`verify.md`](verify.md) §8） |
 | ⏸ 冻结 | 明确留待后续批准批次，本轮不做 |
 
-> 回归命令：`uv run --group dev pytest -q` → **521 passed**（20 个测试模块）。
+> 回归命令：`uv run --group dev pytest -q` → **569 passed**（23 个测试模块）。
 > 无硬件全链路自检见 [`verify.md`](verify.md)。
 
 ---
@@ -25,6 +25,7 @@
 | 直流三組電壓 / 電流 | `get_sensors()` → `vout_12v`/`vout_5v`/`vout_3v3`、`iout_*` | `test_psu_sensors.py` | 🧪 待真机 |
 | 輸出功率 / 轉換效率 / 溫度 / 風扇轉速 | `get_sensors()`（0xE0 尾部 + 41h/42h） | `test_psu_sensors.py`、`test_monitor_format.py` | ✅ 已实现 |
 | 本次 / 累計運行時間 | `get_sensors()` 读 `0xD0`/`0xD1`（= MSI Center 的 `Time_Daily`/`Time_Total`） | `test_psu_sensors.py` | ✅ 已实现 |
+| AC 輸入電壓（MEG 機型，0x20，MSI `GET_VIN` 兼容） | `MSIPSU.read_vin()`、`format_text()` 的 `AC Input`、`format_prometheus()` 的 `msi_psu_input_voltage` | `test_psu_sensors.py`、`test_monitor_format.py` | 🧪 待真机（量程/有效值以實測為準） |
 | 單次讀取（`--once`，預設） | `monitor.main()` → `run_once()` | `test_cli_features.py` | ✅ 已实现 |
 | 持續重新整理（`--watch [秒]`，REQ-6 秒數合一） | `run_watch()`（无值默认 2 s，每帧 flush） | `test_cli_features.py` | ✅ 已实现 |
 
@@ -38,8 +39,11 @@
 | Prometheus textfile（`msi_psu_` 前綴，per-pin 帶 connector/pin 標籤） | `format_prometheus()`（`msi_psu_pin_current{connector=,pin=}`、`msi_psu_rail_*{rail=}`；`msi_psu_up` 0/1 + `msi_psu_error_info{reason=}` 讓「沒讀到」不會看起來像健康）；daemon 每個 prom 週期附上 OCP 塊（`format_ocp_prometheus()`；不支援的機型出 `msi_psu_ocp_available 0`） | `test_monitor_format.py`、`test_schema.py`、`test_cli_features.py`、`test_daemon.py` | ✅ 已实现 |
 | 輸出重導向到檔案（三格式皆可） | `-O/--output` + `emit()` | `test_cli_features.py` | ✅ 已实现 |
 | 單常駐 daemon（替代 timer） | `daemon.MonitorDaemon`（flock 獨占、1 s 判警、30 s 原子寫 prom、60 s 追加 history、1 h 輪轉） | `test_daemon.py` | ✅ 已实现 |
-| Linux 維運鏈路（node_exporter → Prometheus → Grafana；告警只走 stderr + exit 2） | `write_prometheus()`、`alerts.format_alert_line()` | `test_daemon.py`、`test_alerts.py`、`test_cli_alerts.py` | ✅ 已实现 |
+| Linux 維運鏈路（node_exporter → Prometheus → Grafana；告警走 stderr + exit 2） | `write_prometheus()`、`alerts.format_alert_line()` | `test_daemon.py`、`test_alerts.py`、`test_cli_alerts.py` | ✅ 已实现 |
+| 告警審計檔案（MSI AlertLog 等價：`alerts-YYYYMMDD.log`，5 MiB 輪轉、30 天清理、`--show-alert-log`） | `state.append_alert_log()` / `iter_alert_log()` / `prune_alert_logs()`、`daemon._record_alerts()`、`monitor.run_show_alert_log()` | `test_state.py`、`test_daemon.py`、`test_cli_features.py` | ✅ 已实现 |
 | 官方分发：自包含 tar.gz + 零 Python 依赖 `.deb`（x86_64/arm64） | `scripts/build_binary.sh` / `scripts/build_deb_binary.sh`（PyInstaller onefile，构建基线 Ubuntu 22.04 / glibc 2.35） | CI `freeze` job + `tests/test_packaging.py` | ✅ 已实现（待真机安装验证） |
+| 变更控制：01 文档曾冻结「源码 `.deb` 依赖 python3、不内嵌 Python」；用户 2026-10-19 明确要求官网下载**目标机不装 Python**，故官方产物改为自包含二进制 + 零 Python `.deb`，源码 `.deb` 仅保留为开发/CI 用途 | `scripts/build_binary.sh`、`scripts/build_deb_binary.sh`、`docs/release.md` | `tests/test_packaging.py` 断言 `Depends` 无 python | ✅ 已按新需求覆盖旧冻结 |
+| 供应链与安全：SBOM、SECURITY/CVD、支持周期、应急 runbook | `scripts/build_sbom.py`、`SECURITY.md`、`docs/support.md`、`docs/incident-response.md`；release workflow 生成并上传 `SBOM-<arch>.json` | `tests/test_release_security.py` | ✅ 已实现（GPG 签名待定） |
 | 开发/CI 源码 `.deb`（`Depends: python3 >= 3.10`，非官网下载） | `scripts/build_deb.sh`（含 postinst/prerm、systemd unit、udev rule、doc） | CI 步骤 `Build the .deb` | ✅ 仅开发 |
 | 桌面彈窗 / 顯卡功耗連動下調 | — | — | ⏸ 明确不做 |
 
@@ -52,7 +56,7 @@
 | 12V-2x6 狀態列（Normal / 告警名；閾值單針 12 A、針差 5 A） | `alerts.evaluate_pin_alerts()`、`monitor.status_from()` | `test_alerts.py` | ✅ 已实现 |
 | E1h 告警位图按机型解名（MPG TS / MEG P / MEG Ai1600T 三套字节序） | `protocol.ALERT_INDEXES`、`MSIPSU.alert_names` | `test_psu_sensors.py`（对照 `CPSU.cs` 三张索引数组） | ✅ 已实现 |
 | 告警結束碼與連續判定（0/2/1，連續 2 次才算） | `alerts.AlertEngine(consecutive_required=2)`、`EXIT_ALERT=2` | `test_alerts.py`、`test_cli_alerts.py` | ✅ 已实现 |
-| 黑盒最近 10 條（`--show-log`，新到舊，空提示；与 `-f/--watch/--export` 互斥） | `monitor.format_blackbox()` + `protocol.read_blackbox()`（0xC1 InfoID 1..10） | `test_cli_features.py` | 🧪 待真机（黑盒内容） |
+| 黑盒最近 10 條（`--show-log`，新到舊，空提示；与 `-f/--watch/--export` 互斥） | `monitor.format_blackbox()` + `protocol.read_blackbox()`（0xC1 InfoID 1..10） | `test_cli_features.py` | 🧪 待真机（黑盒内容；MSI Center 从不读这个日志，格式为本项目定义，**不宣称 MSI 兼容**） |
 | 按序號選多電源（`--serial`，默认第一颗，对不上报错并列列表） | `resolve_device()` | `test_demo.py`、`test_psu_sensors.py` | ✅ 已实现 |
 
 ### 3.2 能耗統計
@@ -60,7 +64,7 @@
 | 需求 | 实现位置 | 测试 | 状态 |
 |------|----------|------|------|
 | 功率平均值（AVG，累計不清零） | `state.MonitorState.update()` / `monitor.apply_stats()` → `power_avg` | `test_state.py` | ✅ 已实现 |
-| 效率平均值（AVG，累計不清零） | 同上 → `efficiency_avg`（watt/eff 累加，等价 MSI Center `Wattage_Total/Wattage_in_Total`） | `test_state.py` | 🧪 待真机（AVG 数值） |
+| 效率平均值（AVG，累計不清零） | 同上 → `efficiency_avg`（算术平均，等价 MSI Center PCIE5 分支 `Efficiency_Total/Count`；MEG 分支的 `Wattage_Total/Wattage_in_Total` 是另一种定义，本实现不混用） | `test_state.py` | 🧪 待真机（AVG 数值） |
 | 累計用電量（kWh，`wh += watts*dt/3600` 落盤） | `state.MonitorState.update()` → `total_energy_kwh` | `test_state.py` | 🧪 待真机（72 h 对照） |
 | 當日運行時間（讀 `0xD0`/`0xD1`） | `get_sensors()` → `uptime`/`uptime_total` | `test_psu_sensors.py` | ✅ 已实现 |
 
@@ -92,16 +96,16 @@
 | Zero Fan 開關（43h + F1h，讀回 42h byte 4） | `MSIPSU.set_zero_fan()`、`monitor.apply_zero_fan_setting()`、`--zero-fan`；daemon 依 `[fan] zero_fan` 恢復 | `test_set_zero_fan_*`、`test_zero_fan_*`、`test_zero_fan_only_profile_is_restored` | 🧪 待真机 |
 | 蜂鳴器靜音（C2h，只寫無回讀） | `MSIPSU.silence_buzzer()`、`monitor.run_write_controls()`、`--buzzer-off` | `test_silence_buzzer_*`、`test_buzzer_off_*` | 🧪 待真机 |
 | OCP 閾值檢視（一期只讀：單針 12 A、針差 5 A、觸發 20 s、警告 180 s） | `protocol.read_ocp_thresholds()`（0xC0 8 B）、`read_ocp_state()`（0xC1 42 B）、`monitor.run_ocp()`；daemon 每個 prom 週期一併導出（C1 是 5 s 滾動平均，不快取） | `test_ocp.py`、`test_daemon.py` | 🧪 待真机 |
-| 單多軌模式檢視（二期只讀，`==2` 為多軌） | `protocol.read_multirail_ocp()`（0xC0 1 B）、`monitor.format_multirail_*()` | `test_ocp.py`、`test_demo.py` | 🧪 待真机（**提前落地**） |
-| OCP 閾值設定（三期專批，8 B + `0xF1`，鉗制 10-14 A / 4-8 A / 5-30 s / 30-240 s） | — | — | ⏸ 冻结 |
-| 單多軌模式切換（部分機型） | — | — | ⏸ 冻结 |
+| 單多軌模式檢視（`==2` 為多軌） | `protocol.read_multirail_ocp()`（0xC0 1 B）、`monitor.format_multirail_*()` | `test_ocp.py`、`test_demo.py` | 🧪 待真机（**提前落地**） |
+| 單多軌模式切換（MEG Ai1000P/Ai1300P；`--set-rail`，C0h 2/1 + F1h，寫後讀回） | `protocol.set_multirail_ocp()`、`monitor.apply_rail_mode()` | `test_psu_sensors.py`、`test_cli_features.py`、`test_demo.py` | 🧪 待真机（用户要求补齐 MSI 的 DC Output 开关；不属于 12V-2x6 阈值写） |
+| OCP 閾值設定（三期專批，8 B + `0xF1`，鉗制 10-14 A / 4-8 A / 5-30 s / 30-240 s） | — | — | ⏸ 冻结（MSI Center 也没有 UI 写入口） |
 
 ## 6. GUI（CLI 內不做）
 
 | 需求 | 实现位置 | 测试 | 状态 |
 |------|----------|------|------|
 | 平時 CLI，看圖時 `--dashboard`（stdlib-only，預設 `127.0.0.1:8899`，`--port` 可改，關閉即停） | `dashboard.make_server()`、`monitor.run_dashboard()` | `test_dashboard.py` | ✅ 已实现 |
-| 7 張即時曲線（歷史走 daemon 攢的 `daily-*.log`，累計/型號走 `state.json`） | `dashboard.PAGE` + `/api/history`（曲線按真實時間軸）、`/api/state`（表頭 + `last_ts`，頁面按樣本年齡標陳舊）；**非記憶體**，兩者都是讀檔 | `test_dashboard.py` | ✅ 已实现 |
+| 7 張即時曲線（歷史走 `daily-*.log`，累計/型號走 `state.json`，實時走 daemon 每秒寫的 `latest.json`） | `dashboard.PAGE` + `/api/history`、`/api/state`、`/api/live`（1 s 輪詢，daemon 停止 10 s 後 503/stale）；Power 卡含 CPU/GPU/Total 曲線 | `test_dashboard.py`、`test_daemon.py`、`test_state.py` | ✅ 已实现 |
 | Weekly 七天用電圖（`state.json` 的 `daily` kWh 桶，不是 `daily-*.log`） | `dashboard.PAGE: drawWeekly()` + `/api/state` | `test_dashboard.py` | ✅ 已实现 |
 | 讀不到 state 目錄/檔案時不假裝「沒資料」 | `dashboard._state_dir_problem()`（目錄 → `/api/*` 503）、`MonitorState.load(strict=True)`（損壞的 `state.json` → 僅 `/api/state` 503），頁面本身仍 200；`/api/history` 照常服務 | `test_dashboard.py`、`test_state.py` | ✅ 已实现 |
 | 截圖存圖片 → 看圖頁提供匯出 PNG/CSV | `/api/export`（前端导出按钮，HEAD 与 GET 同状态同长度） | `test_dashboard.py` | ✅ 已实现 |
@@ -110,8 +114,8 @@
 ## 7. 无硬件可覆盖的验证方式
 
 所有 🧪 项在无样机时的最大覆盖：`bash scripts/smoke.sh` 一条命令跑完全链路（CI 也跑），`MSI_PSU_DEMO=1` 合成电源（`MSI_PSU_DEMO_MODEL` 可切
-全部 5 机型、`MSI_PSU_DEMO_ALERT` 可卡任意告警位），配合 521 个单测覆盖解析、告警、
-落盘、导出的全部分支。**每一条待真机项的判定标准与命令见 [`verify.md`](verify.md) §8（共 12 项）。**
+全部 5 机型、`MSI_PSU_DEMO_ALERT` 可卡任意告警位），配合 569 个单测覆盖解析、告警、
+落盘、导出的全部分支。**每一条待真机项的判定标准与命令见 [`verify.md`](verify.md) §8（共 18 项）。**
 
 ## 非需求交付物（如实标注）
 

@@ -13,6 +13,7 @@ example, docs) ship next to them in a tarball.
 | `msi-psu-monitor_<version>_linux_aarch64.tar.gz` | arm64 | same |
 | `msi-psu-monitor_<version>_amd64.deb` | x86_64 | the same executables under `/usr/bin`, `Depends: libc6 (>= 2.35), zlib1g` |
 | `msi-psu-monitor_<version>_arm64.deb` | arm64 | same |
+| `SBOM-x86_64.json` / `SBOM-aarch64.json` | per arch | CycloneDX 1.5 SBOM: project, CPython, PyInstaller, OpenSSL, zlib, bzip2, xz and the SHA-256 of every artifact |
 
 The tarball is the recommended download. The `.deb` exists for Debian/Ubuntu
 users who prefer `apt`; it is built from the same binaries and does **not**
@@ -36,6 +37,7 @@ uv sync --group dev --group build     # PyInstaller is build-only, never runtime
 uv run --group dev pytest -q          # source tests first
 bash scripts/build_binary.sh          # dist/bin/... + dist/*.tar.gz + .sha256
 bash scripts/build_deb_binary.sh      # dist/*.deb from the same binaries
+python3 scripts/build_sbom.py --dist dist --output dist/SBOM-x86_64.json --arch x86_64
 ```
 
 `scripts/build_binary.sh` also smoke-tests the frozen executables before
@@ -76,10 +78,14 @@ developer virtualenv or a Python from `PATH`.
 
 ## Checksums and signing
 
-Every release publishes `SHA256SUMS` for the full set of artifacts and a
-`<artifact>.sha256` next to each tarball. GPG signing is not implemented yet
-(there is no project release key); if the official site needs signatures, add a
-detached `.asc` per artifact and publish the public key fingerprint.
+Every release publishes `SHA256SUMS` for the full set of artifacts (including
+the per-arch SBOM) and a `<artifact>.sha256` next to each tarball. GPG signing is
+not implemented yet (there is no project release key); if the official site needs
+signatures, add a detached `.asc` per artifact and publish the public key
+fingerprint. The broader security/support commitments are in [SECURITY.md](../SECURITY.md),
+[docs/support.md](support.md) and [docs/incident-response.md](incident-response.md);
+the SBOM fulfils the supply-chain baseline and should be regenerated for every
+release, never hand-edited.
 
 ## Versioning
 

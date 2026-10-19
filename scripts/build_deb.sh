@@ -47,8 +47,9 @@ info "Staging $PKG $VERSION ($ARCH)"
 install -m 644 "$ROOT"/msi_psu_monitor/*.py "$LIBDIR/"
 install -m 644 "$ROOT/systemd/msi-psu-monitor.service" "$STAGE/lib/systemd/system/"
 install -m 644 "$ROOT/systemd/99-msi-psu.rules" "$STAGE/lib/udev/rules.d/"
-install -m 644 "$ROOT/README.md" "$ROOT/LICENSE" "$ROOT/docs/protocol.md" \
-   "$ROOT/docs/verify.md" "$ROOT/docs/requirements-traceability.md" \
+install -m 644 "$ROOT/README.md" "$ROOT/LICENSE" "$ROOT/SECURITY.md" \
+   "$ROOT/docs/protocol.md" "$ROOT/docs/verify.md" "$ROOT/docs/requirements-traceability.md" \
+   "$ROOT/docs/support.md" "$ROOT/docs/incident-response.md" \
    "$ROOT/docs/msi-psu-monitor.conf.example" \
    "$STAGE/usr/share/doc/$PKG/"
 # Debian policy 12.5: the machine-readable copyright goes next to LICENSE.

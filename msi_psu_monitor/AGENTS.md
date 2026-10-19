@@ -8,11 +8,11 @@ runtime imports.
 
 | Module | Role |
 |--------|------|
-| `protocol.py` | HID framing, register map, variant dispatch, `MSIPSU.get_sensors()`, fan/Zero Fan/buzzer writes, alert/black-box/OCP reads, `HIDDevice` + `flock` |
-| `monitor.py` | CLI: argument validation, three sensor formatters + three `--ocp` formatters, exit codes, fan/Zero Fan/buzzer writes, `--export`, `--show-log`, `--ocp`, device selection, `open_psu()` |
-| `state.py` | `MonitorState` (avg + energy integral), `state.json` atomic persistence, `daily-*.log` history, `--from`/`--columns`/`build_export` |
-| `daemon.py` | Resident sample loop: 1 s alerts, 30 s atomic prometheus incl. the OCP block (`msi_psu_ocp_*` on TS / `msi_psu_multirail_ocp` on MEG P; variant-gated, refreshed every write because C1h is a 5 s rolling average), the same file rewritten with `msi_psu_up 0` + reason on a failed read, 60 s history, rescan after 5 failures |
-| `dashboard.py` | Loopback-only `http.server` reading the history files; charts are hand-drawn `<canvas>` JS |
+| `protocol.py` | HID framing, register map, variant dispatch, `MSIPSU.get_sensors()`, fan/Zero Fan/buzzer/multirail writes, VIN, alert/black-box/OCP reads, `HIDDevice` + `flock` |
+| `monitor.py` | CLI: argument validation, three sensor formatters + three `--ocp` formatters, exit codes, fan/Zero Fan/buzzer/multirail writes, `--export`, `--show-log`, `--show-alert-log`, `--ocp`, device selection, `open_psu()` |
+| `state.py` | `MonitorState` (avg + energy integral), `state.json` atomic persistence, `daily-*.log` history, `alerts-*.log` audit trail, `latest.json` live cache, `--from`/`--columns`/`build_export` |
+| `daemon.py` | Resident sample loop: 1 s alerts, 30 s atomic prometheus incl. the OCP block (`msi_psu_ocp_*` on TS / `msi_psu_multirail_ocp` on MEG P; variant-gated, refreshed every write because C1h is a 5 s rolling average), the same file rewritten with `msi_psu_up 0` + reason on a failed read, 1 s `latest.json`, alert-log append, 60 s history, rescan after 5 failures |
+| `dashboard.py` | Loopback-only `http.server` reading the history/`latest.json` files; charts are hand-drawn `<canvas>` JS |
 | `alerts.py` | `AlertEngine` (edge-triggered + consecutive debounce), severities, per-pin OCP/imbalance mirror |
 | `config.py` | INI config, precedence CLI > file > `DEFAULTS` |
 | `demo.py` | `MSI_PSU_DEMO=1` synthetic PSU; the only synthetic source in the package |
@@ -23,7 +23,7 @@ runtime imports.
   (`CMD_TIMEOUT_MS`), 2-byte echo header stripped, NAK (`0xFE`) → `None`. On top of that,
   `0xC0` and `0xC1` are **overloaded addresses** (see Invariants) — the model gate, not the
   payload length, decides which command you are talking to.
-- Registers: `0x10-0x13` ident, `0x20-0x42` sensors, `0x41` fan setting,
+- Registers: `0x10-0x13` ident, `0x20` VIN (non-TS MSI-compatible extra), `0x22-0x42` sensors, `0x41` fan setting,
   `0x42` fan duty, `0x43` Zero Fan enable (write-only), `0xC2` buzzer silence,
   `0xC0` multirail **or** 12V-2x6 OCP config (TS only),
   `0xC1` OCP state (InfoID 0) / alert log (InfoID 1-10), `0xD0/0xD1` control,
@@ -90,7 +90,18 @@ runtime imports.
   start-up so "nothing reported" is not mistaken for "all normal").
 - **`--ocp` is read-only and model-gated**: `MSIPSU.supports_ocp_config` (TS variants only,
   mirroring `CPSU.cs:843`) guards the read; a MEG model gets the explanation and `EXIT_OK`,
-  never an error. The C0/C1 write path stays frozen for a later approved batch.
+  never an error. The 8-byte threshold write stays frozen for a later approved batch.
+  The separate 1-byte multirail switch is `--set-rail` (MEG P only, write + `F1h` +
+  read-back); never merge the two C0 meanings.
+- **VIN is an extra, not REV6**: `read_vin()` is tried on the non-TS models only and is
+  omitted on NAK; `format_text` calls it `AC Input` and Prometheus exports
+  `msi_psu_input_voltage`. Units are volts (`ValueCalc` direct), not millivolts.
+- **Alert audit trail**: `state.append_alert_log()` writes `alerts-YYYYMMDD.log`
+  (5 MiB rotation to `.1`, fsync per line, 30-day prune); the daemon records fired and
+  recovered edges from `AlertEngine.take_cleared()`; `--show-alert-log` reads local files
+  only. A write failure is warned and never breaks sampling.
+- **Live dashboard**: the daemon writes `latest.json` without fsync every sample; the page
+  polls `/api/live` once a second. A stale/missing file must be 503, never a frozen chart.
 - `HISTORY_COLUMNS` is append-only: `cpu_w`/`gpu_w` were added for the multi-rail
   models, and older 9-column files must keep loading (absent columns export as `N/A`).
 - `state.rail_watts()` is the single definition of the CPU/GPU split (CPU = 12V2,
@@ -133,13 +144,13 @@ runtime imports.
 - The demo's model table lives in `demo.MODEL_WATTS`; a new variant must be added
   there too, or `MSI_PSU_DEMO_MODEL` cannot reach it.
 - Do NOT harden `systemd/*.service` with `PrivateDevices` (needs `/dev/hidraw*`).
-- Do NOT let the dashboard touch hidraw — it is read-only over `daily-*.log`.
+- Do NOT let the dashboard touch hidraw — it is read-only over `daily-*.log` and `latest.json`.
 - `--once or not watch` means the default run is one-shot; keep it.
 
 ## Verification (no hardware required)
 
 ```bash
-uv run --group dev pytest -q              # 521 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
+uv run --group dev pytest -q              # 569 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
 uv run --group dev ruff check .           # must be clean
 uv run --group dev mypy msi_psu_monitor/  # must be clean
 ```

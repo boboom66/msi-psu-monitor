@@ -78,6 +78,9 @@ class AlertEngine:
         self.consecutive_required = consecutive_required
         self._streaks = {}
         self._fired = set()
+        #: Recoveries since the last take_cleared(); retain() is a model swap,
+        #: not a recovery, so it stays out of this list.
+        self._cleared = []
 
     def update(self, active):
         """Feed one E1h poll result; return newly fired alerts.
@@ -100,7 +103,11 @@ class AlertEngine:
                     )
             else:
                 self._streaks.pop(name, None)
-                self._fired.discard(name)
+                if name in self._fired:
+                    self._fired.discard(name)
+                    self._cleared.append(
+                        Alert(name=name, severity=severity_of(name), description=describe(name))
+                    )
         return fired
 
     def retain(self, names):
@@ -123,6 +130,11 @@ class AlertEngine:
         self._fired &= known
         for name in [name for name in self._streaks if name not in known]:
             del self._streaks[name]
+
+    def take_cleared(self):
+        """Return alerts that recovered since the last call, and reset the list."""
+        cleared, self._cleared = self._cleared, []
+        return cleared
 
     @property
     def active_alerts(self):

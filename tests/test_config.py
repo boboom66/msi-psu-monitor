@@ -246,3 +246,21 @@ def test_an_unknown_fan_zero_fan_value_is_reported_and_ignored(tmp_path, caplog)
         cfg = load_config(str(conf))
     assert cfg['fan_zero_fan'] is None
     assert 'zero_fan' in caplog.text
+
+
+def test_daemon_alert_log_defaults_on_and_can_be_disabled(tmp_path):
+    empty = tmp_path / 'empty.conf'
+    empty.write_text('[daemon]' + chr(10), encoding='utf-8')
+    assert load_config(str(empty))['alert_log'] is True
+    disabled = tmp_path / 'disabled.conf'
+    disabled.write_text('[daemon]' + chr(10) + 'alert_log = no' + chr(10), encoding='utf-8')
+    assert load_config(str(disabled))['alert_log'] is False
+
+
+def test_live_snapshot_defaults_on_and_can_be_disabled(tmp_path):
+    empty = tmp_path / 'live-empty.conf'
+    empty.write_text('[daemon]' + chr(10), encoding='utf-8')
+    assert load_config(str(empty))['live_snapshot'] is True
+    disabled = tmp_path / 'live-disabled.conf'
+    disabled.write_text('[daemon]' + chr(10) + 'live_snapshot = no' + chr(10), encoding='utf-8')
+    assert load_config(str(disabled))['live_snapshot'] is False

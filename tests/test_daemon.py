@@ -769,3 +769,60 @@ def test_zero_fan_is_restored_with_the_fan_profile(tmp_path):
     assert psu.zero_writes == [False]
     assert psu.writes == [(3, 60)]
     assert psu.saved == 2  # one F1h for Zero Fan, one for the fan setting
+
+
+def test_alert_edges_and_recoveries_are_written_to_the_alert_log(tmp_path):
+    psu = StubPSU(clean_sensors(), alerts={'ocp_12v': True})
+    daemon = make_daemon(tmp_path, psu)
+    daemon.sample()
+    lines = stats.iter_alert_log(tmp_path)
+    assert len(lines) == 1
+    assert '| ALERT [warning] ocp_12v:' in lines[0]
+    daemon.sample()
+    assert len(stats.iter_alert_log(tmp_path)) == 1  # sustained alert is not re-logged
+    psu._alerts = {'ocp_12v': False}
+    daemon.sample()
+    lines = stats.iter_alert_log(tmp_path)
+    assert len(lines) == 2
+    assert lines[1].endswith(
+        '| RECOVERED ALERT [warning] ocp_12v: 12V rail over-current (≥105% rated)'
+    )
+
+
+def test_the_alert_log_can_be_disabled(tmp_path):
+    daemon = make_daemon(
+        tmp_path, StubPSU(clean_sensors(), alerts={'ocp_12v': True}), alert_log=False
+    )
+    daemon.sample()
+    assert stats.iter_alert_log(tmp_path) == []
+
+
+def test_no_alerts_never_writes_the_alert_log(tmp_path):
+    daemon = make_daemon(
+        tmp_path, StubPSU(clean_sensors(), alerts={'ocp_12v': True}), no_alerts=True
+    )
+    daemon.sample()
+    assert stats.iter_alert_log(tmp_path) == []
+
+
+def test_a_broken_alert_log_cannot_break_sampling(tmp_path, monkeypatch):
+    def broken(*args, **kwargs):
+        raise OSError('disk full')
+
+    monkeypatch.setattr(stats, 'append_alert_log', broken)
+    daemon = make_daemon(tmp_path, StubPSU(clean_sensors(), alerts={'ocp_12v': True}))
+    assert daemon.sample() is not None
+
+
+def test_sample_writes_the_live_snapshot(tmp_path):
+    daemon = make_daemon(tmp_path, StubPSU(clean_sensors()))
+    daemon.sample()
+    live = stats.read_live_snapshot(tmp_path, now=daemon.wall_clock())
+    assert live['ts'] == daemon.wall_clock()
+    assert live['vout_12v'] == clean_sensors()['vout_12v'][0]
+
+
+def test_the_live_snapshot_can_be_disabled(tmp_path):
+    daemon = make_daemon(tmp_path, StubPSU(clean_sensors()), live_snapshot=False)
+    daemon.sample()
+    assert stats.read_live_snapshot(tmp_path, now=daemon.wall_clock()) is None

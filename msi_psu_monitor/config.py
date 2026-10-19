@@ -18,7 +18,7 @@ class ConfigError(ValueError):
 
 # Kept as literal strings so config.py stays importable on its own; monitor.py
 # owns the byte mapping (1 = auto, 3 = customized).
-FAN_MODES = ('auto', 'customized')
+FAN_MODES = ('auto', 'performance', 'customized')
 
 CONFIG_FILES = (
     '/etc/msi-psu-monitor.conf',
@@ -39,6 +39,8 @@ KNOWN_OPTIONS = {
         'prom_interval',
         'history_interval',
         'retention_days',
+        'alert_log',
+        'live_snapshot',
     },
     'fan': {'mode', 'duty', 'zero_fan'},
 }
@@ -59,6 +61,8 @@ DEFAULTS = {
     'prom_interval': 30.0,
     'history_interval': 60.0,
     'retention_days': 30,
+    'alert_log': True,
+    'live_snapshot': True,
     'fan_mode': None,
     'fan_duty': None,
     'fan_zero_fan': None,
@@ -130,6 +134,8 @@ def load_config(path=None):
     cfg['prom_interval'] = _as_float(daemon.get('prom_interval'), cfg['prom_interval'])
     cfg['history_interval'] = _as_float(daemon.get('history_interval'), cfg['history_interval'])
     cfg['retention_days'] = _as_int(daemon.get('retention_days'), cfg['retention_days'])
+    cfg['alert_log'] = _as_bool(daemon.get('alert_log'), cfg['alert_log'])
+    cfg['live_snapshot'] = _as_bool(daemon.get('live_snapshot'), cfg['live_snapshot'])
     if cfg['sample_interval'] <= 0:
         cfg['sample_interval'] = DEFAULTS['sample_interval']
     if cfg['prom_interval'] <= 0:

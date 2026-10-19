@@ -272,7 +272,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 521 passed
+uv run --group dev pytest -q                     → 569 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 34 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
@@ -289,7 +289,7 @@ bash scripts/smoke.sh                            → 58 项全过（三种格式
 - `ast.parse(feature_version=(3, 10))`：全部 `.py` 通过 3.10 语法校验（静态兜底）。
 - **3.12 与 3.10 矩阵真跑过**（turn8 重跑）：`uv venv --python /usr/bin/python3.12` 与
   `uv venv --python 3.10` 各建裸环境（只装 dev 组 pytest，不装本包），把工作树复制一份、
-  不带 `.venv`，直接跑 `python3 -m pytest`：**3.12.3 → 521 通过**、**3.10.21 → 521 通过**。
+  不带 `.venv`，直接跑 `python3 -m pytest`：**3.12.3 → 569 通过**、**3.10.21 → 569 通过**。
   3.10 这条以前根本跑不起来：两个测试模块 `import tomllib`（3.11+），CI 的 3.10 矩阵会在
   收集阶段就红；本轮加 `tomli>=2; python_version < '3.11'`（dev 组）并 try/except 回退。
   `bash scripts/smoke.sh`（**58 项全过**）在 3.12 裸环境重跑过（turn10）。
@@ -341,7 +341,7 @@ turn7 留下的 11 条已逐条修完；每条都补了「改回旧行为就会�
    测试文件都有行。顺带修正文件名正则不收数字的问题：`test_protocol_lin11.py` 之前根本不在
    两条文档校验的覆盖范围内。测试：`test_the_coverage_table_names_real_test_functions`。
 8. **[P2] turn7 留下的裸计数不在护栏里**：`TEST_COUNT_RE` 补 `通过|通過`。那个未受护栏保护的旧通过数已按裸环境实跑对齐：
-   3.12.3 与 3.10.21 各 **521 通过**（细节见上节「质量门禁」）。
+   3.12.3 与 3.10.21 各 **569 通过**（细节见上节「质量门禁」）。
 9. **[P2] 零依赖探针漏了 `__main__.py`**：`SHIPPED_MODULES` 元组补 `__main__`，并新增
    `test_the_probe_covers_every_shipped_module`，把元组与 `msi_psu_monitor/*.py` 精确对齐。
 10. **[P2] `test_pid_consistency.py` 比的是 `bulk_size` 而不是真正的门限 `payload_size`**：README
@@ -422,7 +422,7 @@ turn7 留下的 11 条已逐条修完；每条都补了「改回旧行为就会�
   + 合并 `SHA256SUMS`。
 - 本机 24.04/glibc 2.39 只能用 `ALLOW_NEWER_GLIBC=1` 做本地烟测；正式包必须 22.04。
   已在本机用 `env -i` 跑通打包后的二进制（无 python、无 libpython）。
-- **测试**：521（新增 8 条发布链路静态回归）。
+- **测试**：当时 521 项（新增 8 条发布链路静态回归）。
 ### 外部阻塞
 
 - **Q6 EPS 数量**：等 MSI 回函；未回前按 2×EPS 处理。
@@ -606,7 +606,7 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
   先删掉 override 证明默认目录确实不同，再桩住 `MonitorState.save` 记录本次运行写过的
   每个路径，要求全部落在 tmp 里。
 
-### 真机验收（`docs/verify.md` §8，共 12 项，均待样机）
+### 真机验收（`docs/verify.md` §8，共 18 项，均待样机）
 
 诊断命令与判定标准在 `docs/verify.md` §8；这里只列清单，项数与它逐条对齐（文档测试强制）。
 
@@ -623,7 +623,15 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
 9. `--ocp` 在 MEG P 系上输出单多轨标志，与 MSI Center 开关一致（不发 NAK、不超时）。
 10. `--ocp` 在 MEG Ai1600T 上打印「not available」并 exit 0（不发 NAK、不超时）。
 11. `--zero-fan on/off` 读回一致（42h byte 4）+ `F1h` 断电重启后仍生效；
-    `--buzzer-off` 能让 12+4 OCP 蜂鸣停止（无回读，听感确认）。
+    `--buzzer-off` 能让 12+4 OCP 蜂鸣停止（无回读，听感确认），再按一次确认是否为
+    MSI 命名的 switch。
+12. `--set-rail multi/single` 在 MEG Ai1000P/Ai1300P 上读回一致、断电重启后保持；
+    MPG TS/Ai1600T 拒绝且 exit 1。
+13. 切换前后 `--ocp` 的 multirail 标志一致，单/多轨 OCP 行为与 MSI Center 一致。
+14. MEG 上 `AC Input`（0x20）接近市电；TS 不显示且不产生 NAK 重试。
+15. 真实告警/恢复各写一行 `alerts-*.log`，`--show-alert-log` 可读，5 MiB 轮转正常。
+16. daemon 运行时 dashboard 每秒前进（`/api/live` 200），停 daemon 后 10 s 变 503/stale。
+17. `systemd-analyze security` 无 PrivateDevices、无多余 capability，hidraw 仍可打开。
 
 ## 决策记录（本轮新增）
 
@@ -641,5 +649,19 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
 
 - dashboard 页内 JS 保留内嵌（有意决策：`.deb` 无需 package-data，服务器单文件可审计）；
   `do_HEAD` 语义已补全（与 GET 同状态、同 Content-Type、同 Content-Length，含 404/400）。
-- `0xC0` OCP 阈值写入 / 单多轨切换（三期专批，需样机确认写入安全）。
+- `0xC0` 8 字节 OCP 阈值写入（仍冻结；MSI Center 也无 UI 入口）；单多轨切换已以
+  `--set-rail` 提前落地，需样机确认写入安全。
 - `0xE1` 告警位图之外的二级告警源（当前 E1h + 软件镜像足够）。
+
+## turn12（2026-10-19）：全量复核 + MSI 功能补齐 + 发布安全基线
+
+- 全量读取 psu-file 的 01-06（REV6、产品页、MSI Center PSU 源码/CRA、参考实现、11 张截图、
+  官网存档），3 个并行审计交叉核对；02/04 为准，01 的讨论与冻结项按变更控制处理。
+- 功能补齐：VIN(0x20，非 TS)、多轨切换 `--set-rail`、AlertLog + `--show-alert-log`、
+  Dashboard CPU/GPU 曲线 + 1 s `/api/live`、`--fan-mode performance` 别名。
+- 安全：systemd 地址族/能力/Proc 收敛、设备字符串与 Prometheus 标签清洗、写操作审计行、
+  SBOM 生成 + release 集成、SECURITY/support/incident-response 文档。
+- 测试 569（新增 VIN/AlertLog/live/rail/性能/清洗/发布安全）；smoke 58 不变；
+  3.10/3.12 裸环境与 ruff/mypy 在本轮末尾复跑。
+- 变更控制：官网零 Python 覆盖 01 的「源码 .deb 依赖 python3」冻结；8 字节 OCP 阈值写仍冻结，
+  多轨 1 字节写仅显式 `--set-rail`，需真机验证。

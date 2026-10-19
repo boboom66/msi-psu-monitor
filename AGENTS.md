@@ -8,12 +8,14 @@ Protocol rules live in `msi_psu_monitor/AGENTS.md` (auto-loaded via `opencode.js
 
 ```bash
 uv sync --group dev                                  # py>=3.10, dev toolchain (pytest/ruff/mypy), zero runtime deps
-uv run --group dev pytest -q                         # 521 tests, no hardware needed
+uv run --group dev pytest -q                         # 569 tests, no hardware needed
 uv run --group dev pytest -q tests/test_state.py     # single file
 uv run --group dev ruff check .                      # must be clean
 uv run --group dev mypy msi_psu_monitor/             # must be clean
 MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --once      # full pipeline, no PSU attached
 MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --ocp       # 12V-2x6 OCP thresholds + state (read-only)
+MSI_PSU_DEMO_MODEL=ai1300p MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --set-rail multi
+MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --show-alert-log
 sudo msi-psu-monitor --once                          # one-shot; hidraw needs root (or the udev uaccess rule)
 sudo msi-psu-monitor --watch 1                       # continuous, 1s poll
 sudo msi-psu-monitor -f prometheus -O /var/lib/node_exporter/msi-psu.prom
@@ -91,21 +93,29 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12/3.13.
   numbers and counters in the same direction.
 - **`--ocp` is read-only by scope**: 一期 only *inspects* the thresholds. The write
   (`0xC0` 8 bytes + `0xF1`, clamped to 10-14 A / 4-8 A / 5-30 s / 30-240 s) is a separate,
-  separately approved batch — do not add it while "fixing" the display.
+  separately approved batch — do not add it while "fixing" the display. The *other*
+  meaning of 0xC0, the MEG P 1-byte multirail switch, is exposed explicitly as
+  `--set-rail` (write + `F1h` + read-back); it is not the threshold write and must stay
+  model-gated.
 - **An unsupported model is not an error**: `--ocp` on a MEG prints the reason and exits
   `0`, matching how `--show-log` treats an empty black box. Keep scripts callable blindly.
 - **`argparse` exits `2`** for usage errors and it is deliberately not remapped, so `2`
   means "alert **or** usage error" (`docs/verify.md` §6). `1` is reserved for real faults.
-- **Persistent state**: `state.json` + `daily-YYYYMMDD.log` in
-  `/var/lib/msi-psu-monitor` (systemd `StateDirectory`), XDG fallback, `MSI_PSU_STATE_DIR`
-  override. Both writes are atomic (`.tmp` + `os.replace`); keep it that way.
+- **Persistent state**: `state.json` + `daily-YYYYMMDD.log` + `alerts-YYYYMMDD.log` +
+  the ephemeral `latest.json` in `/var/lib/msi-psu-monitor` (systemd `StateDirectory`),
+  XDG fallback, `MSI_PSU_STATE_DIR` override. Durable writes are atomic (`.tmp` +
+  `os.replace`); `latest.json` is a no-fsync 1 s cache and must stay small.
+  `[daemon] alert_log/live_snapshot` can turn either off.
 - **`MSI_PSU_DEMO=1` is the only synthetic data path** (`demo.py`). It must stay opt-in;
   never let demo values reach a real read.
 - **`systemd/msi-psu-monitor.service` is `Type=simple`/`Restart=always`** running the
   daemon. The old `msi-psu-monitor.timer` was deleted (D-02: one daemon, not a timer).
   The sandbox lines are **active** (`ProtectSystem=full`, `ProtectHome=yes`, `PrivateTmp=yes`,
-  `NoNewPrivileges=yes`) — do not "uncomment the sandbox" (there is nothing to uncomment) and
-  never add `PrivateDevices`: the daemon holds `/dev/hidraw*` open for its whole runtime.
+  `NoNewPrivileges=yes`, `RestrictAddressFamilies=AF_UNIX AF_NETLINK`,
+  `CapabilityBoundingSet=`) — do not "uncomment the sandbox" (there is nothing to uncomment)
+  and never add `PrivateDevices`: the daemon holds `/dev/hidraw*` open for its whole runtime.
+  `CapabilityBoundingSet=` is intentional: root owns the device node and systemd creates the
+  state directory, so no capability is needed; do not re-add one.
 - **`scripts/install.sh` probes all 5 PIDs** (`808c aa6f 56d4 e749 c9eb`) and installs the
   udev rule, the unit and `/etc/msi-psu-monitor.conf` (only when absent). The unit must
   not pin `--config` at a path nothing installs: it used to, so the daemon died on start
@@ -125,6 +135,16 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12/3.13.
 - **Text IO is locale-independent**: config/state/history read `utf-8-sig` and write
   `utf-8`; systemd can inherit `LC_ALL=C`. `state.atomic_write_text` fsyncs the scratch
   file and the directory, so a power cut cannot leave an empty `state.json` behind.
+- **Device strings are untrusted input**: `protocol._clean_identity()` keeps printable
+  ASCII and caps length; `monitor._label()` also strips C0 controls. Do not log/export a
+  raw serial/product/revision before that filter — a CR/LF would forge a log or
+  Prometheus line (CRA ST-008).
+- **Write audit lines**: successful control writes log one INFO with mode/duty,
+  `verified=true|false`, product and firmware (never the serial). Keep the model/firmware
+  fields for the incident trail; the buzzer has no read-back, so it logs `verified=false`.
+- **Dashboard live path**: the daemon writes `latest.json` every sample (no fsync) and the
+  page polls `/api/live` once a second, overlaying it on the one-minute history; it never
+  touches hidraw. A stopped daemon must leave the endpoint 503/stale, not a frozen chart.
 - **Official releases are self-contained**: `scripts/build_binary.sh` freezes two
   PyInstaller onefile executables (pinned `build` group; never a runtime dependency),
   built on Ubuntu 22.04/glibc 2.35 for x86_64 + arm64. The tarball installer and the

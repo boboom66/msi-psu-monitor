@@ -607,6 +607,156 @@ def prune_history(state_dir, today=None, days=RETENTION_DAYS):
     return removed
 
 
+# ---- alert log ----------------------------------------------------------
+# A durable record of alert edges and recoveries, separate from the sampling
+# history: MSI Center keeps AlertLog_MM_dd_yyyy.log and caps it at 5 MiB
+# (Base/Log.cs:129-163). Rotating to .1 keeps the previous content instead of
+# truncating it, and the file never carries a sample line, so it stays readable
+# when the history is being repaired.
+
+ALERT_LOG_PREFIX = 'alerts-'
+ALERT_LOG_SUFFIX = '.log'
+ALERT_LOG_MAX_BYTES = 5 * 1024 * 1024
+
+
+def alert_log_path(state_dir, day=None):
+    """Path of one day's alert log."""
+    day = day or date.today()
+    return Path(state_dir) / f'{ALERT_LOG_PREFIX}{day.strftime("%Y%m%d")}{ALERT_LOG_SUFFIX}'
+
+
+def append_alert_log(state_dir, message, ts=None):
+    """Append one timestamped alert line; rotate at 5 MiB.
+
+    Returns the path written, or None when the write failed (the caller must
+    never treat a logging failure as a monitoring failure). One line ends with
+    a newline and is fsynced: an alert is the one record a later investigation
+    cannot reconstruct from anything else.
+    """
+    ts = time.time() if ts is None else float(ts)
+    path = alert_log_path(state_dir, date.fromtimestamp(ts))
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists() and path.stat().st_size > ALERT_LOG_MAX_BYTES:
+            os.replace(path, path.with_name(path.name + '.1'))
+    except OSError:
+        pass
+    stamp = datetime.fromtimestamp(ts).astimezone().isoformat(timespec='seconds')
+    try:
+        with path.open('a', encoding='utf-8') as handle:
+            handle.write(f'{stamp} | {message}\n')
+            handle.flush()
+            os.fsync(handle.fileno())
+    except OSError as exc:
+        logger.warning(f'Cannot write the alert log {path}: {exc}')
+        return None
+    return path
+
+
+def iter_alert_log(state_dir, limit=None):
+    """Return alert-log lines oldest first, rotated content before its day file."""
+    paths = []
+    for path in Path(state_dir).glob(f'{ALERT_LOG_PREFIX}*'):
+        if path.is_file() and path.name.endswith((ALERT_LOG_SUFFIX, ALERT_LOG_SUFFIX + '.1')):
+            paths.append(path)
+    # alerts-YYYYMMDD.log.1 is older than alerts-YYYYMMDD.log; sort rotated first
+    # within a day and days in filename order.
+    paths.sort(key=lambda p: (p.name.removesuffix('.1'), not p.name.endswith('.1')))
+    lines = []
+    for path in paths:
+        try:
+            with path.open(encoding='utf-8-sig') as handle:
+                lines.extend(line.rstrip('\n') for line in handle)
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.warning(f'Skipping unreadable alert log {path.name}: {exc}')
+    if limit is not None:
+        lines = lines[-limit:]
+    return lines
+
+
+def prune_alert_logs(state_dir, today=None, days=RETENTION_DAYS):
+    """Delete alert logs older than a number of days; return the removed paths."""
+    today = today or date.today()
+    cutoff = today.toordinal() - days
+    removed = []
+    for path in sorted(Path(state_dir).glob(f'{ALERT_LOG_PREFIX}*')):
+        name = path.name.removesuffix('.1')
+        if not name.startswith(ALERT_LOG_PREFIX) or not name.endswith(ALERT_LOG_SUFFIX):
+            continue
+        stamp = name[len(ALERT_LOG_PREFIX) : -len(ALERT_LOG_SUFFIX)]
+        try:
+            ordinal = datetime.strptime(stamp, '%Y%m%d').date().toordinal()
+        except ValueError:
+            continue
+        if ordinal < cutoff:
+            try:
+                path.unlink()
+                removed.append(path)
+            except OSError:
+                continue
+    return removed
+
+
+# ---- live dashboard snapshot -------------------------------------------
+# The requirements ask for real-time charts fed by the daemon, while the page
+# itself must stay a file reader (no API auth, no shared memory). A tiny
+# latest.json replaced without fsync every sample is the compromise: it is
+# ephemeral by design, and a stopped daemon leaves a stale timestamp the page
+# can detect instead of a chart that silently freezes.
+
+LIVE_FILENAME = 'latest.json'
+LIVE_MAX_AGE_S = 10.0
+
+
+def live_path(state_dir):
+    return Path(state_dir) / LIVE_FILENAME
+
+
+def write_live_snapshot(state_dir, sensors, ts=None):
+    """Atomically replace latest.json with the chartable readings.
+
+    No fsync: this file is a cache for a 1 s chart, not an energy record. Only
+    numeric readings plus product are written -- the serial is intentionally
+    absent from a world-readable-by-uaccess cache.
+    """
+    ts = time.time() if ts is None else float(ts)
+    payload = {'ts': ts, 'product': str(sensors.get('product', ''))}
+    for key, value in sensors.items():
+        if isinstance(value, tuple):
+            payload[key] = value[0]
+    watts = rail_watts(sensors)
+    if watts is not None:
+        payload['cpu_w'], payload['gpu_w'] = watts
+    path = live_path(state_dir)
+    tmp = path.with_name(path.name + '.tmp')
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(payload, sort_keys=True) + '\n', encoding='utf-8')
+        os.replace(tmp, path)
+    except (OSError, TypeError, ValueError) as exc:
+        logger.debug(f'Cannot write the live snapshot {path}: {exc}')
+        return None
+    return path
+
+
+def read_live_snapshot(state_dir, max_age=LIVE_MAX_AGE_S, now=None):
+    """Return the latest sample when it is fresh, else None."""
+    now = time.time() if now is None else float(now)
+    try:
+        data = json.loads(live_path(state_dir).read_text(encoding='utf-8-sig'))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    stamp = data.get('ts')
+    if not isinstance(stamp, (int, float)) or not math.isfinite(stamp):
+        return None
+    age = now - stamp
+    if age < 0 or age > max_age:
+        return None
+    return data
+
+
 # ---- --from / --columns parsing ----------------------------------------
 
 

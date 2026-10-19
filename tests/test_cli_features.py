@@ -37,6 +37,9 @@ class StubPSU:
         zero_fan=True,
         accept_zero_fan=True,
         accept_buzzer=True,
+        multirail=True,
+        accept_rail=True,
+        supports_multirail_ocp=False,
     ):
         self._sensors = sensors if sensors is not None else {}
         self._alerts = alerts
@@ -51,6 +54,10 @@ class StubPSU:
         self.writes = []
         self.zero_fan_writes = []
         self.buzzer_requests = 0
+        self.multirail = multirail
+        self.accept_rail = accept_rail
+        self.supports_multirail_ocp = supports_multirail_ocp
+        self.rail_writes = []
         self.closed = False
 
     def open(self):
@@ -85,6 +92,17 @@ class StubPSU:
     def silence_buzzer(self):
         self.buzzer_requests += 1
         return self.accept_write and self.accept_buzzer
+
+    def read_multirail_ocp(self):
+        return self.multirail if self.supports_multirail_ocp else None
+
+    def set_multirail_ocp(self, enabled):
+        self.rail_writes.append(enabled)
+        if not (self.accept_write and self.supports_multirail_ocp):
+            return False
+        if self.accept_rail:
+            self.multirail = enabled
+        return True
 
     def read_fan_setting(self):
         return (self.fan_mode, self.fan_duty)
@@ -171,6 +189,10 @@ def run_main(monkeypatch, capsys, stub, argv):
         ['--zero-fan', 'on', '--show-log'],
         ['--buzzer-off', '--export', '--from', '2h'],
         ['--buzzer-off', '--dashboard'],
+        ['--set-rail', 'multi', '--watch', '1'],
+        ['--set-rail', 'multi', '--ocp'],
+        ['--show-alert-log', '--export', '--from', '2h'],
+        ['--show-alert-log', '--show-log'],
     ],
 )
 def test_conflicting_flags_are_rejected(argv):
@@ -747,3 +769,63 @@ def test_buzzer_off_refused_exits_one(monkeypatch, capsys):
     code, out = run_main(monkeypatch, capsys, stub, ['--buzzer-off'])
     assert code == EXIT_ERROR
     assert 'buzzer-off' in out.err
+
+
+def test_set_rail_writes_and_verifies(monkeypatch, capsys):
+    stub = StubPSU(sensors(), multirail=False, supports_multirail_ocp=True)
+    code, out = run_main(monkeypatch, capsys, stub, ['--set-rail', 'multi'])
+    assert code == EXIT_OK
+    assert stub.rail_writes == [True]
+    assert stub.multirail is True
+    assert out.out.strip() == 'Rail mode: multi'
+
+
+def test_set_rail_readback_mismatch_exits_one(monkeypatch, capsys):
+    stub = StubPSU(sensors(), multirail=False, accept_rail=False, supports_multirail_ocp=True)
+    code, out = run_main(monkeypatch, capsys, stub, ['--set-rail', 'multi'])
+    assert code == EXIT_ERROR
+    assert len(stub.rail_writes) == 3
+    assert 'rail mode' in out.err
+
+
+def test_set_rail_is_refused_on_a_ts_model(monkeypatch, capsys):
+    stub = StubPSU(sensors(), supports_multirail_ocp=False)
+    code, out = run_main(monkeypatch, capsys, stub, ['--set-rail', 'single'])
+    assert code == EXIT_ERROR
+    assert 'rail mode' in out.err
+
+
+def test_fan_performance_is_an_alias_for_the_psu_curve(monkeypatch, capsys):
+    stub = StubPSU(sensors())
+    code, out = run_main(monkeypatch, capsys, stub, ['--fan-mode', 'performance'])
+    assert code == EXIT_OK
+    assert stub.writes == [(1, 0)]
+    assert out.out.strip() == 'Fan mode: performance'
+
+
+def test_show_alert_log_prints_the_local_file(monkeypatch, capsys, tmp_path):
+    stats.append_alert_log(tmp_path, 'ALERT [warning] ocp_pin1: over-current', ts=1000.0)
+    code, out = run_main(monkeypatch, capsys, StubPSU(sensors()), ['--show-alert-log'])
+    assert code == EXIT_OK
+    assert 'ALERT [warning] ocp_pin1: over-current' in out.out
+
+
+def test_show_alert_log_reports_an_empty_log(monkeypatch, capsys):
+    code, out = run_main(monkeypatch, capsys, StubPSU(sensors()), ['--show-alert-log'])
+    assert code == EXIT_OK
+    assert out.out.strip() == 'No alert log records stored.'
+
+
+def test_successful_writes_leave_an_audit_line(monkeypatch, capsys, caplog):
+    stub = StubPSU(sensors())
+    with caplog.at_level('INFO', logger='msi_psu_monitor.monitor'):
+        code, _ = run_main(
+            monkeypatch,
+            capsys,
+            stub,
+            ['--fan-mode', 'customized', '--fan-duty', '60', '--buzzer-off'],
+        )
+    assert code == EXIT_OK
+    assert 'write fan mode=customized duty=60 verified=true' in caplog.text
+    assert 'write buzzer=silenced verified=false' in caplog.text
+    assert 'SN1' not in caplog.text

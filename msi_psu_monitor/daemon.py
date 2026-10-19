@@ -62,6 +62,8 @@ class MonitorDaemon:
         self.prom_interval = float(cfg.get('prom_interval') or 30.0)
         self.history_interval = float(cfg.get('history_interval') or 60.0)
         self.retention_days = int(cfg.get('retention_days') or stats.RETENTION_DAYS)
+        self.alert_log = bool(cfg.get('alert_log', True))
+        self.live_snapshot = bool(cfg.get('live_snapshot', True))
         self.fan_mode = cfg.get('fan_mode') or None
         self.fan_duty = cfg.get('fan_duty')
         self.fan_zero_fan = cfg.get('fan_zero_fan')
@@ -169,7 +171,10 @@ class MonitorDaemon:
                 restored.append(f'{mode}' + ('' if duty is None else f' duty {duty}%'))
         if not restored:
             return False
-        logger.info(f'Restored the configured fan profile: {", ".join(restored)}')
+        logger.info(
+            f'Restored the configured fan profile: {", ".join(restored)} '
+            f'(product={getattr(psu, "product", "")!r} fw={getattr(psu, "fw_revision", "")!r})'
+        )
         return True
 
     def _drop_psu(self):
@@ -224,16 +229,47 @@ class MonitorDaemon:
         # and no alert log lines. It used to be ignored by the daemon, i.e. a
         # documented switch that did nothing in the tool's normal mode.
         if not self.cfg.get('no_alerts'):
-            active, have_e1h = [], False
+            active, have_e1h, fired = [], False, []
             try:
-                _, active, have_e1h = monitor.collect_alerts(psu, self.engine, sensors)
+                fired, active, have_e1h = monitor.collect_alerts(psu, self.engine, sensors)
             except Exception as exc:  # pragma: no cover - defensive against odd devices
                 logger.debug(f'Alert poll failed: {exc}')
+            # take_cleared() must run even when the log is disabled, or the
+            # engine's recovery buffer would grow for the life of the daemon.
+            self._record_alerts(fired, self.engine.take_cleared())
             sensors['alerts'] = active
             sensors['status'] = monitor.status_from(active, have_e1h)
         monitor.apply_stats(sensors, self.state)
+        if self.live_snapshot:
+            stats.write_live_snapshot(self.state_dir, sensors, ts=self.wall_clock())
         self.samples += 1
         return sensors
+
+    def _record_alerts(self, fired, cleared):
+        """Append alert edges and recoveries to the durable alert log.
+
+        MSI Center keeps AlertLog_MM_dd_yyyy.log (5 MiB cap); this is the same
+        idea in the state directory. A failed write is logged by the state helper
+        and never interrupts monitoring.
+        """
+        if not self.alert_log or (not fired and not cleared):
+            return
+        try:
+            for alert in fired:
+                stats.append_alert_log(
+                    self.state_dir, monitor.format_alert_line(alert), ts=self.wall_clock()
+                )
+            for alert in cleared:
+                stats.append_alert_log(
+                    self.state_dir,
+                    f'RECOVERED {monitor.format_alert_line(alert)}',
+                    ts=self.wall_clock(),
+                )
+        except Exception as exc:  # pragma: no cover - alert logging is best effort
+            # A full disk or an unwritable state directory must not turn an alert
+            # poll into a monitoring failure; the state helper already logs the
+            # specific write error.
+            logger.warning(f'Cannot write the alert log: {exc}')
 
     def _read_failed(self, reason):
         """Count one failed read and rescan after ``RESCAN_AFTER_FAILURES``."""
@@ -393,6 +429,7 @@ class MonitorDaemon:
 
         if now >= self._next_prune:
             stats.prune_history(self.state_dir, days=self.retention_days)
+            stats.prune_alert_logs(self.state_dir, days=self.retention_days)
             self._next_prune = now + PRUNE_INTERVAL_S
 
         return not self.stopping

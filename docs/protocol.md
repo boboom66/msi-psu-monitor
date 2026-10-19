@@ -45,16 +45,20 @@ Writes to a single register. The response echoes the written data on success; a
 reply whose first payload byte is `0xFC` (ACK) means accepted, `0xFE` (NAK) means
 the device refused the value.
 
-Implemented writes (frozen scope: fan control only; `0xC0` OCP writes are a later
-batch):
+Implemented writes (fan/Zero Fan/buzzer and the MEG P multirail switch; the 8-byte
+12V-2x6 threshold write remains a separately approved batch):
 
 | What | Command | Notes |
 |------|---------|-------|
 | Fan setting | `[0x50, 0x41, <mode>, 0x00, <duty>]` | `mode` 1 = auto (duty ignored), 3 = manual; `duty` 0-100, the PSU clamps out-of-range values |
-| Persist settings | `[0x50, 0xF1]` | Write with **0 data bytes** (REV6); sent right after the fan/Zero Fan write, without it the setting is lost on power-off |
+| Zero Fan | `[0x50, 0x43, <0/1>]` | MPG TS models; state read back via 42h byte 6 |
+| Buzzer switch | `[0x50, 0xC2]` | MPG TS models; no payload, no read-back, no F1h. MSI calls the method a *switch*, so a second invocation may re-arm the buzzer (hardware check pending) |
+| Multirail OCP | `[0x50, 0xC0, <2/1>]` | MEG Ai1000P/Ai1300P only; 2 = per-rail, 1 = combined; followed by F1h |
+| Persist settings | `[0x50, 0xF1]` | Write with **0 data bytes** (REV6); sent right after the fan/Zero Fan/multirail write, without it the setting is lost on power-off |
 
-`msi-psu-monitor --fan-mode/--fan-duty` does write → read-back verify (up to 3
-attempts) → report `EXIT_ERROR` on a mismatch.
+`msi-psu-monitor --fan-mode/--fan-duty/--zero-fan/--set-rail` does write → read-back
+verify (up to 3 attempts) → report `EXIT_ERROR` on a mismatch. The buzzer has no
+read-back, so its success means only that the PSU acknowledged the write.
 
 ### NAK (0xFE)
 
@@ -80,7 +84,7 @@ frame of real measurements.
 | PRODUCT_STRING | 0x11 | 16 bytes | Product name (ASCII) |
 | REVISION | 0x12 | 2 bytes | Firmware revision（冻结：设备只发 **2 个 ASCII 数字** `b"10"`，小数点由读取方插入 → `1.0`，对齐 `CPSU.cs:497-507` `GetString(...,2).Insert(1,".")`；非「两位数字」的载荷才原样透传；旧 `<I` 十进制拼法废弃） |
 | SERIAL | 0x13 | 16 bytes | Serial number（冻结：TS 按首字节长度切片，后面才是号码，别把长度当号码） |
-| IN_VOLTS | 0x20 | 2 bytes | AC input voltage (LINEAR11, mV) |
+| IN_VOLTS | 0x20 | 2 bytes | AC input voltage (LINEAR11, **volts**; MSI-compatible extra: `GET_VIN` refuses the MPG TS models and decodes `ValueCalc` directly, `CPSU.cs:540-549`). REV6 removed VIN from its command table. |
 | VOUT_12V | 0x24 | 2 bytes | 12V rail voltage (LINEAR11, mV) |
 | IOUT_12V | 0x25 | 2 bytes | 12V rail current (LINEAR11, mA) |
 | VOUT_5V | 0x26 | 2 bytes | 5V rail voltage (LINEAR11, mV) |
@@ -218,6 +222,9 @@ minus current drawn through non-GPU 12V loads (e.g., CPU, motherboard).
 the MPG TS models and the multirail flag on the MEG P models (the Ai1600T answers
 neither and prints why, still exiting 0).
 
+- **0xC0 `MULTIRAIL_OCP`** (1 byte) — on the MEG Ai1000P/Ai1300P, 2 means
+  per-rail protection and 1 means one combined rail. `--set-rail` writes it and
+  reads it back; the two models hide the control for the 1600 W/TS variants.
 - **0xC0 `OCP12V2x6_CONFIG`** (8 bytes) — the configured thresholds. The two amp
   fields use LINEAR11 with exponent -4, which the setter in `CPSU.cs:184-207` builds as
   `low = value << 4`, `high = 0xE0`. So 12 A is the word `0xE0C0` and 5 A is `0xE050`.

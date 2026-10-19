@@ -651,3 +651,64 @@ def test_a_bom_on_the_history_header_is_still_canonical(tmp_path, caplog):
     assert len(rows) == 1
     assert rows[0]['12v'] == '12.100'
     assert 'no canonical header' not in caplog.text
+
+
+def test_append_alert_log_writes_one_timestamped_line(tmp_path):
+    path = stats.append_alert_log(tmp_path, 'ALERT [warning] ocp_pin1: over-current', ts=1000.0)
+    assert path == stats.alert_log_path(tmp_path, date.fromtimestamp(1000.0))
+    lines = stats.iter_alert_log(tmp_path)
+    assert len(lines) == 1
+    assert lines[0].endswith('| ALERT [warning] ocp_pin1: over-current')
+
+
+def test_alert_log_rotates_instead_of_truncating(tmp_path, monkeypatch):
+    monkeypatch.setattr(stats, 'ALERT_LOG_MAX_BYTES', 10)
+    stats.append_alert_log(tmp_path, 'first', ts=1000.0)
+    stats.append_alert_log(tmp_path, 'second', ts=1001.0)
+    path = stats.alert_log_path(tmp_path, date.fromtimestamp(1000.0))
+    assert path.with_name(path.name + '.1').exists()
+    assert 'second' in path.read_text(encoding='utf-8')
+    lines = stats.iter_alert_log(tmp_path)
+    assert any('first' in line for line in lines)
+    assert lines[-1].endswith('second')
+
+
+def test_prune_alert_logs_keeps_the_retention_window(tmp_path):
+    old = stats.alert_log_path(tmp_path, date(2026, 1, 1))
+    new = stats.alert_log_path(tmp_path, date(2026, 2, 1))
+    old.write_text('old' + chr(10), encoding='utf-8')
+    new.write_text('new' + chr(10), encoding='utf-8')
+    removed = stats.prune_alert_logs(tmp_path, today=date(2026, 2, 10), days=30)
+    assert old in removed
+    assert not old.exists()
+    assert new.exists()
+
+
+def test_iter_alert_log_skips_an_unreadable_file(tmp_path, caplog):
+    stats.alert_log_path(tmp_path).write_bytes(b'\xff\xfe')
+    with caplog.at_level('WARNING'):
+        assert stats.iter_alert_log(tmp_path) == []
+    assert 'unreadable alert log' in caplog.text
+
+
+def test_live_snapshot_round_trips_without_the_serial_and_ages_out(tmp_path):
+    sensors = {
+        'product': 'MEG Ai1300P',
+        'serial': 'SECRET',
+        'vout_12v': (12.1, 'V'),
+        'iout_12v_rails': ([10.0, 20.0, 15.0, 5.0, 0.0], 'A'),
+        'vout_12v_rails': ([12.1, 12.1, 12.1, 12.1, 12.1], 'V'),
+    }
+    path = stats.write_live_snapshot(tmp_path, sensors, ts=1000.0)
+    assert path == stats.live_path(tmp_path)
+    live = stats.read_live_snapshot(tmp_path, now=1005.0)
+    assert live['vout_12v'] == 12.1
+    assert live['cpu_w'] == round(20.0 * 12.1, 1)
+    assert 'serial' not in live
+    assert stats.read_live_snapshot(tmp_path, now=1100.0) is None
+
+
+def test_a_missing_or_corrupt_live_snapshot_reads_as_none(tmp_path):
+    assert stats.read_live_snapshot(tmp_path) is None
+    stats.live_path(tmp_path).write_text('not json', encoding='utf-8')
+    assert stats.read_live_snapshot(tmp_path) is None

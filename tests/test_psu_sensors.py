@@ -69,10 +69,15 @@ def test_fw_revision_is_two_digits_with_the_msi_decimal_point():
 
 
 def test_fw_revision_falls_back_for_a_payload_that_is_not_two_digits():
-    """A non-conforming answer is passed through rather than guessed at."""
+    """A non-conforming answer is passed through, minus non-printable bytes.
+
+    The pass-through rule stops the code from inventing a revision; the
+    printable-ASCII filter then keeps a hostile payload out of journald, the
+    CSV export and a Prometheus label (CRA ST-008).
+    """
     assert _psu_1300ts(registers={0x12: b'1.0'}).fw_revision == '1.0'
     assert _psu_1300ts(registers={0x12: b'7'}).fw_revision == '7'
-    assert _psu_1300ts(registers={0x12: b'\xff\xfe'}).fw_revision == '\ufffd\ufffd'
+    assert _psu_1300ts(registers={0x12: b'\xff\xfe'}).fw_revision == ''
 
 
 def test_fw_revision_does_not_truncate_a_longer_digit_leading_payload():
@@ -773,3 +778,67 @@ def test_read_zero_fan_uses_the_fourth_fanduty_byte():
     assert psu.read_zero_fan() is True
     psu = _psu_1300ts(registers={0x42: bytes([0x1E, 0x1E, 0x32, 0x00])})
     assert psu.read_zero_fan() is False
+
+
+def test_set_multirail_ocp_writes_c0_then_saves():
+    psu = _psu_1300ts(commands={(0xFA, 0x51): b'MEG Ai1300P' + bytes([0])})
+    psu.hid = RecordingHID()
+    assert psu.set_multirail_ocp(True) is True
+    assert psu.hid.writes == [(0x50, 0xC0, 2), (0x50, 0xF1)]
+    psu.hid.writes.clear()
+    assert psu.set_multirail_ocp(False) is True
+    assert psu.hid.writes == [(0x50, 0xC0, 1), (0x50, 0xF1)]
+
+
+def test_set_multirail_ocp_is_refused_on_a_ts_model():
+    psu = _psu_1300ts()
+    psu.hid = RecordingHID()
+    assert psu.set_multirail_ocp(True) is False
+    assert psu.hid.writes == []
+
+
+def test_read_multirail_ocp_gates_on_the_model():
+    psu = _psu_1300ts(commands={(0xFA, 0x51): b'MEG Ai1300P' + bytes([0])})
+    psu.hid = RecordingHID(registers={0xC0: bytes([2])})
+    assert psu.read_multirail_ocp() is True
+    psu.hid = RecordingHID(registers={0xC0: bytes([1])})
+    assert psu.read_multirail_ocp() is False
+    psu = _psu_1300ts()
+    psu.hid = RecordingHID(registers={0xC0: bytes([2])})
+    assert psu.read_multirail_ocp() is None
+
+
+def test_read_vin_decodes_volts_on_a_non_ts_model():
+    psu = _psu_1300ts(commands={(0xFA, 0x51): b'MEG Ai1300P' + bytes([0])})
+    psu.hid = RecordingHID(registers={0x20: bytes([0x73, 0x08])})
+    assert psu.read_vin() == (230.0, 'V')
+
+
+def test_read_vin_is_refused_on_a_ts_model():
+    psu = _psu_1300ts()
+    psu.hid = RecordingHID(registers={0x20: bytes([0x73, 0x08])})
+    assert psu.read_vin() is None
+
+
+def test_get_sensors_includes_vin_on_a_non_ts_model():
+    psu = _psu_1300ts(commands={(0xFA, 0x51): b'MEG Ai1300P' + bytes([0])})
+    psu.hid = RecordingHID(registers={0x20: bytes([0x73, 0x08])})
+    psu.hid.read_all = lambda: bytes(64)
+    sensors = psu.get_sensors()
+    assert sensors['vin'] == (230, 'V')
+
+
+def test_control_characters_are_stripped_from_device_identity():
+    psu = _psu_1300ts(
+        registers={
+            0x11: b'MPG\x00Ai1300TS\x01\x00',
+            0x13: bytes([10]) + b'SN12\r\n3456',
+        }
+    )
+    assert psu.product == 'MPG Ai1300TS'
+    assert psu.serial == 'SN123456'
+
+
+def test_the_identity_cap_bounds_a_hostile_serial():
+    psu = _psu_1300ts(registers={0x13: bytes([64]) + b'A' * 64})
+    assert len(psu.serial) == 64

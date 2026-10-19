@@ -37,10 +37,19 @@ EXIT_ERROR = 1
 EXIT_ALERT = 2
 
 FAN_MODE_AUTO = 'auto'
+# MSI Center's PCIE5 Cooling Wizard calls the PSU's own curve "Performance";
+# accept that spelling as an alias for the same byte (1), never a second mode.
+FAN_MODE_PERFORMANCE = 'performance'
 FAN_MODE_CUSTOMIZED = 'customized'
+RAIL_MODE_MULTI = 'multi'
+RAIL_MODE_SINGLE = 'single'
 #: `--watch` without a number: take [monitor] interval from the config file.
 WATCH_FROM_CONFIG = 'config'
-_FAN_MODE_TO_BYTE = {FAN_MODE_AUTO: 1, FAN_MODE_CUSTOMIZED: 3}
+_FAN_MODE_TO_BYTE = {
+    FAN_MODE_AUTO: 1,
+    FAN_MODE_PERFORMANCE: 1,
+    FAN_MODE_CUSTOMIZED: 3,
+}
 _FAN_BYTE_TO_MODE = {1: FAN_MODE_AUTO, 3: FAN_MODE_CUSTOMIZED}
 
 STATUS_NORMAL = 'Normal'
@@ -138,6 +147,10 @@ def format_text(sensors):
     if 'status' in sensors:
         lines.append(f'  12V-2x6 Status: {sensors["status"]}')
 
+    if 'vin' in sensors:
+        value, unit = sensors['vin']
+        lines.append(f'  AC Input: {value:8.1f} {unit}')
+
     if 'power_total' in sensors:
         value, unit = sensors['power_total']
         lines.append(_reading_line('POWER', value, unit, 1, sensors.get('power_avg'), 2))
@@ -180,8 +193,14 @@ def format_json(sensors):
 
 
 def _label(value):
-    """Escape a Prometheus label value."""
-    return str(value).replace('\\', '\\\\').replace('"', '\\"').replace('\n', ' ')
+    """Escape a Prometheus label value and strip every C0 control character.
+
+    A device-supplied serial or product string is untrusted input (CRA ST-008):
+    an embedded CR/LF would otherwise start a new exposition line, and a bare
+    backslash/quote would make the scrape invalid.
+    """
+    text = str(value).replace('\\', '\\\\').replace('"', '\\"')
+    return ''.join(' ' if ord(ch) < 0x20 or ord(ch) == 0x7F else ch for ch in text)
 
 
 def format_prometheus(sensors):
@@ -223,6 +242,12 @@ def format_prometheus(sensors):
             lines.append(f'# HELP {prefix}_{name} {name} in amps')
             lines.append(f'# TYPE {prefix}_{name} gauge')
             lines.append(f'{prefix}_{name}{{rail="{key}"}} {value}')
+
+    if 'vin' in sensors:
+        value, _ = sensors['vin']
+        lines.append('# HELP msi_psu_input_voltage AC input voltage in volts')
+        lines.append('# TYPE msi_psu_input_voltage gauge')
+        lines.append(f'msi_psu_input_voltage {value}')
 
     rails = stats.reading(sensors, 'iout_12v_rails')
     if rails:
@@ -342,8 +367,15 @@ def format_blackbox(records):
     lines = ['GPU Safeguard+ alert log (black box, last 10, newest first)', '']
     for record in ordered:
         status = _BLACKBOX_STATUS.get(record.get('status'), f'status {record.get("status")}')
+        # REV6 p.13 byte 1 is "12+4 pin ID / pin set"; MSI never reads this
+        # record, so a 1/2 value is most likely the connector and 3..12 can only
+        # be a pin number. Claiming "Conn3" for a pin would be worse than naming
+        # the raw id, so the ambiguous 1/2 values keep the connector label and a
+        # larger value is shown as the pin it must be (needs a real capture).
+        id_or_set = record.get('pin_set')
+        location = f'Conn{id_or_set}' if id_or_set in (1, 2) else f'pin {id_or_set}'
         lines.append(
-            f'#{record["info_id"]}  Conn{record.get("pin_set")}   {status}   '
+            f'#{record["info_id"]}  {location}   {status}   '
             f'uptime {_format_duration(record.get("run_time", 0))} / '
             f'total {_format_duration(record.get("total_time", 0))}   '
             f'total count: {record.get("total_count")}'
@@ -888,26 +920,34 @@ def apply_fan_setting(psu, mode, duty=None):
 
     Args:
         psu: An opened PSU.
-        mode: 'auto'/'customized', or None to infer 'customized' from a duty.
+        mode: 'auto'/'performance'/'customized', or None to infer 'customized'
+            from a duty. 'performance' is MSI Center's name for the PSU's own
+            curve and maps to the same byte as 'auto'.
         duty: 0-100 for 'customized'; None keeps whatever the PSU reports.
 
     Returns:
-        ``(mode, duty)`` as actually applied, or None when the PSU refused
-        (write NAK or a read-back that disagrees with what was sent).
+        ``(mode, duty)`` as actually applied (the requested spelling is kept so
+        ``--fan-mode performance`` reports what the user asked for), or None when
+        the PSU refused (write NAK or a read-back that disagrees).
     """
     mode = mode or (FAN_MODE_CUSTOMIZED if duty is not None else FAN_MODE_AUTO)
-    if mode == FAN_MODE_AUTO:
+    effective = FAN_MODE_AUTO if mode == FAN_MODE_PERFORMANCE else mode
+    if effective == FAN_MODE_AUTO:
         duty = 0
     elif duty is None:
         current = psu.read_fan_setting()
         duty = current[1] if current else 0
 
-    target_mode = _FAN_MODE_TO_BYTE[mode]
+    target_mode = _FAN_MODE_TO_BYTE[effective]
     for _ in range(3):
         if not psu.set_fan_mode(target_mode, duty):
             continue
         setting = psu.read_fan_setting()
-        if setting and setting[0] == target_mode and (mode == FAN_MODE_AUTO or setting[1] == duty):
+        if (
+            setting
+            and setting[0] == target_mode
+            and (effective == FAN_MODE_AUTO or setting[1] == duty)
+        ):
             return (mode, duty)
     return None
 
@@ -928,10 +968,33 @@ def apply_zero_fan_setting(psu, enabled):
     return None
 
 
+def apply_rail_mode(psu, mode):
+    """Switch the MEG P rail protection mode and verify it by read-back.
+
+    MSI Center's DC Output page exposes this as Multi Rail / Single Rail and
+    sends SET_MULTIRAIL_OCP + SAVE_SETTING without a read-back (C_PSU.cs:1392);
+    we verify the single-byte register, which answers immediately. Three
+    attempts, like the other control writes. Returns the applied mode or None
+    when the model does not support it or the read-back disagrees.
+    """
+    enabled = mode == RAIL_MODE_MULTI
+    for _ in range(3):
+        if not psu.set_multirail_ocp(enabled):
+            continue
+        current = psu.read_multirail_ocp()
+        if current is not None and bool(current) == enabled:
+            return mode
+    return None
+
+
 def _write_requested(args):
     """True when any flag asks for a device write (not a read/export/dashboard)."""
     return bool(
-        args.fan_mode or args.fan_duty is not None or args.zero_fan is not None or args.buzzer_off
+        args.fan_mode
+        or args.fan_duty is not None
+        or args.zero_fan is not None
+        or args.buzzer_off
+        or args.set_rail is not None
     )
 
 
@@ -945,6 +1008,19 @@ def run_write_controls(psu, args):
     being overwritten by each line.
     """
     lines = []
+    if args.set_rail is not None:
+        applied = apply_rail_mode(psu, args.set_rail)
+        if applied is None:
+            logger.error(
+                'Error: the PSU did not accept the rail mode '
+                '(read-back mismatch, or only the MEG Ai1000P/Ai1300P support it).'
+            )
+            return EXIT_ERROR
+        logger.info(
+            f'write rail mode={applied} verified=true '
+            f'product={getattr(psu, "product", "")!r} fw={getattr(psu, "fw_revision", "")!r}'
+        )
+        lines.append(f'Rail mode: {applied}')
     if args.zero_fan is not None:
         enabled = args.zero_fan == 'on'
         applied = apply_zero_fan_setting(psu, enabled)
@@ -954,6 +1030,10 @@ def run_write_controls(psu, args):
                 '(read-back mismatch, or the model does not support it).'
             )
             return EXIT_ERROR
+        logger.info(
+            f'write zero_fan={"on" if applied else "off"} verified=true '
+            f'product={getattr(psu, "product", "")!r} fw={getattr(psu, "fw_revision", "")!r}'
+        )
         lines.append(f'Zero Fan: {"on" if applied else "off"}')
     if args.fan_mode or args.fan_duty is not None:
         applied = apply_fan_setting(psu, args.fan_mode, args.fan_duty)
@@ -961,7 +1041,11 @@ def run_write_controls(psu, args):
             logger.error('Error: the PSU did not accept the fan setting (read-back mismatch).')
             return EXIT_ERROR
         mode, duty = applied
-        duty_text = '' if mode == FAN_MODE_AUTO else f'   Duty: {duty}%'
+        logger.info(
+            f'write fan mode={mode} duty={duty} verified=true '
+            f'product={getattr(psu, "product", "")!r} fw={getattr(psu, "fw_revision", "")!r}'
+        )
+        duty_text = '' if mode in (FAN_MODE_AUTO, FAN_MODE_PERFORMANCE) else f'   Duty: {duty}%'
         lines.append(f'Fan mode: {mode}{duty_text}')
     if args.buzzer_off:
         if not psu.silence_buzzer():
@@ -970,6 +1054,10 @@ def run_write_controls(psu, args):
                 '(or the model does not support it).'
             )
             return EXIT_ERROR
+        logger.info(
+            f'write buzzer=silenced verified=false '
+            f'product={getattr(psu, "product", "")!r} fw={getattr(psu, "fw_revision", "")!r}'
+        )
         lines.append('Buzzer: silenced')
     emit('\n'.join(lines), args.output)
     return EXIT_OK
@@ -1037,6 +1125,16 @@ def _run_ocp_12v2x6(psu, product, args):
             state = None
 
     emit(OCP_FORMATTERS[args.format](config, state, product), args.output)
+    return EXIT_OK
+
+
+def run_show_alert_log(args, cfg):
+    """Print the local alert log (MSI Center's ViewLog equivalent, text only)."""
+    lines = stats.iter_alert_log(_state_dir(cfg), limit=200)
+    if not lines:
+        emit('No alert log records stored.', args.output)
+        return EXIT_OK
+    emit('\n'.join(lines), args.output)
     return EXIT_OK
 
 
@@ -1172,9 +1270,10 @@ def build_parser():
     )
     parser.add_argument(
         '--fan-mode',
-        choices=[FAN_MODE_AUTO, FAN_MODE_CUSTOMIZED],
+        choices=[FAN_MODE_AUTO, FAN_MODE_PERFORMANCE, FAN_MODE_CUSTOMIZED],
         default=None,
-        help='Write the fan control mode (41h) and save it (F1h)',
+        help='Write the fan control mode (41h) and save it (F1h); '
+        'performance is an alias for the PSU curve (auto)',
     )
     parser.add_argument(
         '--fan-duty',
@@ -1194,6 +1293,12 @@ def build_parser():
         '--buzzer-off',
         action='store_true',
         help='Silence the 12+4 OCP buzzer (C2h; 12+4 models only)',
+    )
+    parser.add_argument(
+        '--set-rail',
+        choices=[RAIL_MODE_MULTI, RAIL_MODE_SINGLE],
+        default=None,
+        help='Switch 12V rail protection mode (C0h + F1h; MEG Ai1000P/Ai1300P only)',
     )
     parser.add_argument(
         '--export',
@@ -1230,6 +1335,11 @@ def build_parser():
         help='Dump PSU black-box alert records (C1h)',
     )
     parser.add_argument(
+        '--show-alert-log',
+        action='store_true',
+        help='Print the local alert log (alerts-*.log in the state directory)',
+    )
+    parser.add_argument(
         '--ocp',
         action='store_true',
         help='Show the OCP view (C0h/C1h): the 12V-2x6 thresholds and state on the '
@@ -1260,6 +1370,21 @@ def _validate_args(parser, args):
         args.watch is not None or args.export or args.format not in (None, 'text')
     ):
         parser.error('--show-log cannot be combined with --watch, --export or --format')
+    if args.show_alert_log and (
+        args.watch is not None
+        or args.export
+        or args.dashboard
+        or args.show_log
+        or args.ocp
+        or args.serial is not None
+        or _write_requested(args)
+        or args.format not in (None, 'text')
+    ):
+        parser.error(
+            '--show-alert-log reads local files only: it cannot be combined with '
+            '--watch, --export, --dashboard, --show-log, --ocp, --serial, --format '
+            'or a control write'
+        )
     if args.ocp and (
         args.watch is not None
         or args.export
@@ -1325,8 +1450,10 @@ def _validate_args(parser, args):
             'control writes (--fan-mode/--fan-duty/--zero-fan/--buzzer-off) cannot '
             'be combined with --watch, --export or --show-log'
         )
-    if args.fan_mode == FAN_MODE_AUTO and args.fan_duty is not None:
-        parser.error('--fan-duty does not apply to --fan-mode auto (the PSU uses its own curve)')
+    if args.fan_mode in (FAN_MODE_AUTO, FAN_MODE_PERFORMANCE) and args.fan_duty is not None:
+        parser.error(
+            '--fan-duty does not apply to --fan-mode auto/performance (the PSU uses its own curve)'
+        )
     if args.port is not None and not 0 <= args.port <= 65535:
         # bind() raises OverflowError, which is not an OSError: it used to escape
         # serve() as a traceback instead of a usage message.
@@ -1416,6 +1543,8 @@ def _main():
         sys.exit(run_dashboard(args, cfg))
     if args.export:
         sys.exit(run_export(args, cfg))
+    if args.show_alert_log:
+        sys.exit(run_show_alert_log(args, cfg))
 
     if args.once or args.watch is None:
         debounce = 1

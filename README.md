@@ -14,10 +14,20 @@ Python standard library only — no third-party runtime dependencies.
 - **Per-pin 12V-2x6 current** with a software mirror of the PSU's own OCP thresholds
   (single pin ≥ 12 A — the C0h trip point is inclusive — spread > 5 A per connector).
 - **Alerting with exit codes** — hardware alert bits (E1h) plus the software mirror,
-  debounced, reported on stderr; `0` normal / `1` fault / `2` alert.
+  debounced, reported on stderr; `0` normal / `1` fault / `2` alert. The daemon also
+  appends every alert edge and recovery to `alerts-YYYYMMDD.log` (5 MiB rotation,
+  30-day retention), and `--show-alert-log` prints it (MSI Center's AlertLog/ViewLog).
 - **Fan display and control** — read mode/duty/Zero Fan (41h/42h), write and save a
   custom duty (41h + F1h) or toggle Zero Fan (43h + F1h), both with read-back
-  verification; silence the 12+4 OCP buzzer (C2h).
+  verification; silence the 12+4 OCP buzzer (C2h); `performance` is accepted as the
+  PCIE5 Cooling Wizard's name for the PSU curve (`auto`).
+- **Rail protection mode** — switch the MEG Ai1000P/Ai1300P between single-rail and
+  multi-rail OCP (`--set-rail`, C0h 1 byte + F1h) and verify the read-back; the
+  8-byte 12V-2x6 threshold write remains read-only until a separately approved batch
+  and a real-unit validation.
+- **AC input voltage** — `vin` on the MEG models (0x20, an MSI-compatible extra
+  removed from the REV6 table), shown as `AC Input` and exported as
+  `msi_psu_input_voltage`.
 - **Black-box dump** — the last 10 GPU Safeguard+ trip records (`--show-log`).
 - **OCP threshold inspection** — display the 12V-2x6 OCP configuration (pin trip point,
   pin spread, trigger and warning times) and the per-connector state, read-only (`--ocp`).
@@ -26,8 +36,9 @@ Python standard library only — no third-party runtime dependencies.
 - **Cumulative statistics** — average power/efficiency and integrated energy (kWh)
   persisted across restarts, daily buckets kept for 30 days.
 - **History export** — 9-column CSV over any `m/h/d` window, to a file or stdout.
-- **Local dashboard** — loopback-only charts (7 live curves + weekly energy) drawn
-  from the daemon history, with per-chart PNG/CSV export.
+- **Local dashboard** — loopback-only charts (7 cards + weekly energy, including
+  CPU/GPU wattage) that overlay the daemon's 1 s `latest.json` snapshot on the
+  one-minute history, with per-chart PNG/CSV export and a stale-daemon marker.
 - **Fan profile restore** — the daemon re-asserts a configured fan mode/duty/Zero Fan
   every time it (re)opens the PSU, so a custom curve survives AC loss (`[fan]` in the
   config file).
@@ -115,10 +126,12 @@ sudo msi-psu-monitor -f prometheus -O /var/lib/node_exporter/msi-psu.prom
 
 ```
 msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
-                [-O OUTPUT] [--serial SERIAL] [--fan-mode {auto,customized}]
+                [-O OUTPUT] [--serial SERIAL] [--fan-mode {auto,performance,customized}]
                 [--fan-duty 0-100] [--zero-fan {on,off}] [--buzzer-off]
+                [--set-rail {multi,single}]
                 [--export] [--from FROM_SPEC]
                 [--columns COLUMNS] [--dashboard] [--port PORT] [--show-log]
+                [--show-alert-log]
                 [--ocp] [--no-alerts] [--config CONFIG] [--verbose] [--quiet]
                 [--version]
 
@@ -130,19 +143,26 @@ msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
   -O, --output     Write output to a file instead of stdout (with --watch the
                    frames are appended to that file; --dashboard has no output)
       --serial     Select one of several PSUs by serial number
-      --fan-mode   Write the fan control mode (41h) and save it (F1h)
+      --fan-mode   Write the fan control mode (41h) and save it (F1h);
+                   performance is an alias for the PSU curve (auto)
       --fan-duty   Custom fan duty in percent; implies --fan-mode customized,
-                   and is refused together with --fan-mode auto
+                   and is refused together with --fan-mode auto/performance
       --zero-fan   Enable/disable Zero Fan (43h) and save it (F1h); 12+4
                    (MPG TS) models only
-      --buzzer-off Silence the 12+4 OCP buzzer (C2h); MPG TS models only
+      --buzzer-off Silence the 12+4 OCP buzzer (C2h); MPG TS models only. The
+                   method is a switch on the PSU (no read-back): test the second
+                   invocation on hardware before treating it as idempotent
+      --set-rail   Switch 12V protection between multi and single rail
+                   (C0h + F1h); MEG Ai1000P/Ai1300P only, verified by read-back
       --export     Export the daemon history as CSV
       --from       Export window: 30m, 2h, 7d, ... (required with --export)
       --columns    Export columns (default: all)
       --dashboard  Serve local charts on 127.0.0.1 (it reads the history
                    files: --once/--serial/--format/-O do not apply)
       --port       Dashboard port (default 8899)
-      --show-log   Dump the PSU black-box alert records (C1h)
+      --show-log   Dump the PSU black-box alert records (C1h; this format is
+                   project-defined because MSI Center never reads that log)
+      --show-alert-log  Print the local alerts-*.log (MSI AlertLog equivalent)
       --ocp        Show the OCP view (C0h/C1h): 12V-2x6 thresholds + state on
                    the MPG TS models, the multirail flag on the MEG P models
       --no-alerts  Skip the E1h alert poll
@@ -171,6 +191,13 @@ sudo msi-psu-monitor --fan-mode auto
 # Zero Fan toggle and buzzer silence (MPG TS models)
 sudo msi-psu-monitor --zero-fan off
 sudo msi-psu-monitor --buzzer-off
+
+# PSU curve (the PCIE5 "Performance" mode) and the MEG P rail mode
+sudo msi-psu-monitor --fan-mode performance
+sudo msi-psu-monitor --set-rail multi
+
+# Local alert audit trail and its viewer
+sudo msi-psu-monitor --show-alert-log
 
 # Last two hours of temperature and fan as CSV
 sudo msi-psu-monitor --export --from 2h --columns temp,fan -O psu-2h.csv
@@ -313,8 +340,11 @@ review caught it.
 
 State lives in `/var/lib/msi-psu-monitor` (created by the unit's
 `StateDirectory`), falling back to `$XDG_STATE_HOME/msi-psu-monitor`; override with
-`MSI_PSU_STATE_DIR`. It holds `state.json` (cumulative counters) and
-`daily-YYYYMMDD.log` (one CSV line per minute, 30-day retention).
+`MSI_PSU_STATE_DIR`. It holds `state.json` (cumulative counters and the last
+sample), `latest.json` (ephemeral 1 s snapshot for the live charts; disable with
+`[daemon] live_snapshot = no`), `daily-YYYYMMDD.log` (one CSV line per minute) and
+`alerts-YYYYMMDD.log` (alert edges/recoveries). History and alert logs are pruned
+after `retention_days` (30).
 
 ## Verifying without hardware
 
@@ -352,6 +382,15 @@ the user-space tool**; there is no kernel module to build today.
 
 See [`docs/protocol.md`](docs/protocol.md) for full protocol documentation, including
 the 62-byte `0xE0` bulk read layout and the register map.
+
+## Security and support
+
+- [SECURITY.md](SECURITY.md) — reporting a vulnerability, security properties and
+  the supply-chain baseline (SBOM, SHA-256, no runtime Python).
+- [docs/support.md](docs/support.md) — support window, end-of-support and the manual
+  update channel.
+- [docs/incident-response.md](docs/incident-response.md) — evidence preservation and
+  release-withdrawal runbook.
 
 ## Attribution
 

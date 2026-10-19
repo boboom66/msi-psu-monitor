@@ -116,8 +116,9 @@ install -m 755 "$ROOT/scripts/install_binary.sh" "$STAGE/install.sh"
 install -m 755 "$ROOT/scripts/uninstall_binary.sh" "$STAGE/uninstall.sh"
 install -m 644 "$ROOT/systemd/99-msi-psu.rules" "$ROOT/systemd/msi-psu-monitor.service" "$STAGE/"
 install -m 644 "$ROOT/docs/msi-psu-monitor.conf.example" "$STAGE/msi-psu-monitor.conf.example"
-install -m 644 "$ROOT/README.md" "$ROOT/LICENSE" "$STAGE/"
-install -m 644 "$ROOT/docs/protocol.md" "$ROOT/docs/verify.md" "$ROOT/docs/release.md" "$STAGE/docs/"
+install -m 644 "$ROOT/README.md" "$ROOT/LICENSE" "$ROOT/SECURITY.md" "$STAGE/"
+install -m 644 "$ROOT/docs/protocol.md" "$ROOT/docs/verify.md" "$ROOT/docs/release.md" \
+  "$ROOT/docs/support.md" "$ROOT/docs/incident-response.md" "$STAGE/docs/"
 printf 'version=%s\narch=%s\ndeb_arch=%s\nbuild_glibc=%s\n' "$VERSION" "$ARCH" "$DEB_ARCH" "$GLIBC" > "$STAGE/BUILD-INFO"
 (
     cd "$STAGE"

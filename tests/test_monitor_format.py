@@ -95,3 +95,44 @@ def test_prometheus_shapes():
     assert '# TYPE msi_psu_uptime counter' in out
     assert 'msi_psu_power_total {} 660.0' in out
     assert 'msi_psu_fan_speed {} 2050' in out
+
+
+def test_vin_has_a_text_line_and_a_prometheus_metric():
+    sensors = {'product': 'MEG Ai1300P', 'vout_12v': (12.1, 'V'), 'vin': (230.0, 'V')}
+    text = format_text(sensors)
+    assert 'AC Input:    230.0 V' in text
+    prom = format_prometheus(sensors)
+    assert 'msi_psu_input_voltage 230.0' in prom
+
+
+def test_blackbox_location_never_invents_a_connector_for_a_pin_id():
+    from msi_psu_monitor.monitor import format_blackbox
+
+    records = [
+        {
+            'info_id': 1,
+            'pin_set': 7,
+            'status': 1,
+            'run_time': 60,
+            'total_time': 600,
+            'total_count': 3,
+        }
+    ]
+    text = format_blackbox(records)
+    assert 'pin 7' in text
+    assert 'Conn7' not in text
+
+
+def test_prometheus_labels_cannot_be_broken_by_device_control_characters():
+    sensors = {
+        'product': 'PSU\r\nmsi_psu_up 0',
+        'vendor': 'MSI\x01',
+        'fw_revision': '1.0',
+        'serial': 'SN\x00\r',
+        'vout_12v': (12.1, 'V'),
+    }
+    prom = format_prometheus(sensors)
+    assert '\r' not in prom
+    assert 'msi_psu_up 1' in prom.splitlines()
+    info = [line for line in prom.splitlines() if line.startswith('msi_psu_info{')][0]
+    assert 'PSU  msi_psu_up 0' in info

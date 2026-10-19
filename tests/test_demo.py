@@ -359,3 +359,15 @@ def test_zero_fan_and_buzzer_are_refused_on_a_meg_model():
     psu = demo.DemoPSU(clock=Clock(), variant='ai1300p')
     assert psu.set_zero_fan(True) is False
     assert psu.silence_buzzer() is False
+
+
+def test_multirail_mode_round_trips_on_a_meg_p_model():
+    psu = demo.DemoPSU(clock=Clock(), variant='ai1300p')
+    assert psu.read_multirail_ocp() is True
+    assert psu.set_multirail_ocp(False) is True
+    assert psu.read_multirail_ocp() is False
+
+
+def test_multirail_is_refused_on_a_ts_model():
+    psu = demo.DemoPSU(clock=Clock(), variant='mpg_ai1300ts')
+    assert psu.set_multirail_ocp(False) is False
