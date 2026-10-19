@@ -44,8 +44,8 @@ def test_the_release_workflow_generates_and_publishes_an_sbom():
     assert 'SBOM-${{ matrix.arch }}.json' in text
     assert 'dist/SBOM-*.json' in text
     assert (
-        'sha256sum msi-psu-monitor_*.tar.gz msi-psu-monitor_*_amd64.deb '
-        'msi-psu-monitor_*_arm64.deb SBOM-*.json'
+        'sha256sum msi-psu-monitor_*.tar.gz msi-psu-monitor-*hardware-kit*.tar.gz '
+        'msi-psu-monitor_*_amd64.deb msi-psu-monitor_*_arm64.deb SBOM-*.json'
     ) in text
 
 
