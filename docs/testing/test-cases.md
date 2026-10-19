@@ -1,7 +1,7 @@
 # 测试用例（第二阶段）
 
 - 基线提交：`650076a`；当前修复后工作树：Phase 2（见 git log）。
-- 全量自动化用例由 `pytest --collect-only` 收集，当前 **629** 个；本文件记录本轮新增/关键用例、
+- 全量自动化用例由 `pytest --collect-only` 收集，当前 **630** 个；本文件记录本轮新增/关键用例、
   人工 E2E 用例和仍无法执行的真机/root 用例。
 - 状态：PASS 已实际执行且符合预期；FAIL 已实际执行且不符合；BLOCKED 环境/权限/硬件限制；
   NOT RUN 尚未执行；N/A 不适用。
@@ -57,7 +57,7 @@
 
 ## D. 已有自动化覆盖
 
-原有 629 个 pytest 用例（含本文件列出的新增项）由 `tests/` 直接执行；逐项结果以
+原有 630 个 pytest 用例（含本文件列出的新增项）由 `tests/` 直接执行；逐项结果以
 `pytest -q` 的实际输出为准，不在此重复伪造逐条结果。测试模块与覆盖范围见
 [test-plan.md](test-plan.md) §4 和 [test-report.md](test-report.md)。
 
@@ -75,3 +75,6 @@
 | TEST-056 | FUNC-160 | Dashboard CSV 引号 | 历史值含逗号时 `/api/export` | 单元格被 `"..."` 引用，列数不变 | 通过 | PASS |
 
 | TEST-057 | FUNC-158/159 | 真实 headless Chromium Dashboard | Playwright 打开 `/`，等待数据；检查标题/product/8 canvas、CSV/PNG 下载、console/page error、外部请求 | 页面有数据、CSV/PNG 有效、无错误/外部请求 | 通过（本机 headless） | PASS |
+
+| TEST-058 | FUNC-158 | Dashboard 窄视口 | Playwright 320/768/1920px；检查 `scrollWidth`、8 canvas | 320 无横向溢出；图表仍渲染 | 通过（headless） | PASS |
+| TEST-059 | FUNC-137 | 加速长稳 | demo daemon 20,000 样本，5s 采样 RSS/fd/state/prom/history | RSS 稳定、fd 不增长、无 traceback、正常退出 | 通过（约 200s） | PASS（加速）/24h NOT RUN |

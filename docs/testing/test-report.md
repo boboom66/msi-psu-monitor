@@ -160,7 +160,7 @@ daemon + alert 注入                              alerts-YYYYMMDD.log 写入，
 
 ## 9. Phase 2 增量（2026-10-19）
 
-- 当前提交：Phase 2 修复（见 git log），测试 **629 passed**（3.10.21 / 3.12.3 裸环境与 3.12.3 venv）。
+- 当前提交：Phase 2 修复（见 git log），测试 **630 passed**（3.10.21 / 3.12.3 裸环境与 3.12.3 venv）。
 - 覆盖率：源语句 **92%**（`coverage report` 8 个模块；`__main__.py` 未覆盖）；CI 的门限为 90%。
 - 新增测试：真实 console 子进程 E2E、Host/CSP、JS 语法、HID 短/垃圾帧、daemon fd 泄漏、
   `--iterations` 边界、AlertLog `-O`、release/CI 门禁静态检查；
@@ -173,18 +173,18 @@ daemon + alert 注入                              alerts-YYYYMMDD.log 写入，
 - 仍 BLOCKED/NOT RUN：真实 hidraw/PSU、root/systemd/udev、安装卸载、22.04/arm64、真实浏览器、
   24h/72h 长稳、真实 tag 发布。
 
-> Phase 1 段落中的 569 是当时基线，保留作历史记录；当前以本节 629 为准。
+> Phase 1 段落中的 569 是当时基线，保留作历史记录；当前以本节 630 为准。
 
 ## 10. Phase 3 全量审计增量（2026-10-19）
 
 ### 10.1 实际执行证据
 
 ```text
-pytest -q                              629 passed in 17.9s
+pytest -q                              630 passed in 17.9s
 ruff check .                           All checks passed!
 ruff format --check .                  50 files already formatted
 mypy msi_psu_monitor/                  Success: no issues found in 10 source files
-coverage run --branch -m pytest -q     629 passed
+coverage run --branch -m pytest -q     630 passed
 coverage report                        TOTAL 92% (statement)
 bash scripts/smoke.sh                  58 passed, 0 failed
 shellcheck -S warning scripts/*.sh scripts/hardware/*.sh   exit 0
@@ -207,7 +207,7 @@ systemd-analyze verify                 exit 0
 
 | 状态 | 数量/说明 |
 |---|---|
-| PASS | 629 个自动化测试 + 静态检查 + smoke 58 |
+| PASS | 630 个自动化测试 + 静态检查 + smoke 58 |
 | FAIL | 0（本轮修复后） |
 | BLOCKED | 真实 hidraw/PSU、root/systemd/udev、22.04/arm64、真实浏览器、长稳、正式发版 |
 | NOT RUN | 24h/72h、真实 release 下载/升级/回滚、真实浏览器 PNG/CSV |
@@ -227,3 +227,19 @@ systemd-analyze verify                 exit 0
   `pageerror=[]`、`console error=[]`、外部请求 `[]`。
 - 截图证据：[evidence-dashboard-headless.png](evidence-dashboard-headless.png)。
 - 限制：这是 headless shell，不是桌面 Firefox/Chrome；Playwright 未进项目依赖/CI，不能当作发布环境全浏览器矩阵。
+
+### 10.6 浏览器交互 / 响应式（2026-10-19）
+
+- Playwright headless Chromium：range 30m/2h/7d 切换后 `#csv` href 同步；
+- 7 个卡片 CSV（34–45KB）+ 7 个卡片 PNG（6–20KB）全部触发下载且 PNG 签名有效；
+- 8 个 canvas 均有数据；`pageerror=[]`、`console error=[]`、外部请求 `[]`；
+- 320px 视口初测发现 `scrollWidth=360 > clientWidth=320`，定位为 `.grid` 的 `minmax(340px,1fr)`；
+  改为 `minmax(min(340px,100%),1fr)` 后 320/768/1920 均无横向溢出。对应 DEF-012。
+- 证据：[evidence-dashboard-headless.png](evidence-dashboard-headless.png)。
+
+### 10.7 加速长稳 / 资源（2026-10-19）
+
+- demo daemon 20,000 样本，`sample_interval=0.01`，约 200 秒；每 5 秒采 `/proc/<pid>`。
+- 结果：RSS 约 16.6MB 稳定、fd=3 恒定、prom 约 4.4KB 稳定、history 1,164 行；
+  无 traceback，正常 `Stopped after 20000 samples`。
+- 证据：[evidence-soak-20k.tsv](evidence-soak-20k.tsv)。**24h/72h 仍未跑**。

@@ -59,4 +59,13 @@ Phase 2 会把上表映射为 TEST-xxx，并在 `test-cases.md` 中记录前置�
 | DEF-010 | P2 | 已修复 | daemon `open()` 成功、`init()` 失败时未关闭已打开的 hidraw fd | `test_a_failed_init_closes_the_already_open_device` | 持续发现失败时每轮泄漏一个 fd | `_ensure_psu` 失败路径关闭 psu |
 | DEF-011 | P3 | 已修复 | Dashboard `/api/export` 用 `",".join` 拼 CSV，值含逗号/引号时错列 | `test_export_endpoint_quotes_a_comma_in_a_value` | 手工编辑的历史文件可让导出列错位 | 改用 `csv.writer`（与 CLI 一致） |
 
-回归命令：`uv run --group dev pytest -q` → 629 passed；覆盖率 92%；`ruff check`/`mypy`/`smoke` 见 test-report。
+回归命令：`uv run --group dev pytest -q` → 630 passed；覆盖率 92%；`ruff check`/`mypy`/`smoke` 见 test-report。
+
+## 6. Phase 3 补充：响应式与长稳验证
+
+| ID | 严重度 | 状态 | 描述 | 证据 | 影响 | 处理 |
+|---|---|---|---|---|---|---|
+| DEF-012 | P3 | 已修复 | Dashboard 图表网格 `minmax(340px,1fr)` 在 320px 视口下产生 360px 横向溢出 | Playwright 320px 实测 `scrollWidth=360 > clientWidth=320`；修复后均为 320 | 手机/窄窗口横向滚动，卡片被截 | 改为 `minmax(min(340px,100%),1fr)`；浏览器 320/768/1920 复测无溢出；新增静态 CSS 断言 |
+
+- 长稳：demo daemon 20,000 样本（约 200s，`sample_interval=0.01`），RSS 稳定在 16.6MB、fd=3、prom 约 4.4KB、history 1,164 行；无 traceback，正常 `Stopped after 20000 samples`。
+  证据：[evidence-soak-20k.tsv](evidence-soak-20k.tsv)。24h/72h 仍未跑。

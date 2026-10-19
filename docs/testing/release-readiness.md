@@ -9,7 +9,7 @@
 | 条件 | 状态 | 证据/原因 |
 |---|---|---|
 | 代码构建 | PASS（本机 x86_64/24.04） | 源码 `.deb`、tar.gz、二进制 `.deb`、SBOM 均构建成功 |
-| 自动化测试 | PASS | 629 passed；ruff/mypy/compileall 通过 |
+| 自动化测试 | PASS | 630 passed；ruff/mypy/compileall 通过 |
 | smoke | PASS | 58 passed，0 failed |
 | 覆盖率门禁 | PASS | 源语句 92%，CI fail-under=90 |
 | 真实 PSU 通信 | **BLOCKED（P1）** | 无 `/dev/hidraw*`、无样机 |
@@ -17,8 +17,8 @@
 | root/udev/systemd 安装启停 | **PARTIAL（P2）** | 用户命名空间内 install/uninstall/`--purge` 通过；真实 systemd/udev 未跑 |
 | Ubuntu 22.04 / glibc 2.35 产物 | **BLOCKED（P1）** | 本机 24.04/2.39；CI 未实际运行 |
 | arm64 产物/运行 | **BLOCKED（P1）** | 无 arm64 环境；arm runner 未验证 |
-| 真实浏览器 Dashboard | **PASS（本机 headless）** | Playwright 1.64.1 headless Chromium：title/product/8 canvases、CSV/PNG 下载、无 console/page error；尚未进 CI，见 [test-report](test-report.md) §10.5 |
-| 长稳/内存/fd | PARTIAL | 300 次 fd 检查通过；24h/72h 未跑 |
+| 真实浏览器 Dashboard | **PASS（本机 headless）** | Playwright 1.64.1：range 切换、7 CSV/7 PNG、8 canvas、无 console/page error、无外部请求；320/768/1920 无横向溢出；尚未进 CI，见 [test-report](test-report.md) §10.5/§10.6 |
+| 长稳/内存/fd | PARTIAL | 20,000 样本加速长稳 PASS（RSS/fd 稳定）；24h/72h 未跑 |
 | 安装/卸载/升级/回滚 | **PARTIAL（P2）** | 用户命名空间 install/uninstall/`--purge` 通过；真实 root 未跑 |
 | 硬件验收 kit | **PASS（软件层）** | kit 构建、setup（二进制/源码）、acceptance demo、证据打包通过 |
 | 正式 tag 发布/下载 | **NOT RUN（P2）** | 未 push tag |

@@ -63,7 +63,7 @@ PAGE = """<!DOCTYPE html>
         border-radius: 5px; padding: 5px 11px; font-size: 13px; cursor: pointer;
         text-decoration: none; }
  button.on { background: #2f6fb5; border-color: #3f86d4; }
- .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+ .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); }
  .card { background: #1b1f26; border: 1px solid #262d36; border-radius: 8px; padding: 10px 12px 6px; }
  .card h2 { font-size: 13px; font-weight: 600; margin: 0 0 2px; color: #b9c4d1; }
  .last { font-size: 18px; font-variant-numeric: tabular-nums; }

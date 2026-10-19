@@ -591,3 +591,8 @@ def test_export_endpoint_quotes_a_comma_in_a_value(tmp_path):
     lines = body.splitlines()
     assert lines[0] == 'time,12v'
     assert lines[1].endswith('"a,b"')
+
+
+def test_the_chart_grid_can_shrink_below_its_desktop_minimum():
+    """A 320px viewport must not scroll horizontally: minmax(340px) overflowed."""
+    assert 'minmax(min(340px, 100%), 1fr)' in dashboard.PAGE
