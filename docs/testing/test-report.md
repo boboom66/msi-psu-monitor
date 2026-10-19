@@ -252,5 +252,5 @@ systemd-analyze verify                 exit 0
 - 冻结 smoke 8 项：once / zero-fan / buzzer / performance / rail / alertlog / VIN / clean-env 全 PASS。
 - 本地 `.deb`：`msi-psu-monitor_1.0.0_amd64.deb`，`Depends: libc6 (>= 2.35), zlib1g`。
 - `.deb` 解包后同样在 22.04 内运行 `--version/--once` 通过；硬件 kit 的 `acceptance.sh --demo` 26 PASS/0 FAIL。
-- 证据：[evidence-2204-build.txt](evidence-2204-build.txt)。
+- 复现步骤：[build-2204-chroot.md](build-2204-chroot.md)；证据：[evidence-2204-build.txt](evidence-2204-build.txt)。
 - **限制**：这是本地 chroot，不是 GitHub Actions 的 `ubuntu-22.04` runner；arm64 仍未构建。
