@@ -842,3 +842,58 @@ def test_control_characters_are_stripped_from_device_identity():
 def test_the_identity_cap_bounds_a_hostile_serial():
     psu = _psu_1300ts(registers={0x13: bytes([64]) + b'A' * 64})
     assert len(psu.serial) == 64
+
+
+@pytest.mark.parametrize(
+    'bulk',
+    [
+        b'',
+        b'\x00' * 3,
+        b'\xff' * 20,
+        b'\xff' * 40,
+        b'\xff' * 44,
+        b'\xff' * 62,
+        b'\xfe' * 64,
+        bytes(range(64)),
+    ],
+)
+def test_short_or_garbage_bulk_frames_never_raise(bulk):
+    psu = _psu_1300ts(commands={(0x51, 0xE0): bulk})
+    sensors = psu.get_sensors()
+    assert isinstance(sensors, dict)
+    if len(bulk) < 44:
+        assert 'power_total' not in sensors
+        assert 'iout_pins' not in sensors
+
+
+@pytest.mark.parametrize('payload', [b'', b'\x00', b'\xff' * 3, b'\xfe' * 18, bytes(range(18))])
+def test_short_or_garbage_alert_bitmaps_never_raise(payload):
+    psu = _psu_1300ts(registers={0xE1: payload})
+    status = psu.read_alert_status()
+    assert status is None or isinstance(status, dict)
+
+
+@pytest.mark.parametrize('payload', [b'', b'\x00', b'\xff' * 7, b'\xff' * 8, bytes(range(8))])
+def test_short_or_garbage_ocp_config_never_raises(payload):
+    psu = _psu_1300ts(registers={0xC0: payload})
+    config = psu.read_ocp_thresholds()
+    assert config is None or isinstance(config, dict)
+
+
+@pytest.mark.parametrize('payload', [b'', b'\x00', b'\xff' * 41, b'\xff' * 42, bytes(range(42))])
+def test_short_or_garbage_ocp_state_never_raises(payload):
+    psu = _psu_1300ts(registers={0xC1: payload})
+    state = psu.read_ocp_state()
+    assert state is None or isinstance(state, dict)
+
+
+@pytest.mark.parametrize('payload', [b'', b'\x00', b'\xff' * 3, b'\xff' * 4, bytes(range(6))])
+def test_short_fan_registers_never_raise(payload):
+    psu = _psu_1300ts(registers={0x41: payload, 0x42: payload})
+    assert psu.read_fan_setting() is None or isinstance(psu.read_fan_setting(), tuple)
+    assert psu.read_fan_duty() is None or isinstance(psu.read_fan_duty(), tuple)
+
+
+def test_a_short_blackbox_record_is_skipped_not_invented():
+    psu = _psu_1300ts(commands={(0x51, 0xC1, 1): b'\xff' * 3})
+    assert psu.read_blackbox() == []

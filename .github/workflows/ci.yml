@@ -40,6 +40,10 @@ jobs:
           shellcheck -S warning scripts/*.sh
       - name: Pytest
         run: uv run --group dev pytest -q
+      - name: Coverage (branch)
+        run: |
+          uv run --group dev coverage run --branch -m pytest -q
+          uv run --group dev coverage report --fail-under=90
       # End-to-end on the synthetic PSU: CLI formats, alert exit 2, black box,
       # OCP, fan write, daemon -> prometheus + history, dashboard HTTP.
       - name: Smoke test (no hardware)

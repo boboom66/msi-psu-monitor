@@ -73,7 +73,7 @@ Dashboard 链:
 | `demo.py` | 无硬件合成 PSU（仅 opt-in） |
 | `scripts/*` | 构建、安装、卸载、smoke、SBOM |
 | `systemd/*` | unit、udev、沙箱 |
-| `tests/*` | 569 个自动化测试 |
+| `tests/*` | 612 个自动化测试（Phase 2 当前） |
 
 ## 4. 功能清单（FUNC）
 

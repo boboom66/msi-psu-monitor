@@ -33,8 +33,15 @@ jobs:
             echo "tag ${{ github.ref_name }} does not match v$VERSION"; exit 1; }
       - name: Install dependencies
         run: uv sync --group dev --group build
+      - name: Static gates
+        run: |
+          uv run --group dev ruff check .
+          uv run --group dev ruff format --check .
+          uv run --group dev mypy msi_psu_monitor/
       - name: Test
         run: uv run --group dev pytest -q
+      - name: Smoke test (no hardware)
+        run: bash scripts/smoke.sh
       - name: Build the self-contained binaries
         run: bash scripts/build_binary.sh
       - name: Build the zero-Python .deb

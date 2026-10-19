@@ -157,3 +157,19 @@ daemon + alert 注入                              alerts-YYYYMMDD.log 写入，
 软件层自动化基线健康：569/569、静态门禁通过、冒烟 58/58、源码语句覆盖 93%。
 但本报告不能证明真实 PSU、真实 systemd/udev、22.04/arm64 发布产物或浏览器端行为；
 这些必须在后续阶段明确保留为 BLOCKED/NOT RUN，不能写成 PASS。
+
+## 9. Phase 2 增量（2026-10-19）
+
+- 当前提交：Phase 2 修复（见 git log），测试 **612 passed**（3.10.21 / 3.12.3 裸环境与 3.12.3 venv）。
+- 覆盖率：源语句 **92%**（`coverage report` 8 个模块；`__main__.py` 未覆盖）；CI 的门限为 90%。
+- 新增测试：真实 console 子进程 E2E、Host/CSP、JS 语法、HID 短/垃圾帧、daemon fd 泄漏、
+  `--iterations` 边界、AlertLog `-O`、release/CI 门禁静态检查；
+  以及用户命名空间内真实安装/卸载（配置保留、systemctl/udevadm 调用、`--purge`）。
+- 修复：Dashboard Host 仅 loopback（否则 421）+ CSP/Permissions-Policy；`--iterations 0/-1` 拒绝；
+  覆盖率纳入 dev 依赖与 CI；release workflow 增加 ruff/format/mypy/smoke 门禁；
+  冻结二进制 smoke 增加 performance/多轨/AlertLog/VIN 检查。
+- smoke：**58 passed, 0 failed**；本地二进制重新构建通过。
+- 仍 BLOCKED/NOT RUN：真实 hidraw/PSU、root/systemd/udev、安装卸载、22.04/arm64、真实浏览器、
+  24h/72h 长稳、真实 tag 发布。
+
+> Phase 1 段落中的 569 是当时基线，保留作历史记录；当前以本节 612 为准。

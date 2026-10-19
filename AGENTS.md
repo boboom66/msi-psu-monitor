@@ -8,10 +8,12 @@ Protocol rules live in `msi_psu_monitor/AGENTS.md` (auto-loaded via `opencode.js
 
 ```bash
 uv sync --group dev                                  # py>=3.10, dev toolchain (pytest/ruff/mypy), zero runtime deps
-uv run --group dev pytest -q                         # 569 tests, no hardware needed
+uv run --group dev pytest -q                         # 612 tests, no hardware needed
 uv run --group dev pytest -q tests/test_state.py     # single file
 uv run --group dev ruff check .                      # must be clean
 uv run --group dev mypy msi_psu_monitor/             # must be clean
+uv run --group dev coverage run --branch -m pytest -q
+uv run --group dev coverage report --fail-under=90   # source statement floor
 MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --once      # full pipeline, no PSU attached
 MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --ocp       # 12V-2x6 OCP thresholds + state (read-only)
 MSI_PSU_DEMO_MODEL=ai1300p MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --set-rail multi
@@ -145,6 +147,9 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12/3.13.
 - **Dashboard live path**: the daemon writes `latest.json` every sample (no fsync) and the
   page polls `/api/live` once a second, overlaying it on the one-minute history; it never
   touches hidraw. A stopped daemon must leave the endpoint 503/stale, not a frozen chart.
+- **Dashboard Host/CSP**: `_route()` rejects a non-loopback `Host` with 421
+  (DNS-rebinding defence), and every response carries a self-contained CSP plus
+  Permissions-Policy. GET and HEAD share `_route()`; do not add a second response path.
 - **Official releases are self-contained**: `scripts/build_binary.sh` freezes two
   PyInstaller onefile executables (pinned `build` group; never a runtime dependency),
   built on Ubuntu 22.04/glibc 2.35 for x86_64 + arm64. The tarball installer and the

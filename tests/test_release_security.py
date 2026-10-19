@@ -88,3 +88,17 @@ def test_the_sbom_generator_is_stdlib_only():
     text = (ROOT / 'scripts/build_sbom.py').read_text(encoding='utf-8')
     for forbidden in ('import requests', 'import tomli', 'from tomli'):
         assert forbidden not in text
+
+
+def test_ci_and_release_run_the_quality_gates():
+    """A release tag must not publish code that skipped the normal gates."""
+    ci = (ROOT / '.github/workflows/ci.yml').read_text(encoding='utf-8')
+    release = (ROOT / '.github/workflows/release.yml').read_text(encoding='utf-8')
+    assert 'coverage report --fail-under=90' in ci
+    for command in (
+        'ruff check .',
+        'ruff format --check .',
+        'mypy msi_psu_monitor/',
+        'bash scripts/smoke.sh',
+    ):
+        assert command in release, command

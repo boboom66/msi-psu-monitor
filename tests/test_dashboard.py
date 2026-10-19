@@ -7,6 +7,7 @@ import os
 import pathlib
 import re
 import select
+import shutil
 import socket
 import subprocess
 import sys
@@ -306,7 +307,7 @@ def test_a_bracket_mangled_request_target_is_a_400(tmp_path):
     thread.start()
     try:
         sock = socket.create_connection(('127.0.0.1', httpd.server_port), timeout=5)
-        sock.sendall(b'GET http://[/x HTTP/1.1\r\nHost: x\r\n\r\n')
+        sock.sendall(b'GET http://[/x HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n')
         reply = sock.recv(200)
         sock.close()
     finally:
@@ -470,6 +471,11 @@ def test_security_headers_are_present_on_every_route(live_server):
         assert headers['X-Content-Type-Options'] == 'nosniff'
         assert headers['X-Frame-Options'] == 'DENY'
         assert headers['Referrer-Policy'] == 'no-referrer'
+        csp = headers['Content-Security-Policy']
+        assert "default-src 'none'" in csp
+        assert "script-src 'unsafe-inline'" in csp
+        assert "connect-src 'self'" in csp
+        assert headers['Permissions-Policy'] == 'camera=(), microphone=(), geolocation=()'
 
 
 def test_an_unexpected_handler_error_keeps_its_traceback(tmp_path, caplog):
@@ -518,3 +524,48 @@ def test_live_endpoint_is_503_without_a_fresh_snapshot(live_server):
     with pytest.raises(HTTPError) as excinfo:
         _get(live_server + '/api/live')
     assert excinfo.value.code == 503
+
+
+def _raw_http(url, host_header):
+    """Send a raw GET with an explicit Host header; return the response text."""
+    rest = url.split('://', 1)[1]
+    host, port = rest.rsplit(':', 1)
+    with socket.create_connection((host, int(port)), timeout=5) as sock:
+        request = (f'GET / HTTP/1.1\r\nHost: {host_header}\r\nConnection: close\r\n\r\n').encode(
+            'ascii'
+        )
+        sock.sendall(request)
+        chunks = []
+        while True:
+            data = sock.recv(4096)
+            if not data:
+                break
+            chunks.append(data)
+    return b''.join(chunks).decode('latin-1')
+
+
+def test_a_non_loopback_host_header_is_rejected(live_server):
+    """A DNS-rebinding page can resolve its name to 127.0.0.1 and reach the
+    dashboard; the Host header is the only server-side proof it is not us."""
+    response = _raw_http(live_server, 'evil.example')
+    assert response.startswith(('HTTP/1.1 421', 'HTTP/1.0 421'))
+
+
+def test_loopback_host_headers_are_accepted(live_server):
+    port = live_server.rsplit(':', 1)[1]
+    for host in (f'127.0.0.1:{port}', f'localhost:{port}', f'[::1]:{port}'):
+        response = _raw_http(live_server, host)
+        assert response.startswith(('HTTP/1.1 200', 'HTTP/1.0 200')), host
+
+
+def test_the_embedded_javascript_is_syntactically_valid(tmp_path):
+    """HTTP tests do not execute JS; a syntax error would leave a blank page."""
+    node = shutil.which('node')
+    if node is None:
+        pytest.skip('node is not installed')
+    page = dashboard.render_page()
+    script = page.split('<script>', 1)[1].split('</script>', 1)[0]
+    target = tmp_path / 'page.js'
+    target.write_text(script, encoding='utf-8')
+    result = subprocess.run([node, '--check', str(target)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

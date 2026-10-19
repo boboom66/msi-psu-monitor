@@ -462,6 +462,17 @@ class MonitorDaemon:
         return EXIT_OK
 
 
+def _positive_iterations(text):
+    """argparse type: --iterations 0/negative would silently run one sample."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f'invalid iteration count: {text!r}') from None
+    if value < 1:
+        raise argparse.ArgumentTypeError('--iterations must be at least 1')
+    return value
+
+
 def build_parser():
     parser = argparse.ArgumentParser(
         prog='msi-psu-monitor-daemon',
@@ -472,10 +483,10 @@ def build_parser():
     parser.add_argument('--prom-path', type=str, default=None, help='Override the prometheus path')
     parser.add_argument(
         '--iterations',
-        type=int,
+        type=_positive_iterations,
         default=None,
         metavar='N',
-        help='Stop after N samples instead of running forever (smoke tests)',
+        help='Stop after N positive samples instead of running forever (smoke tests)',
     )
     parser.add_argument(
         '--verbose', '-v', action='store_true', help='Verbose diagnostics on stderr'

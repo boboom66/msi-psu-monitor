@@ -12,7 +12,7 @@ runtime imports.
 | `monitor.py` | CLI: argument validation, three sensor formatters + three `--ocp` formatters, exit codes, fan/Zero Fan/buzzer/multirail writes, `--export`, `--show-log`, `--show-alert-log`, `--ocp`, device selection, `open_psu()` |
 | `state.py` | `MonitorState` (avg + energy integral), `state.json` atomic persistence, `daily-*.log` history, `alerts-*.log` audit trail, `latest.json` live cache, `--from`/`--columns`/`build_export` |
 | `daemon.py` | Resident sample loop: 1 s alerts, 30 s atomic prometheus incl. the OCP block (`msi_psu_ocp_*` on TS / `msi_psu_multirail_ocp` on MEG P; variant-gated, refreshed every write because C1h is a 5 s rolling average), the same file rewritten with `msi_psu_up 0` + reason on a failed read, 1 s `latest.json`, alert-log append, 60 s history, rescan after 5 failures |
-| `dashboard.py` | Loopback-only `http.server` reading the history/`latest.json` files; charts are hand-drawn `<canvas>` JS |
+| `dashboard.py` | Loopback-only `http.server` reading the history/`latest.json` files; non-loopback Host → 421, CSP/Permissions-Policy on every response; charts are hand-drawn `<canvas>` JS |
 | `alerts.py` | `AlertEngine` (edge-triggered + consecutive debounce), severities, per-pin OCP/imbalance mirror |
 | `config.py` | INI config, precedence CLI > file > `DEFAULTS` |
 | `demo.py` | `MSI_PSU_DEMO=1` synthetic PSU; the only synthetic source in the package |
@@ -102,6 +102,9 @@ runtime imports.
   only. A write failure is warned and never breaks sampling.
 - **Live dashboard**: the daemon writes `latest.json` without fsync every sample; the page
   polls `/api/live` once a second. A stale/missing file must be 503, never a frozen chart.
+- **Dashboard Host/CSP**: a non-loopback `Host` is 421 (DNS-rebinding defence), and every
+  response carries a self-contained CSP plus Permissions-Policy. GET and HEAD share
+  `_route()`; do not add a second response path.
 - `HISTORY_COLUMNS` is append-only: `cpu_w`/`gpu_w` were added for the multi-rail
   models, and older 9-column files must keep loading (absent columns export as `N/A`).
 - `state.rail_watts()` is the single definition of the CPU/GPU split (CPU = 12V2,
@@ -150,9 +153,11 @@ runtime imports.
 ## Verification (no hardware required)
 
 ```bash
-uv run --group dev pytest -q              # 569 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
+uv run --group dev pytest -q              # 612 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
 uv run --group dev ruff check .           # must be clean
 uv run --group dev mypy msi_psu_monitor/  # must be clean
+uv run --group dev coverage run --branch -m pytest -q
+uv run --group dev coverage report --fail-under=90
 ```
 
 `ruff format --check .` is safe repo-wide and is a CI gate: the four legacy files

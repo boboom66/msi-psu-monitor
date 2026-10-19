@@ -3,7 +3,7 @@
 > 没有真机也能验证 CLI、告警、daemon、历史落盘、prometheus 与 dashboard 全链路。
 > 下面每条命令都已在 `.venv`（Python 3.13.15）实跑通过；测试套件另在**裸环境**复核过
 > 3.12.3 与 3.10.21 两遍（把工作树复制一份、不带 `.venv`、不装本包，直接
-> `python3 -m pytest`，各 **569 通过**；`smoke.sh` 的 **58 项**在 3.12 裸环境跑过）。
+> `python3 -m pytest`，各 **612 通过**；`smoke.sh` 的 **58 项**在 3.12 裸环境跑过）。
 > 3.10 另有静态兜底——ruff `target-version = "py310"`、mypy
 > `python_version = "3.10"`（按 3.10 typeshed 分析）、smoke 里对每个 `.py` 的
 > `ast.parse(feature_version=(3, 10))`。
@@ -32,6 +32,13 @@ uv run --group dev ruff check .
 uv run --group dev mypy msi_psu_monitor/
 ```
 
+覆盖率门禁（源包语句覆盖不得低于 90%；CI 也跑）：
+
+```bash
+uv run --group dev coverage run --branch -m pytest -q
+uv run --group dev coverage report --fail-under=90
+```
+
 现在 `ruff format --check .` 也安全了（`[tool.ruff.format] exclude` +
 `force-exclude = true` 把 4 个历史文件挡在外面），CI 已把它加进门禁：
 
@@ -58,12 +65,14 @@ uv run --group dev ruff format --check .
 | `tests/test_dashboard.py` | HTTP 端点、损坏 state.json 的 503（`test_a_corrupt_state_file_is_a_503_while_history_still_serves`）、HEAD 与错误码一致、真实时间 x 轴 |
 | `tests/test_demo.py` | 合成电源、5 机型切换、告警位注入（`test_every_supported_variant_can_be_emulated`） |
 | `tests/test_packaging.py` | 安装器/`.deb`/udev/config 不变量（`test_the_deb_does_not_inherit_the_builders_umask`、`test_the_unit_does_not_require_a_config_nothing_installs`） |
+| `tests/test_install_namespace.py` | 一次性用户命名空间内实际安装/卸载：配置保留、systemctl/udevadm 调用、`--purge` 删除（`test_root_install_keeps_config_and_uninstall_purges_it`） |
 | `tests/test_schema.py` | JSON 输出结构契约（`test_json_schema_keys_frozen`）；prometheus 契约在 `test_monitor_format.py` |
 | `tests/test_monitor.py` | 遗留冒烟（兼容旧接口，勿删；`test_format_text_contains_keys`） |
 | `tests/test_pid_consistency.py` | 五处 USB PID 列表 + README 载荷双数字（`test_readme_payload_sizes_match_the_parser`） |
 | `tests/test_stdlib_only.py` | `python -I` 子进程导入全部模块（零第三方依赖；`test_the_probe_covers_every_shipped_module`） |
 | `tests/test_docs_consistency.py` | 文档里的用例数、测试文件名、§1.1 覆盖表函数名、CLI 参数清单、版本号双重来源不得与事实不符（`test_quoted_test_counts_are_accurate`） |
 | `tests/test_release_security.py` | SBOM/CycloneDX 与产物哈希、SECURITY/support/incident 文档、release workflow 发布 SBOM（`test_the_sbom_generator_emits_cyclonedx_with_artifact_hashes`、`test_the_release_workflow_generates_and_publishes_an_sbom`） |
+| `tests/test_e2e_cli.py` | 真实 console 入口子进程：`--version`/`--help`/demo text+json/告警 exit 2/`-O`/`--show-alert-log`/无设备错误（`test_demo_alert_exit_code_and_stderr_via_subprocess`、`test_no_demo_no_hardware_is_a_clean_error`） |
 
 `tests/test_docs_consistency.py` 是「文档防伪」：文档里写下的数字与文件名，都由测试去核对一遍。
 
@@ -88,7 +97,8 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。当前基线：**569 passed**、`ruff check` 全过、`mypy` 10 个文件无问题。
+三条全绿即通过。当前基线：**612 passed**、`ruff check` 全过、`mypy` 10 个文件无问题；
+源包语句覆盖率 **92%**（CI 门限 90%）。
 
 > `ruff format --check .` **可以全仓跑**（CI 也跑）：`protocol.py`/`__init__.py`/`__main__.py`/
 > `tests/test_monitor.py` 这四个历史文件混用引号风格，已由 `[tool.ruff.format] exclude` +

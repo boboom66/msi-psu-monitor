@@ -44,7 +44,13 @@ include = ["msi_psu_monitor*"]
 [dependency-groups]
 # tomli is the stdlib tomllib backport for the 3.10 CI leg: two test modules parse
 # pyproject.toml, and tomllib only exists from 3.11. Runtime dependencies stay [].
-dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10", "tomli>=2; python_version < '3.11'"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "tomli>=2; python_version < '3.11'",
+    "coverage>=7.16.2",
+]
 # Build-only: freezes the self-contained release binaries. Never a runtime
 # dependency -- the shipped binary bundles CPython, the package itself stays
 # stdlib-only (tests/test_stdlib_only.py enforces that).
@@ -82,6 +88,17 @@ python_version = "3.10"
 # planned refactor adds annotations.
 strict = false
 ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["msi_psu_monitor"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 90
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

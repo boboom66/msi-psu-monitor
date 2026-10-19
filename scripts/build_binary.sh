@@ -106,6 +106,10 @@ MSI_PSU_DEMO=1 MSI_PSU_STATE_DIR="$STATE" "$DIST/msi-psu-monitor" --once >/dev/n
 MSI_PSU_DEMO=1 MSI_PSU_STATE_DIR="$STATE" "$DIST/msi-psu-monitor-daemon" --iterations 1 >/dev/null 2>&1 || die "frozen daemon cannot run one iteration"
 MSI_PSU_DEMO=1 MSI_PSU_STATE_DIR="$STATE" "$DIST/msi-psu-monitor" --zero-fan off >/dev/null || die "frozen Zero Fan write failed"
 MSI_PSU_DEMO=1 MSI_PSU_STATE_DIR="$STATE" "$DIST/msi-psu-monitor" --buzzer-off >/dev/null || die "frozen buzzer command failed"
+MSI_PSU_DEMO=1 MSI_PSU_STATE_DIR="$STATE" "$DIST/msi-psu-monitor" --fan-mode performance >/dev/null 2>&1 || die "frozen performance alias failed"
+MSI_PSU_DEMO=1 MSI_PSU_DEMO_MODEL=ai1300p MSI_PSU_STATE_DIR="$STATE" "$DIST/msi-psu-monitor" --set-rail multi >/dev/null 2>&1 || die "frozen multirail write failed"
+MSI_PSU_DEMO=1 MSI_PSU_STATE_DIR="$STATE" "$DIST/msi-psu-monitor" --show-alert-log >/dev/null || die "frozen alert-log viewer failed"
+MSI_PSU_DEMO=1 MSI_PSU_DEMO_MODEL=ai1300p MSI_PSU_STATE_DIR="$STATE" "$DIST/msi-psu-monitor" --once | grep -q 'AC Input' || die "frozen VIN/AC Input missing"
 
 install -m 755 "$DIST/msi-psu-monitor" "$DIST/msi-psu-monitor-daemon" "$ROOT/dist/bin/linux-$ARCH/"
 

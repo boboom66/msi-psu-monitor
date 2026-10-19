@@ -1,6 +1,7 @@
 """Tests for the resident daemon sample loop (device and clock fully faked)."""
 
 import logging
+import os
 import time
 
 import pytest
@@ -8,6 +9,7 @@ import pytest
 from msi_psu_monitor import state as stats
 from msi_psu_monitor.config import DEFAULTS
 from msi_psu_monitor.daemon import EXIT_ERROR, RESCAN_AFTER_FAILURES, MonitorDaemon
+from msi_psu_monitor.daemon import build_parser
 from msi_psu_monitor.daemon import main as daemon_main
 from msi_psu_monitor.protocol import DeviceBusyError
 
@@ -826,3 +828,21 @@ def test_the_live_snapshot_can_be_disabled(tmp_path):
     daemon = make_daemon(tmp_path, StubPSU(clean_sensors()), live_snapshot=False)
     daemon.sample()
     assert stats.read_live_snapshot(tmp_path, now=daemon.wall_clock()) is None
+
+
+def test_many_iterations_do_not_leak_file_descriptors(tmp_path, monkeypatch):
+    clock = Clock()
+    daemon = make_daemon(tmp_path, StubPSU(clean_sensors()), clock=clock)
+    monkeypatch.setattr('time.sleep', lambda _s: clock.advance(1))
+    before = len(os.listdir('/proc/self/fd'))
+    daemon.run(iterations=300)
+    after = len(os.listdir('/proc/self/fd'))
+    assert after <= before + 3, f'fd count grew from {before} to {after}'
+
+
+def test_daemon_rejects_zero_or_negative_iterations():
+    parser = build_parser()
+    for value in ('0', '-1'):
+        with pytest.raises(SystemExit) as excinfo:
+            parser.parse_args(['--iterations', value])
+        assert excinfo.value.code == 2

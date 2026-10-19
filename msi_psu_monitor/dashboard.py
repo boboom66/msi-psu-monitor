@@ -427,6 +427,34 @@ def _state_payload(state_dir):
     }
 
 
+_LOOPBACK_HOSTS = frozenset({'127.0.0.1', 'localhost', '::1'})
+
+
+def _host_is_loopback(header):
+    """Accept only a loopback authority in Host; reject DNS-rebinding names.
+
+    The dashboard is read-only over local telemetry, but a hostile page whose
+    DNS name resolves to 127.0.0.1 can still make the browser send requests
+    here. Host is the only server-side evidence the request was addressed to us;
+    a missing Host (HTTP/1.0) is rejected with the same 421.
+    """
+    host = (header or '').strip().lower()
+    if not host:
+        return False
+    if host.startswith('['):
+        end = host.find(']')
+        if end == -1:
+            return False
+        name, rest = host[1:end], host[end + 1 :]
+        if rest and not rest.startswith(':'):
+            return False
+    else:
+        if host.count(':') > 1:  # unbracketed IPv6, or a malformed authority
+            return False
+        name = host.split(':', 1)[0]
+    return name in _LOOPBACK_HOSTS
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     """Read-only HTTP handler bound to one state directory."""
 
@@ -460,6 +488,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('X-Frame-Options', 'DENY')
             self.send_header('Referrer-Policy', 'no-referrer')
+            # The page is self-contained: no external loads, inline CSS/JS is
+            # intentional, fetches stay same-origin, PNG export uses data: URLs.
+            self.send_header(
+                'Content-Security-Policy',
+                "default-src 'none'; style-src 'unsafe-inline'; "
+                "script-src 'unsafe-inline'; img-src 'self' data:; "
+                "connect-src 'self'; base-uri 'none'; form-action 'none'",
+            )
+            self.send_header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
             for name, value in extra_headers:
                 self.send_header(name, value)
             self.end_headers()
@@ -493,6 +530,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
         Split out from ``do_GET`` so HEAD can reuse it verbatim and cannot drift
         into answering 200 for a route that GET would 404.
         """
+        if not _host_is_loopback(self.headers.get('Host')):
+            return 421, 'misdirected request\n', 'text/plain; charset=utf-8', ()
         try:
             # Inside the try on purpose: a request target with an unbalanced
             # bracket ("GET http://[/x HTTP/1.1" is a legal request line) makes
