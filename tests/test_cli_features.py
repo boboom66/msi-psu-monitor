@@ -2,6 +2,7 @@
 
 import csv
 import io
+import json
 import logging
 import os
 import pathlib
@@ -195,6 +196,17 @@ def run_main(monkeypatch, capsys, stub, argv):
         ['--set-rail', 'multi', '--ocp'],
         ['--show-alert-log', '--export', '--from', '2h'],
         ['--show-alert-log', '--show-log'],
+        ['--dump-config', '--once'],
+        ['--dump-config', '--watch', '1'],
+        ['--dump-config', '--serial', 'SN1'],
+        ['--dump-config', '--port', '9000'],
+        ['--dump-config', '-f', 'prometheus'],
+        ['--dump-config', '--dump-thresholds'],
+        ['--ocp-set', '13,6,10,12,60', '--watch', '1'],
+        ['--ocp-set', '13,6,10,12,60', '--load-thresholds', 'x'],
+        ['--dump-thresholds', '--ocp'],
+        ['--dump-thresholds', '-f', 'prometheus'],
+        ['--load-thresholds', ''],
     ],
 )
 def test_conflicting_flags_are_rejected(argv):
@@ -205,9 +217,31 @@ def test_conflicting_flags_are_rejected(argv):
     assert exc.value.code == 2
 
 
+def test_invalid_ocp_set_values_are_usage_errors():
+    parser = monitor.build_parser()
+    for argv in (
+        ['--ocp-set', '9,6,10,12,60'],
+        ['--ocp-set', '13,6,10,12'],
+        ['--ocp-set', '13,6,10,12,60,maybe'],
+    ):
+        with pytest.raises(SystemExit) as excinfo:
+            parser.parse_args(argv)
+        assert excinfo.value.code == 2
+
+
 def test_fan_mode_and_export_are_not_rejected():
     parser = monitor.build_parser()
-    for argv in (['--fan-mode', 'auto'], ['--export', '--from', '2h'], ['--dashboard']):
+    for argv in (
+        ['--fan-mode', 'auto'],
+        ['--export', '--from', '2h'],
+        ['--dashboard'],
+        ['--dump-config'],
+        ['--dump-config', '-f', 'json'],
+        ['--dump-thresholds'],
+        ['--dump-thresholds', '-f', 'json'],
+        ['--ocp-set', '13,6,10,12,60'],
+        ['--load-thresholds', '/tmp/x.json'],
+    ):
         args = parser.parse_args(argv)
         monitor._validate_args(parser, args)  # must not raise
 
@@ -241,6 +275,40 @@ def test_export_rejects_a_bad_window(monkeypatch, capsys):
         monitor.main()
     assert exc.value.code == EXIT_ERROR
     assert 'invalid --from value' in capsys.readouterr().err
+
+
+def test_output_through_a_symlink_keeps_the_symlink(monkeypatch, capsys, tmp_path):
+    """-O must write through a symlink instead of renaming the link away.
+
+    os.replace() replaces the *name*: the previous atomic write turned the link
+    into a regular file and left the real target untouched. For /dev/stdout (a
+    symlink to /proc/self/fd/1) that is a system-level name when the tool runs as
+    root, which the install docs tell users to do.
+    """
+    real = tmp_path / 'real.txt'
+    real.write_text('old output\n', encoding='utf-8')
+    link = tmp_path / 'link.txt'
+    link.symlink_to(real)
+    code, captured = run_main(monkeypatch, capsys, StubPSU(sensors()), ['--once', '-O', str(link)])
+    assert code == EXIT_OK
+    assert link.is_symlink(), 'the output path replaced the symlink'
+    assert real.read_text(encoding='utf-8').startswith('MSI PSU:')
+    assert captured.out == ''
+
+
+def test_export_through_a_symlink_keeps_the_symlink(monkeypatch, capsys, tmp_path):
+    stats.append_history(tmp_path, sensors(), ts=time.time())
+    real = tmp_path / 'real.csv'
+    real.write_text('old export\n', encoding='utf-8')
+    link = tmp_path / 'link.csv'
+    link.symlink_to(real)
+    code, captured = run_main(
+        monkeypatch, capsys, StubPSU(sensors()), ['--export', '--from', '2h', '-O', str(link)]
+    )
+    assert code == EXIT_OK
+    assert link.is_symlink(), 'the export replaced the symlink'
+    assert real.read_text(encoding='utf-8').startswith('time,')
+    assert captured.out == ''
 
 
 # ---- fan control --------------------------------------------------------
@@ -339,11 +407,13 @@ def test_prometheus_exposes_the_new_metrics(monkeypatch, capsys):
     stub = StubPSU(sensors(), alerts={'ocp_12v': False})
     _, captured = run_main(monkeypatch, capsys, stub, ['--once', '-f', 'prometheus'])
     out = captured.out
-    assert 'msi_psu_power_avg {} 600.0' in out
-    assert 'msi_psu_efficiency_avg {} 94.0' in out
+    assert 'msi_psu_power_avg{} 600.0' in out
+    assert 'msi_psu_efficiency_avg{} 94.0' in out
+    assert 'msi_psu_energy_kwh_total{}' in out
+    assert 'msi_psu_total_energy_kwh{}' in out
     assert 'msi_psu_status_12v_2x6{status="Normal"} 1' in out
     assert 'msi_psu_zero_fan{state="on"} 1' in out
-    assert 'msi_psu_total_energy_kwh {}' in out
+    assert 'msi_psu_total_energy_kwh{}' in out
     assert 'serial="SN1"' in out
     assert 'msi_psu_alert{alert="ocp_12v"}' not in out  # inactive bit is not exported
 
@@ -758,12 +828,13 @@ def test_zero_fan_and_fan_mode_write_together(monkeypatch, capsys):
     ]
 
 
-def test_buzzer_off_writes_and_reports(monkeypatch, capsys):
+def test_buzzer_off_writes_and_reports_the_switch(monkeypatch, capsys):
+    """C2h is MSI's BUZZER_SWITCH: write-only and a toggle, so no "silenced" claim."""
     stub = StubPSU(sensors())
     code, out = run_main(monkeypatch, capsys, stub, ['--buzzer-off'])
     assert code == EXIT_OK
     assert stub.buzzer_requests == 1
-    assert out.out.strip() == 'Buzzer: silenced'
+    assert out.out.strip() == 'Buzzer: switch toggled (no read-back)'
 
 
 def test_buzzer_off_refused_exits_one(monkeypatch, capsys):
@@ -780,6 +851,18 @@ def test_set_rail_writes_and_verifies(monkeypatch, capsys):
     assert stub.rail_writes == [True]
     assert stub.multirail is True
     assert out.out.strip() == 'Rail mode: multi'
+
+
+def test_set_rail_is_a_noop_when_already_in_the_requested_mode(monkeypatch, capsys):
+    """The hardware rejects writing the value it already holds (REQ-11).
+
+    Reading first also avoids burning an F1h flash save on every idempotent run.
+    """
+    stub = StubPSU(sensors(), multirail=True, supports_multirail_ocp=True)
+    code, out = run_main(monkeypatch, capsys, stub, ['--set-rail', 'multi'])
+    assert code == EXIT_OK
+    assert stub.rail_writes == [], 'a same-value write must not be sent'
+    assert out.out.strip() == 'Rail mode: multi (already set)'
 
 
 def test_set_rail_readback_mismatch_exits_one(monkeypatch, capsys):
@@ -829,7 +912,7 @@ def test_successful_writes_leave_an_audit_line(monkeypatch, capsys, caplog):
         )
     assert code == EXIT_OK
     assert 'write fan mode=customized duty=60 verified=true' in caplog.text
-    assert 'write buzzer=silenced verified=false' in caplog.text
+    assert 'write buzzer=toggled verified=false' in caplog.text
     assert 'SN1' not in caplog.text
 
 
@@ -948,3 +1031,290 @@ def test_serial_discovery_skips_an_unexpected_parser_error(monkeypatch, caplog):
     assert available == []
     assert blocked == ['/dev/hidraw9']
     assert 'unexpected error' in caplog.text
+
+
+# ---- local early-warning thresholds -------------------------------------
+
+
+def test_a_configured_threshold_trips_exit_two(monkeypatch, capsys):
+    stub = StubPSU(sensors(power_total=(1500.0, 'W'), temp=(80.0, 'C')))
+    code, out = run_main(monkeypatch, capsys, stub, ['--once'])
+    assert code == EXIT_ALERT
+    assert 'ALERT [warning] power_high' in out.err
+    assert 'ALERT [warning] temp_high' in out.err
+    assert 'measured 1500, limit 1200' in out.err
+    assert 'measured 80, limit 70' in out.err
+    assert 'Thresholds    : power_high, temp_high' in out.out
+
+
+def test_a_config_threshold_override_can_keep_the_same_sample_normal(monkeypatch, capsys, tmp_path):
+    conf = tmp_path / 'psu.conf'
+    conf.write_text('[alerts]\npower_w = 2000\ntemp_c = 90\n', encoding='utf-8')
+    stub = StubPSU(sensors(power_total=(1500.0, 'W'), temp=(80.0, 'C')))
+    code, out = run_main(monkeypatch, capsys, stub, ['--once', '--config', str(conf)])
+    assert code == EXIT_OK
+    assert 'Thresholds' not in out.out
+    assert 'ALERT' not in out.err
+
+
+def test_thresholds_appear_in_json(monkeypatch, capsys):
+    stub = StubPSU(sensors(power_total=(1500.0, 'W')))
+    code, out = run_main(monkeypatch, capsys, stub, ['--once', '-f', 'json'])
+    assert code == EXIT_ALERT
+    payload = json.loads(out.out)
+    assert payload['threshold_alerts'] == ['power_high']
+    assert payload['threshold_limits']['power_w'] == 1200.0
+    assert payload['threshold_limits']['temp_c'] == 70.0
+
+
+def test_thresholds_appear_in_prometheus(monkeypatch, capsys):
+    stub = StubPSU(sensors())
+    code, out = run_main(monkeypatch, capsys, stub, ['--once', '-f', 'prometheus'])
+    assert code == EXIT_OK
+    assert 'msi_psu_threshold_limit{name="power_w"} 1200.0' in out.out
+    assert 'msi_psu_threshold_limit{name="pin_max_a"} 12.0' in out.out
+    assert 'msi_psu_threshold_alert' not in out.out
+
+    stub = StubPSU(sensors(power_total=(1500.0, 'W')))
+    code, out = run_main(monkeypatch, capsys, stub, ['--once', '-f', 'prometheus'])
+    assert code == EXIT_ALERT
+    assert 'msi_psu_threshold_alert{alert="power_high"} 1' in out.out
+
+
+def test_no_alerts_skips_the_local_thresholds_too(monkeypatch, capsys):
+    stub = StubPSU(sensors(power_total=(1500.0, 'W'), temp=(80.0, 'C')))
+    code, out = run_main(monkeypatch, capsys, stub, ['--once', '--no-alerts', '-f', 'json'])
+    assert code == EXIT_OK
+    payload = json.loads(out.out)
+    assert 'threshold_alerts' not in payload
+    assert 'threshold_limits' not in payload
+
+
+# ---- --dump-config ------------------------------------------------------
+
+
+def test_dump_config_prints_effective_thresholds_without_a_psu(monkeypatch, capsys):
+    code, out = run_main(monkeypatch, capsys, StubPSU(), ['--dump-config'])
+    assert code == EXIT_OK
+    assert '[alerts]' in out.out
+    assert 'power_w = 1200.0' in out.out
+    assert 'rail_12v_a = 108.33' in out.out
+    assert out.err == ''
+
+
+def test_dump_config_json_reflects_a_config_override(monkeypatch, capsys, tmp_path):
+    conf = tmp_path / 'psu.conf'
+    conf.write_text('[alerts]\npower_w = 900\ntemp_c = 65\n', encoding='utf-8')
+    code, out = run_main(
+        monkeypatch, capsys, StubPSU(), ['--dump-config', '-f', 'json', '--config', str(conf)]
+    )
+    assert code == EXIT_OK
+    payload = json.loads(out.out)
+    assert payload['power_w'] == 900.0
+    assert payload['temp_c'] == 65.0
+    assert payload['pin_max_a'] == 12.0
+
+
+def test_dump_config_can_write_to_a_file(monkeypatch, capsys, tmp_path):
+    target = tmp_path / 'effective.ini'
+    code, out = run_main(monkeypatch, capsys, StubPSU(), ['--dump-config', '-O', str(target)])
+    assert code == EXIT_OK
+    assert out.out == ''
+    body = target.read_text(encoding='utf-8')
+    assert '[alerts]' in body and 'power_w = 1200.0' in body
+
+
+# ---- hardware OCP threshold write / dump / load (MPG TS) -----------------
+
+
+class ThresholdPSU:
+    """Read/write OCP thresholds the way protocol.MSIPSU does (no hardware)."""
+
+    supports_ocp_config = True
+
+    def __init__(self, config=None, accept=True, readback_updates=True):
+        self.config = dict(
+            config
+            or {
+                'enabled': True,
+                'point_a': 12.0,
+                'diff_a': 5.0,
+                'trigger_s': 20,
+                'diff_trigger_s': 20,
+                'warning_s': 180,
+            }
+        )
+        self.accept = accept
+        self.readback_updates = readback_updates
+        self.writes = []
+        self.product = 'MPG Ai1600TS'
+        self.fw_revision = '1.0'
+
+    def open(self):
+        return self
+
+    def init(self):
+        return self.product
+
+    def close(self):
+        pass
+
+    def read_ocp_thresholds(self):
+        return dict(self.config)
+
+    def set_ocp_thresholds(self, config):
+        self.writes.append(dict(config))
+        if not self.accept:
+            return False
+        if self.readback_updates:
+            self.config = dict(config)
+        return True
+
+
+def test_dump_thresholds_prints_text_and_json(monkeypatch, capsys):
+    stub = ThresholdPSU()
+    code, out = run_main(monkeypatch, capsys, stub, ['--dump-thresholds'])
+    assert code == EXIT_OK
+    assert 'Pin OCP point' in out.out
+    assert '12.0 A' in out.out
+
+    code, out = run_main(monkeypatch, capsys, stub, ['--dump-thresholds', '-f', 'json'])
+    assert code == EXIT_OK
+    payload = json.loads(out.out)
+    assert payload['ocp_config']['point_a'] == 12.0
+    assert payload['ocp_config']['warning_s'] == 180
+
+
+def test_ocp_set_writes_and_verifies(monkeypatch, capsys):
+    stub = ThresholdPSU()
+    code, out = run_main(monkeypatch, capsys, stub, ['--ocp-set', '13,6,10,12,60'])
+    assert code == EXIT_OK
+    assert len(stub.writes) == 1
+    assert stub.writes[0]['point_a'] == 13
+    assert stub.config['diff_a'] == 6
+    assert 'OCP thresholds: point 13.0 A' in out.out
+    assert 'trigger 10 s' in out.out
+
+
+def test_ocp_set_is_idempotent(monkeypatch, capsys):
+    stub = ThresholdPSU()
+    code, out = run_main(monkeypatch, capsys, stub, ['--ocp-set', '12,5,20,20,180'])
+    assert code == EXIT_OK
+    assert stub.writes == []
+    assert '(already set)' in out.out
+
+
+def test_ocp_set_readback_mismatch_exits_one(monkeypatch, capsys):
+    stub = ThresholdPSU(readback_updates=False)
+    code, out = run_main(monkeypatch, capsys, stub, ['--ocp-set', '13,6,10,12,60'])
+    assert code == EXIT_ERROR
+    assert len(stub.writes) == 3
+    assert 'read-back mismatch' in out.err
+
+
+def test_ocp_set_is_refused_on_a_model_without_the_8_byte_view(monkeypatch, capsys):
+    stub = ThresholdPSU()
+    stub.supports_ocp_config = False
+    code, out = run_main(monkeypatch, capsys, stub, ['--ocp-set', '13,6,10,12,60'])
+    assert code == EXIT_ERROR
+    assert stub.writes == []
+    assert 'not available on this model' in out.err
+
+
+def test_load_thresholds_reads_a_dump_and_writes(monkeypatch, capsys, tmp_path):
+    path = tmp_path / 'thresholds.json'
+    path.write_text(
+        json.dumps(
+            {
+                'ocp_config': {
+                    'enabled': False,
+                    'point_a': 11.0,
+                    'diff_a': 6.0,
+                    'trigger_s': 9,
+                    'diff_trigger_s': 10,
+                    'warning_s': 45,
+                }
+            }
+        ),
+        encoding='utf-8',
+    )
+    stub = ThresholdPSU()
+    code, out = run_main(monkeypatch, capsys, stub, ['--load-thresholds', str(path)])
+    assert code == EXIT_OK
+    assert stub.config['point_a'] == 11.0
+    assert stub.config['enabled'] is False
+    assert 'enabled no' in out.out
+
+
+def test_dump_thresholds_is_refused_on_an_unsupported_model(monkeypatch, capsys):
+    stub = ThresholdPSU()
+    stub.supports_ocp_config = False
+    code, out = run_main(monkeypatch, capsys, stub, ['--dump-thresholds'])
+    assert code == EXIT_ERROR
+    assert 'not available on this model' in out.err
+
+
+def test_ocp_set_explains_a_failed_configuration_read(monkeypatch, capsys):
+    stub = ThresholdPSU()
+    stub.read_ocp_thresholds = lambda: None
+    code, out = run_main(monkeypatch, capsys, stub, ['--ocp-set', '13,6,10,12,60'])
+    assert code == EXIT_ERROR
+    assert 'did not answer the 0xC0 OCP configuration read' in out.err
+    assert stub.writes == []
+
+
+def test_ocp_set_can_disable_ocp_with_the_optional_flag(monkeypatch, capsys):
+    stub = ThresholdPSU()
+    code, out = run_main(monkeypatch, capsys, stub, ['--ocp-set', '13,6,10,12,60,off'])
+    assert code == EXIT_OK
+    assert stub.config['enabled'] is False
+    assert 'enabled no' in out.out
+
+
+def test_load_thresholds_rejects_unknown_keys(monkeypatch, capsys, tmp_path):
+    path = tmp_path / 'thresholds.json'
+    path.write_text(json.dumps({'point_a': 12, 'point_a_typo': 5}), encoding='utf-8')
+    stub = ThresholdPSU()
+    code, out = run_main(monkeypatch, capsys, stub, ['--load-thresholds', str(path)])
+    assert code == EXIT_ERROR
+    assert 'unknown threshold key(s): point_a_typo' in out.err
+    assert stub.writes == []
+
+
+def test_load_thresholds_reports_malformed_json(monkeypatch, capsys, tmp_path):
+    path = tmp_path / 'thresholds.json'
+    path.write_text('{not json', encoding='utf-8')
+    stub = ThresholdPSU()
+    code, out = run_main(monkeypatch, capsys, stub, ['--load-thresholds', str(path)])
+    assert code == EXIT_ERROR
+    assert 'cannot load OCP thresholds' in out.err
+
+
+def test_load_thresholds_rejects_out_of_range_values(monkeypatch, capsys, tmp_path):
+    path = tmp_path / 'thresholds.json'
+    path.write_text(json.dumps({'point_a': 99}), encoding='utf-8')
+    stub = ThresholdPSU()
+    code, out = run_main(monkeypatch, capsys, stub, ['--load-thresholds', str(path)])
+    assert code == EXIT_ERROR
+    assert 'point_a must be 10-14' in out.err
+    assert stub.writes == []
+
+
+def test_a_config_json_format_is_ignored_for_threshold_modes(monkeypatch, capsys, tmp_path):
+    conf = tmp_path / 'psu.conf'
+    conf.write_text('[monitor]\nformat = json\n', encoding='utf-8')
+    stub = ThresholdPSU()
+    code, captured = run_main(
+        monkeypatch, capsys, stub, ['--ocp-set', '13,6,10,12,60', '--config', str(conf)]
+    )
+    assert code == EXIT_OK
+    assert 'fixed output format' in captured.err
+    assert 'OCP thresholds:' in captured.out
+
+    code, captured = run_main(
+        monkeypatch, capsys, stub, ['--dump-thresholds', '--config', str(conf)]
+    )
+    assert code == EXIT_OK
+    assert 'fixed output format' not in captured.err
+    payload = json.loads(captured.out)
+    assert payload['ocp_config']['point_a'] == 13.0

@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from msi_psu_monitor import __version__
 from msi_psu_monitor import state as stats
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,9 +36,11 @@ def _run(args, tmp_path, demo=True, extra_env=None, timeout=20):
 
 
 def test_the_real_entry_point_reports_its_version(tmp_path):
+    # Derive the expected string from the package: a hardcoded version here
+    # turned a deliberate version bump into a false test failure.
     result = _run(['--version'], tmp_path, demo=False)
     assert result.returncode == 0
-    assert result.stdout.strip() == 'msi-psu-monitor 1.0.0'
+    assert result.stdout.strip() == f'msi-psu-monitor {__version__}'
     assert result.stderr == ''
 
 
@@ -113,3 +116,32 @@ def test_a_full_stdout_is_a_clean_exit_one(args, tmp_path):
     assert 'Traceback' not in result.stderr
     assert 'Exception ignored' not in result.stderr
     assert 'cannot write output' in result.stderr
+
+
+@pytest.mark.skipif(
+    not Path('/dev/stdout').is_symlink(), reason='/dev/stdout is not a symlink here'
+)
+def test_output_to_dev_stdout_follows_the_symlink(tmp_path):
+    """-O /dev/stdout (stdout redirected to a file) must write into that file.
+
+    /dev/stdout is a symlink to /proc/self/fd/1; once stdout is a regular file it
+    looks like a regular file too, so the atomic writer used to rename the system
+    symlink away (as root) and fail with a permission error otherwise.
+    """
+    target = tmp_path / 'stdout.txt'
+    env = os.environ.copy()
+    env['MSI_PSU_STATE_DIR'] = str(tmp_path)
+    env['MSI_PSU_DEMO'] = '1'
+    with open(target, 'w', encoding='utf-8') as sink:
+        result = subprocess.run(
+            [sys.executable, '-m', 'msi_psu_monitor', '--once', '-O', '/dev/stdout'],
+            cwd=ROOT,
+            env=env,
+            stdout=sink,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=20,
+        )
+    assert result.returncode == 0, result.stderr
+    assert 'MSI PSU:' in target.read_text(encoding='utf-8')
+    assert Path('/dev/stdout').is_symlink(), 'the system /dev/stdout symlink was replaced'

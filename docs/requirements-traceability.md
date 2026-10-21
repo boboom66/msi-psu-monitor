@@ -9,7 +9,7 @@
 | 🧪 待真机 | 代码完成、单测覆盖，但结论必须样机复核（见 [`verify.md`](verify.md) §8） |
 | ⏸ 冻结 | 明确留待后续批准批次，本轮不做 |
 
-> 回归命令：`uv run --group dev pytest -q` → **645 passed**（24 个测试模块）。
+> 回归命令：`uv run --group dev pytest -q` → **736 passed**（28 个测试模块）。
 > 无硬件全链路自检见 [`verify.md`](verify.md)。
 
 ---
@@ -20,7 +20,7 @@
 |------|----------|------|------|
 | PSU 自動發現（hidraw 掃描） | `protocol.detect_devices()`（sysfs `uevent` → `/dev/hidrawN`）、`monitor.resolve_device()` | `test_protocol_discovery.py`（真解析器 + 假 sysfs 樹）、`test_demo.py` | ✅ 已实现 |
 | 多機型相容解析（不同資料長度） | `protocol.MSIPSU.VARIANTS[*]["payload_size"]` + `get_sensors()` | `test_psu_sensors.py`（62/40/20B + 拒解） | 🧪 待真机 |
-| 廠商 / 型號 / 韌體 / 序號 | `protocol.MSIPSU.init()`（0x10/0x11/0x12/0x13，FW 為 2 位 ASCII 數字 + 讀取方補小數點、序號按首字節切片） | `test_psu_sensors.py` | ✅ 已实现 |
+| 廠商 / 型號 / 韌體 / 序號 | `protocol.MSIPSU.init()`（0x10/0x11/0x12/0x13，FW 為 2 位 ASCII 數字 + 讀取方補小數點、序號 TS 按首字節切片 / MEG 固定 24 字節，對齊 `CPSU.cs:515-528`） | `test_psu_sensors.py` | ✅ 已实现 |
 | 雙 12V-2x6 每針電流（TS 專屬） | `get_sensors()` TS 分支（44 B 内联切片）→ `iout_pins` | `test_psu_sensors.py`、`test_monitor_format.py` | 🧪 待真机 |
 | 直流三組電壓 / 電流 | `get_sensors()` → `vout_12v`/`vout_5v`/`vout_3v3`、`iout_*` | `test_psu_sensors.py` | 🧪 待真机 |
 | 輸出功率 / 轉換效率 / 溫度 / 風扇轉速 | `get_sensors()`（0xE0 尾部 + 41h/42h） | `test_psu_sensors.py`、`test_monitor_format.py` | ✅ 已实现 |
@@ -75,6 +75,18 @@
 | Zero Fan 開關與風扇模式顯示（41h/42h） | `monitor.read_fan_fields()`、`format_text()` | `test_monitor_format.py`、`test_cli_features.py` | ✅ 已实现 |
 | 按時間區間 + 按欄勾選的歷史匯出（`--export --from --columns`） | `monitor.run_export()`、`state.build_export()` | `test_cli_features.py`、`test_state.py` | ✅ 已实现 |
 
+### 3.4 本地阈值早警（软件阈值，REQ-13/14）
+
+| 需求 | 实现位置 | 测试 | 状态 |
+|------|----------|------|------|
+| 可配置本地阈值：总功率、温度、单针电流、针差、单 12V-2x6 连接器总电流、12V/5V/3.3V 轨电流（`[alerts]`，0=关闭） | `config.threshold_limits()`、`alerts.evaluate_threshold_alerts()`、`alerts.configured_threshold_names()` | `test_config.py`、`test_alerts.py` | ✅ 已实现（默认值为 REQ-14 初值，真机后调参） |
+| 阈值告警进入统一告警链路：边沿去抖、stderr ALERT、exit 2、`alerts-*.log` | `monitor.attach_alerts()`、`AlertEngine`、`daemon._record_alerts()` | `test_cli_features.py`、`test_daemon.py` | ✅ 已实现 |
+| 阈值告警与 12V-2x6 状态行分离，JSON/Prometheus 单独暴露 | `monitor.format_text()`（Thresholds 行）、JSON `threshold_alerts/threshold_limits`、Prometheus `msi_psu_threshold_alert/limit` | `test_cli_features.py`、`test_daemon.py` | ✅ 已实现 |
+| 0xE0 读失败不清除已 latched 的阈值告警 | `evaluate_threshold_alerts()` 缺读数时省略名字 + `retain()` 的 `configured_threshold_names()` | `test_a_failed_payload_read_does_not_clear_a_threshold_alert` | ✅ 已实现 |
+| 运维交付：生效配置查询、Prometheus 告警规则、电量 counter 双名、规范 exposition、严格 exposition 校验 | `monitor._dump_effective_config()`（`--dump-config`）、`docs/prometheus-rules.yml`、`format_prometheus()` 的 `msi_psu_energy_kwh_total` 别名、`tests/test_prometheus_exposition.py`（promtool 替代） | `test_cli_features.py`（dump-config/alias）、`test_packaging.py`（规则随包）、`test_prometheus_exposition.py` | ✅ 已实现 |
+| 可靠性/发布收口：5k soak 门禁、确定性 fuzz、多轨 formatter、CHANGELOG/发布文档、Python 3.13 裸跑 | `scripts/soak.sh`（CI 接线）、`tests/test_soak.py`、`tests/test_robustness.py`、`CHANGELOG.md` | `test_soak.py`、`test_robustness.py`、`test_packaging.py`；裸 3.13.15 736 passed | ✅ 已实现 |
+| 恢复/重连：初始化握手 3 次指数退避（0.5/1.0 s）+ daemon 连续 5 次失败后重扫 | `protocol._handshake()`、`daemon._ensure_psu()` | `test_psu_sensors.py`（握手重试/退避）、`test_daemon.py`（rescan） | ✅ 已实现 |
+
 ## 4. P0 數據正確性（已凍結）
 
 | 需求 | 实现位置 | 测试 | 状态 |
@@ -94,18 +106,18 @@
 | 風扇設定儲存（`[0x50 0xF1]`，REV6 0 數據字節） | `set_fan_mode()` 内联发 `REG_SAVE_SETTING` | `test_cli_features.py` | 🧪 待真机 |
 | 風扇配置按 Profile 恢復 | `daemon.restore_fan_profile()`（每次打開/重連重發 41h + F1h，並按 `[fan] zero_fan` 重發 43h + F1h）；`[fan] mode/duty/zero_fan` opt-in | `test_daemon.py`、`test_config.py` | 🧪 待真机 |
 | Zero Fan 開關（43h + F1h，讀回 42h byte 4） | `MSIPSU.set_zero_fan()`、`monitor.apply_zero_fan_setting()`、`--zero-fan`；daemon 依 `[fan] zero_fan` 恢復 | `test_set_zero_fan_*`、`test_zero_fan_*`、`test_zero_fan_only_profile_is_restored` | 🧪 待真机 |
-| 蜂鳴器靜音（C2h，只寫無回讀） | `MSIPSU.silence_buzzer()`、`monitor.run_write_controls()`、`--buzzer-off` | `test_silence_buzzer_*`、`test_buzzer_off_*` | 🧪 待真机 |
-| OCP 閾值檢視（一期只讀：單針 12 A、針差 5 A、觸發 20 s、警告 180 s） | `protocol.read_ocp_thresholds()`（0xC0 8 B）、`read_ocp_state()`（0xC1 42 B）、`monitor.run_ocp()`；daemon 每個 prom 週期一併導出（C1 是 5 s 滾動平均，不快取） | `test_ocp.py`、`test_daemon.py` | 🧪 待真机 |
+| 蜂鳴器開關切換（C2h，只寫無回讀；MSI 名為 BUZZER_SWITCH，會 toggle，CLI 不宣稱已靜音） | `MSIPSU.silence_buzzer()`、`monitor.run_write_controls()`、`--buzzer-off` | `test_silence_buzzer_*`、`test_buzzer_off_*` | 🧪 待真机 |
+| OCP 閾值檢視（單針 12 A、針差 5 A、觸發 20 s、警告 180 s）+ 導出（`--dump-thresholds`/JSON） | `protocol.read_ocp_thresholds()`（0xC0 8 B）、`read_ocp_state()`（0xC1 42 B）、`monitor.run_ocp()`、`monitor.run_ocp_thresholds()`；daemon 每個 prom 週期一併導出（C1 是 5 s 滾動平均，不快取） | `test_ocp.py`、`test_cli_features.py`、`test_daemon.py` | ✅ 实现；数值/状态需真机核对 |
 | 單多軌模式檢視（`==2` 為多軌） | `protocol.read_multirail_ocp()`（0xC0 1 B）、`monitor.format_multirail_*()` | `test_ocp.py`、`test_demo.py` | 🧪 待真机（**提前落地**） |
-| 單多軌模式切換（MEG Ai1000P/Ai1300P；`--set-rail`，C0h 2/1 + F1h，寫後讀回） | `protocol.set_multirail_ocp()`、`monitor.apply_rail_mode()` | `test_psu_sensors.py`、`test_cli_features.py`、`test_demo.py` | 🧪 待真机（用户要求补齐 MSI 的 DC Output 开关；不属于 12V-2x6 阈值写） |
-| OCP 閾值設定（三期專批，8 B + `0xF1`，鉗制 10-14 A / 4-8 A / 5-30 s / 30-240 s） | — | — | ⏸ 冻结（MSI Center 也没有 UI 写入口） |
+| 單多軌模式切換（MEG Ai1000P/Ai1300P；`--set-rail`，C0h 2/1 + F1h，寫前先讀回、同值不寫，寫後讀回） | `protocol.set_multirail_ocp()`、`monitor.apply_rail_mode()`（同值返回 `(mode, False)`，見 REQ-11） | `test_psu_sensors.py`、`test_cli_features.py`、`test_demo.py` | 🧪 待真机（用户要求补齐 MSI 的 DC Output 开关；不属于 12V-2x6 阈值写） |
+| OCP 閾值設定（8 B + `0xF1`，範圍 10-14 A / 4-8 A / 5-30 s / 5-30 s / 30-240 s） | `protocol.set_ocp_thresholds()`、`monitor.apply_ocp_thresholds()`（寫 + F1h + 讀回，3 次；同值不寫）、`--ocp-set`/`--load-thresholds`；越界拒絕不 clamp、不支援機型 exit 1 | `test_ocp.py`、`test_cli_features.py`、`test_demo.py` | 🟡 已实现（demo/mock）；**保护写，需真机 bench 验收后放行** |
 
 ## 6. GUI（CLI 內不做）
 
 | 需求 | 实现位置 | 测试 | 状态 |
 |------|----------|------|------|
 | 平時 CLI，看圖時 `--dashboard`（stdlib-only，預設 `127.0.0.1:8899`，`--port` 可改，關閉即停） | `dashboard.make_server()`、`monitor.run_dashboard()` | `test_dashboard.py` | ✅ 已实现 |
-| 7 張即時曲線（歷史走 `daily-*.log`，累計/型號走 `state.json`，實時走 daemon 每秒寫的 `latest.json`） | `dashboard.PAGE` + `/api/history`、`/api/state`、`/api/live`（1 s 輪詢，daemon 停止 10 s 後 503/stale）；Power 卡含 CPU/GPU/Total 曲線 | `test_dashboard.py`、`test_daemon.py`、`test_state.py` | ✅ 已实现 |
+| 7 張即時曲線（歷史走 `daily-*.log`，累計/型號走 `state.json`，實時走 daemon 每秒寫的 `latest.json`；構成與 MSI Center 一致：12V/5V/3.3V/效率/溫度/風扇/功率 CPU+GPU+Total） | `dashboard.PAGE` + `/api/history`、`/api/state`、`/api/live`（1 s 輪詢，daemon 停止 10 s 後 503/stale） | `test_dashboard.py`、`test_daemon.py`、`test_state.py` | ✅ 已实现 |
 | Weekly 七天用電圖（`state.json` 的 `daily` kWh 桶，不是 `daily-*.log`） | `dashboard.PAGE: drawWeekly()` + `/api/state` | `test_dashboard.py` | ✅ 已实现 |
 | 讀不到 state 目錄/檔案時不假裝「沒資料」 | `dashboard._state_dir_problem()`（目錄 → `/api/*` 503）、`MonitorState.load(strict=True)`（損壞的 `state.json` → 僅 `/api/state` 503），頁面本身仍 200；`/api/history` 照常服務 | `test_dashboard.py`、`test_state.py` | ✅ 已实现 |
 | 截圖存圖片 → 看圖頁提供匯出 PNG/CSV | `/api/export`（前端导出按钮，HEAD 与 GET 同状态同长度） | `test_dashboard.py` | ✅ 已实现 |
@@ -114,8 +126,8 @@
 ## 7. 无硬件可覆盖的验证方式
 
 所有 🧪 项在无样机时的最大覆盖：`bash scripts/smoke.sh` 一条命令跑完全链路（CI 也跑），`MSI_PSU_DEMO=1` 合成电源（`MSI_PSU_DEMO_MODEL` 可切
-全部 5 机型、`MSI_PSU_DEMO_ALERT` 可卡任意告警位），配合 645 个单测覆盖解析、告警、
-落盘、导出的全部分支。**每一条待真机项的判定标准与命令见 [`verify.md`](verify.md) §8（共 18 项）。**
+全部 5 机型、`MSI_PSU_DEMO_ALERT` 可卡任意告警位），配合 736 个单测覆盖解析、告警、
+落盘、导出的全部分支。**每一条待真机项的判定标准与命令见 [`verify.md`](verify.md) §8（共 19 项）。**
 
 ## 非需求交付物（如实标注）
 

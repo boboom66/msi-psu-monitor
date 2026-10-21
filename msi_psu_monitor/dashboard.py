@@ -92,15 +92,19 @@ PAGE = """<!DOCTYPE html>
 </div>
 <div class="foot">Data source: daily-*.log written by msi-psu-monitor-daemon. Local only.</div>
 <script>
+// The seven cards mirror the MSI Center real-time dashboard: temperature, 12V,
+// 5V, 3.3V, fan, efficiency and the CPU/GPU/total wattage chart. The 12V total
+// current is still recorded (CSV/Prometheus/export), it is just not one of the
+// seven MSI charts.
 const CHARTS = [
   {id:'12v',   title:'+12V',              unit:'V',   keys:[['12v','#e05c5c']]},
   {id:'5v',    title:'+5V',               unit:'V',   keys:[['5v','#5cc9e0']]},
   {id:'3v3',   title:'+3.3V',             unit:'V',   keys:[['3v3','#c9a05c']]},
-  {id:'total', title:'12V total current', unit:'A',   keys:[['total_a','#8f7ce0']]},
+  {id:'eff',   title:'Efficiency',        unit:'%',   keys:[['eff','#6ea8fe']]},
   {id:'temp',  title:'Temperature',       unit:'\\u00b0C', keys:[['temp','#e0a25c']]},
   {id:'fan',   title:'Fan speed',         unit:'RPM', keys:[['fan','#5ce09b']]},
-  {id:'power', title:'Power / efficiency',unit:'W / %', keys:[
-    ['power','#e05cc9','W'],['cpu_w','#f2a65a','W'],['gpu_w','#8f7ce0','W'],['eff','#6ea8fe','%']]},
+  {id:'power', title:'Power',             unit:'W',   keys:[
+    ['power','#e05cc9','W'],['cpu_w','#f2a65a','W'],['gpu_w','#8f7ce0','W']]},
 ];
 let range = '7d', rows = [];
 // Injected by the server (see PAGE_SUBSTITUTIONS): a Python constant is not
@@ -429,6 +433,39 @@ def _state_payload(state_dir):
     }
 
 
+# The live snapshot stores sensor keys (vout_12v, power_total, ...), while the
+# charts and the history rows are keyed by the daily-*.log CSV column names. The
+# page pushes /api/live straight into the same rows array the history fills, so
+# without this translation only the keys the two shapes share ('temp') could
+# ever move: every other chart stayed frozen on its last one-minute point even
+# while the daemon was writing fresh samples once a second.
+LIVE_HISTORY_KEYS = {
+    'vout_12v': '12v',
+    'vout_5v': '5v',
+    'vout_3v3': '3v3',
+    'iout_12v_total': 'total_a',
+    'temp': 'temp',
+    'fan_rpm': 'fan',
+    'power_total': 'power',
+    'efficiency': 'eff',
+    'cpu_w': 'cpu_w',
+    'gpu_w': 'gpu_w',
+}
+
+
+def _live_view(payload):
+    """Add the history column names to a latest.json payload.
+
+    The raw sensor keys are kept so /api/live stays a faithful snapshot, and a
+    chart key is never overwritten by a differently named sensor key.
+    """
+    row = dict(payload)
+    for source, column in LIVE_HISTORY_KEYS.items():
+        if source in payload and column not in row:
+            row[column] = payload[source]
+    return row
+
+
 _LOOPBACK_HOSTS = frozenset({'127.0.0.1', 'localhost', '::1'})
 
 
@@ -544,12 +581,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if route in ('/', '/index.html'):
                 page = render_page()
                 return 200, page, 'text/html; charset=utf-8', ()
-            if route.startswith('/api/'):
+            if route in ('/api/live', '/api/history', '/api/state', '/api/export'):
                 problem = _state_dir_problem(self.state_dir)
                 if problem is not None:
                     # An unreadable directory yields the same "0 samples / 0.000
                     # kWh / 200" as a daemon that never ran, and the operator has
                     # no way to tell the two apart. The CLI can: it fails loudly.
+                    # Only for the routes that actually read the directory: an
+                    # unknown /api/ path is a client bug and must stay a 404 even
+                    # on a host where the daemon has never run.
                     return 503, f'{problem}\n', 'text/plain; charset=utf-8', ()
             if route == '/api/live':
                 payload = stats.read_live_snapshot(self.state_dir)
@@ -560,7 +600,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         'text/plain; charset=utf-8',
                         (),
                     )
-                return 200, json.dumps(payload), 'application/json', ()
+                return 200, json.dumps(_live_view(payload)), 'application/json', ()
             if route == '/api/history':
                 payload = _history_payload(self.state_dir, self._from_spec())
                 return 200, json.dumps(payload), 'application/json', ()

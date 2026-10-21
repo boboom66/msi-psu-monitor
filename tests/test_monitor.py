@@ -58,6 +58,6 @@ def test_format_prometheus_metrics():
     assert "msi_psu_current_12v_total" in out
     assert 'msi_psu_pin_current{connector="1",pin="1"} 5.312' in out
     assert 'msi_psu_pin_current{connector="2",pin="6"} 5.312' in out
-    assert "msi_psu_power_total {} 1040.0" in out
-    assert "msi_psu_temperature {} 51.0" in out
-    assert "msi_psu_fan_speed {} 536" in out
+    assert "msi_psu_power_total{} 1040.0" in out
+    assert "msi_psu_temperature{} 51.0" in out
+    assert "msi_psu_fan_speed{} 536" in out

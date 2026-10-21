@@ -30,7 +30,17 @@ CONFIG_FILES = (
 #: which is exactly the kind of failure an operator cannot see.
 KNOWN_OPTIONS = {
     'monitor': {'interval', 'format', 'output', 'verbose', 'quiet', 'no_alerts', 'serial'},
-    'alerts': {'consecutive_required'},
+    'alerts': {
+        'consecutive_required',
+        'power_w',
+        'temp_c',
+        'pin_max_a',
+        'pin_imbalance_a',
+        'connector_a',
+        'rail_12v_a',
+        'rail_5v_a',
+        'rail_3v3_a',
+    },
     'daemon': {
         'state_dir',
         'prom_path',
@@ -54,6 +64,18 @@ DEFAULTS = {
     'no_alerts': False,
     'serial': None,
     'consecutive_required': 2,
+    # Local early-warning limits (software, not PSU protection). Initial values
+    # are the REQ-14 draft: 1200 W total, 70 C internal, 12 A per pin, 5 A pin
+    # spread, 50 A per 12V-2x6 connector (600 W at 12 V), and the product-spec
+    # rail currents. 0 disables a limit. Tune after real-hardware acceptance.
+    'power_w': 1200.0,
+    'temp_c': 70.0,
+    'pin_max_a': 12.0,
+    'pin_imbalance_a': 5.0,
+    'connector_a': 50.0,
+    'rail_12v_a': 108.33,
+    'rail_5v_a': 22.0,
+    'rail_3v3_a': 22.0,
     'state_dir': None,
     'prom_path': None,
     'port': 8899,
@@ -127,6 +149,13 @@ def load_config(path=None):
     )
     if cfg['consecutive_required'] < 1:
         cfg['consecutive_required'] = 1
+    for key in THRESHOLD_KEYS:
+        raw = alerts.get(key)
+        value = _as_float(raw, cfg[key])
+        if value < 0:
+            logger.warning(f'[alerts] {key} is negative ({raw!r}); using 0 (disabled).')
+            value = 0.0
+        cfg[key] = value
 
     daemon = parser['daemon'] if parser.has_section('daemon') else {}
     cfg['state_dir'] = daemon.get('state_dir', cfg['state_dir']) or None
@@ -171,6 +200,24 @@ def load_config(path=None):
         else:
             logger.warning(f'Ignoring unknown [fan] zero_fan value {raw_zero!r} (use on or off).')
     return cfg
+
+
+#: Config keys that form the local early-warning thresholds, in report order.
+THRESHOLD_KEYS = (
+    'power_w',
+    'temp_c',
+    'pin_max_a',
+    'pin_imbalance_a',
+    'connector_a',
+    'rail_12v_a',
+    'rail_5v_a',
+    'rail_3v3_a',
+)
+
+
+def threshold_limits(cfg):
+    """Return the enabled local thresholds as {config_key: float} (0 = disabled)."""
+    return {key: float(cfg.get(key) or 0.0) for key in THRESHOLD_KEYS}
 
 
 def _as_float(raw, fallback):

@@ -23,6 +23,7 @@ import math
 import os
 import re
 import time
+from collections import deque
 from datetime import date, datetime
 from pathlib import Path
 
@@ -113,7 +114,11 @@ def _finite_float(raw, fallback=0.0):
     """
     try:
         value = float(raw)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # A JSON integer with hundreds of digits is valid JSON but cannot be
+        # converted to float on Python 3.10 (on 3.11+ json's int-digit limit
+        # usually rejects it first). It must be treated as a damaged state
+        # field, not as a traceback out of the daemon's startup path.
         return fallback
     return value if math.isfinite(value) else fallback
 
@@ -654,7 +659,15 @@ def append_alert_log(state_dir, message, ts=None):
 
 
 def iter_alert_log(state_dir, limit=None):
-    """Return alert-log lines oldest first, rotated content before its day file."""
+    """Return alert-log lines oldest first, rotated content before its day file.
+
+    'limit' bounds memory as well as output. Thirty days of 5 MiB logs plus their
+    rotated copies is hundreds of megabytes, while --show-alert-log only ever
+    prints the newest few hundred lines: every line was materialised in a list
+    before the tail was taken, which could exhaust a small monitoring host.
+    """
+    if limit is not None and limit <= 0:
+        return []
     paths = []
     for path in Path(state_dir).glob(f'{ALERT_LOG_PREFIX}*'):
         if path.is_file() and path.name.endswith((ALERT_LOG_SUFFIX, ALERT_LOG_SUFFIX + '.1')):
@@ -662,18 +675,18 @@ def iter_alert_log(state_dir, limit=None):
     # alerts-YYYYMMDD.log.1 is older than alerts-YYYYMMDD.log; sort rotated first
     # within a day and days in filename order.
     paths.sort(key=lambda p: (p.name.removesuffix('.1'), not p.name.endswith('.1')))
-    lines = []
+    lines = deque(maxlen=limit) if limit is not None else []
     for path in paths:
         try:
             with path.open(encoding='utf-8-sig') as handle:
-                lines.extend(line.rstrip('\n') for line in handle)
+                if limit is None:
+                    lines.extend(line.rstrip('\n') for line in handle)
+                else:
+                    for line in handle:
+                        lines.append(line.rstrip('\n'))
         except (OSError, UnicodeDecodeError) as exc:
             logger.warning(f'Skipping unreadable alert log {path.name}: {exc}')
-    if limit is not None:
-        if limit <= 0:
-            return []
-        lines = lines[-limit:]
-    return lines
+    return list(lines)
 
 
 def prune_alert_logs(state_dir, today=None, days=RETENTION_DAYS):

@@ -269,3 +269,39 @@ def test_the_release_doc_states_the_no_python_glibc_contract():
     assert 'glibc 2.35' in text
     assert 'SHA256SUMS' in text
     assert 'ubuntu-22.04-arm' in text
+
+
+PROMETHEUS_RULES = ROOT / 'docs' / 'prometheus-rules.yml'
+BUILD_HARDWARE_KIT_SH = ROOT / 'scripts' / 'build_hardware_kit.sh'
+
+
+def test_the_prometheus_alert_rules_are_shipped():
+    """The ops deliverable must exist and be staged by every installer."""
+    text = PROMETHEUS_RULES.read_text(encoding='utf-8')
+    for needle in (
+        'MsiPsuDown',
+        'MsiPsuStale',
+        'MsiPsuScrapeError',
+        'MsiPsuHardwareAlert',
+        'MsiPsuThresholdAlert',
+        'msi_psu_threshold_alert',
+    ):
+        assert needle in text, needle
+    for script in (BUILD_DEB_SH, BUILD_DEB_BINARY_SH, BUILD_BINARY_SH, BUILD_HARDWARE_KIT_SH):
+        assert 'prometheus-rules.yml' in script.read_text(encoding='utf-8'), script
+
+
+CHANGELOG = ROOT / 'CHANGELOG.md'
+CI_WORKFLOW = ROOT / '.github' / 'workflows' / 'ci.yml'
+SOAK_SH = ROOT / 'scripts' / 'soak.sh'
+
+
+def test_the_changelog_is_shipped_and_the_soak_gate_is_in_ci():
+    """Release/ops artifacts must be in every package, not only in the tree."""
+    assert CHANGELOG.is_file()
+    changelog = CHANGELOG.read_text(encoding='utf-8')
+    assert '## [Unreleased]' in changelog
+    for script in (BUILD_DEB_SH, BUILD_BINARY_SH, BUILD_HARDWARE_KIT_SH):
+        assert 'CHANGELOG.md' in script.read_text(encoding='utf-8'), script
+    assert SOAK_SH.is_file()
+    assert 'scripts/soak.sh 5000' in CI_WORKFLOW.read_text(encoding='utf-8')

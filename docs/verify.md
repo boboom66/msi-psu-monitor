@@ -1,12 +1,12 @@
 # 无硬件自检手册
 
 > 没有真机也能验证 CLI、告警、daemon、历史落盘、prometheus 与 dashboard 全链路。
-> 下面每条命令都已在 `.venv`（Python 3.13.15）实跑通过；测试套件另在**裸环境**复核过
-> 3.12.3 与 3.10.21 两遍（把工作树复制一份、不带 `.venv`、不装本包，直接
-> `python3 -m pytest`，各 **645 通过**；`smoke.sh` 的 **58 项**在 3.12 裸环境跑过）。
-> 3.10 另有静态兜底——ruff `target-version = "py310"`、mypy
+> 下面每条命令都已在 `.venv`（Python 3.12.3）实跑通过；完整测试套件另在裸
+> Python 3.13.15（uv 缓存解释器，只装 pytest、不装本包）复核 **736 通过**；
+> `smoke.sh` → 58 项（Python 3.12 环境跑过）。本机没有 python3.10，3.10 兼容性
+> 由静态门禁兜底——ruff `target-version = "py310"`、mypy
 > `python_version = "3.10"`（按 3.10 typeshed 分析）、smoke 里对每个 `.py` 的
-> `ast.parse(feature_version=(3, 10))`。
+> `ast.parse(feature_version=(3, 10))`；CI 矩阵另在 3.10 / 3.12 / 3.13 上执行。
 > 需要真机的部分集中在最后一节，交付样机后再做。
 
 ## 0. 环境
@@ -39,6 +39,22 @@ uv run --group dev coverage run --branch -m pytest -q
 uv run --group dev coverage report --fail-under=90
 ```
 
+加速长跑门禁（demo，5000 次采样；CI 也跑）：
+
+```bash
+bash scripts/soak.sh 5000
+```
+
+它检查 daemon 正常退出、state/latest/prom/daily 仍在更新、`msi_psu_up 1`，以及
+峰值 RSS ≤256 MiB、fd ≤64；输出 `SOAK PASS` 才算过。默认 5000，最少 100。
+
+无 PSU 也能查看生效配置（含 `[alerts]` 阈值；text/json）：
+
+```bash
+msi-psu-monitor --dump-config
+msi-psu-monitor --dump-config -f json | python3 -m json.tool | head
+```
+
 现在 `ruff format --check .` 也安全了（`[tool.ruff.format] exclude` +
 `force-exclude = true` 把 4 个历史文件挡在外面），CI 已把它加进门禁：
 
@@ -57,10 +73,10 @@ uv run --group dev ruff format --check .
 | `tests/test_alerts.py` | 阈值判定、`consecutive_required` 去抖（`test_debounce_needs_two_consecutive_polls`）、严重度、`retain()` 换机清理 |
 | `tests/test_state.py` | 能量积分、原子写中断（`test_an_interrupted_save_keeps_the_previous_state_intact`）、strict load、历史追加/裁剪、`--export` 列 |
 | `tests/test_config.py` | INI 解析、`[daemon]`、`[fan]` 段与非法值回落；显式 `--config` 缺失/格式错误必须报错（`test_an_explicit_config_file_must_exist`）；越界 port 回落 |
-| `tests/test_monitor_format.py` | text / json / prometheus 三种 formatter（`test_prometheus_reports_down_for_a_short_payload`）；prometheus 契约在这里，不在 `test_schema.py` |
+| `tests/test_monitor_format.py` | text / json / prometheus 三种 formatter（`test_prometheus_reports_down_for_a_short_payload`）；多轨 12V1-5 电压/电流与 CPU/GPU 拆分（`test_prometheus_multi_rail_uses_rail_labels_and_cpu_gpu_metrics`）；prometheus 契约在这里，不在 `test_schema.py` |
 | `tests/test_cli_alerts.py` | CLI 告警路径与退出码 2（`test_once_alert_exits_two_and_prints_line`）、黑盒空表 |
 | `tests/test_cli_features.py` | `--watch`/`-O`/`--serial`/`--show-log`/`--fan-*`/`--export`/互斥校验（`test_an_empty_columns_spec_is_not_silently_every_column`） |
-| `tests/test_ocp.py` | 0xC0 阈值 / 0xC1 状态 / 单多轨标志的三格式输出与机型门（`test_run_ocp_on_a_meg_p_model_shows_the_multirail_flag`） |
+| `tests/test_ocp.py` | 0xC0 阈值 / 0xC1 状态 / 单多轨标志的三格式输出与机型门（`test_run_ocp_on_a_meg_p_model_shows_the_multirail_flag`）；0xC0 阈值写的 MSI 字节编码与 F1h 保存（`test_set_ocp_thresholds_writes_msi_bytes_then_saves`） |
 | `tests/test_daemon.py` | 采样节拍、原子写（`test_a_failed_prometheus_replace_keeps_the_previous_textfile`）、重扫、风扇 Profile 恢复、只答 ident 判读失败、OCP 块换机不继承旧阈值 |
 | `tests/test_dashboard.py` | HTTP 端点、损坏 state.json 的 503（`test_a_corrupt_state_file_is_a_503_while_history_still_serves`）、HEAD 与错误码一致、真实时间 x 轴 |
 | `tests/test_demo.py` | 合成电源、5 机型切换、告警位注入（`test_every_supported_variant_can_be_emulated`） |
@@ -74,6 +90,10 @@ uv run --group dev ruff format --check .
 | `tests/test_docs_consistency.py` | 文档里的用例数、测试文件名、§1.1 覆盖表函数名、CLI 参数清单、版本号双重来源不得与事实不符（`test_quoted_test_counts_are_accurate`） |
 | `tests/test_release_security.py` | SBOM/CycloneDX 与产物哈希、SECURITY/support/incident 文档、release workflow 发布 SBOM（`test_the_sbom_generator_emits_cyclonedx_with_artifact_hashes`、`test_the_release_workflow_generates_and_publishes_an_sbom`） |
 | `tests/test_e2e_cli.py` | 真实 console 入口子进程：`--version`/`--help`/demo text+json/告警 exit 2/`-O`/`--show-alert-log`/无设备错误（`test_demo_alert_exit_code_and_stderr_via_subprocess`、`test_no_demo_no_hardware_is_a_clean_error`） |
+| `tests/test_ai1300ts.py` | Ai1300TS 全功能回归（`test_ai1300ts_cli_covers_every_feature`）：读数/JSON/Prom、OCP 读写、风扇/Zero Fan/蜂鸣器、告警和本地阈值、`--set-rail` 拒绝 |
+| `tests/test_prometheus_exposition.py` | 严格 exposition 语法（`test_format_prometheus_passes_a_strict_exposition_parser`）：HELP/TYPE、label 转义、数值、重复序列，旧式 `metric {} value` 必须被拒；promtool 的本机替代 |
+| `tests/test_robustness.py` | 确定性 fuzz：随机 0xE0 payload ×5 机型、随机配置文本、随机 `--ocp-set`（`test_random_bulk_payloads_never_crash_a_variant_or_a_formatter`）；不崩、不泄漏 NaN/inf |
+| `tests/test_soak.py` | `scripts/soak.sh` 的坏参数拒绝、短线长跑与 CI 门禁（`test_the_soak_script_passes_a_short_run`） |
 
 `tests/test_docs_consistency.py` 是「文档防伪」：文档里写下的数字与文件名，都由测试去核对一遍。
 
@@ -98,7 +118,7 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。当前基线：**645 passed**、`ruff check` 全过、`mypy` 10 个文件无问题；
+三条全绿即通过。当前基线：**736 passed**、`ruff check` 全过、`mypy` 10 个文件无问题；
 源包语句覆盖率 **92%**（CI 门限 90%）。
 
 > `ruff format --check .` **可以全仓跑**（CI 也跑）：`protocol.py`/`__init__.py`/`__main__.py`/
@@ -198,6 +218,20 @@ MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --fan-mode customized --fan-duty 55   #
 MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --fan-mode auto                       # expect: Fan mode: auto
 ```
 
+### 2.0.2 控制写入（Zero Fan / 蜂鸣器 / 单多轨）
+
+demo 可验证写路径与输出语义（真实写入需 root + 真机）：
+
+```bash
+MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --zero-fan off   # Zero Fan: off（43h + F1h + 42h 读回）
+MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --buzzer-off     # Buzzer: switch toggled (no read-back)
+MSI_PSU_DEMO_MODEL=ai1300p MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --set-rail multi
+# ↑ 写 C0h 1 字节 + F1h + 读回；与当前值相同时不重复写，输出 (already set)
+```
+
+`--buzzer-off` 在 MSI 的命名里是 **switch** 且没有回读，所以只报告 ACK/toggled，
+不宣称"已静音"；第二次调用是否会重新响必须真机确认。
+
 ### 2.1 OCP 阈值检视（`--ocp`，只读）
 
 一期需求「OCP 閾值檢視」的落地点。读 0xC0 配置 + 0xC1 状态，只读不改电源设置。
@@ -223,6 +257,26 @@ uv run --group dev pytest -q tests/test_ocp.py
 
 `--ocp` 与 `--watch`/`--export`/`--show-log`/`--dashboard`/风扇写互斥（argparse 报错 exit 2）。
 
+### 2.2 OCP 阈值导出/写入/导入（MPG TS；真实保护写）
+
+`--dump-thresholds` 只读；`--ocp-set` / `--load-thresholds` 是**会改写电源保护参数**的写路径
+（0xC0 8 字节 + F1h），写后必须读回一致，失败重试 3 次后 exit 1。范围
+10-14 A / 4-8 A / 5-30 s / 5-30 s / 30-240 s，越界直接拒绝（不静默 clamp）。无硬件时用
+demo/mock 验证命令链路（demo 进程内不落 NVRAM，下次进程仍回出厂值）：
+
+```bash
+S=$(mktemp -d)
+MSI_PSU_STATE_DIR=$S MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --dump-thresholds
+MSI_PSU_STATE_DIR=$S MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --dump-thresholds -f json > /tmp/ocp.json
+MSI_PSU_STATE_DIR=$S MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --ocp-set 13,6,10,12,60
+MSI_PSU_STATE_DIR=$S MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --load-thresholds /tmp/ocp.json
+MSI_PSU_DEMO_MODEL=ai1300p MSI_PSU_STATE_DIR=$S MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --ocp-set 12,5,20,20,180; echo "exit=$?"  # 1：无 8 字节视图
+uv run --group dev pytest -q tests/test_ocp.py tests/test_cli_features.py -k 'ocp or threshold'
+```
+
+越界/错误输入走 argparse exit 2（例如 `--ocp-set 9,6,10,12,60`）；`--load-thresholds` 的
+JSON 范围/未知键错误 exit 1。真机验收清单（§8）必须先导出原值再写，写后核对并恢复。
+
 ## 3. 告警路径（exit 2 + stderr 单行）
 
 `MSI_PSU_DEMO_ALERT` 可让一条告警位置 1，取值须是该机型**能报**的名字
@@ -236,6 +290,27 @@ MSI_PSU_DEMO_ALERT=fan .venv/bin/msi-psu-monitor --once; echo "exit=$?"
 预期：stderr 打印 `ALERT [critical] fan: fan blocked, shutdown imminent`，`exit=2`。
 `fan` 是唯一的 critical 级，其余为 warning。CLI 单次读把去抖设为 1 次（立即触发）；
 daemon 按配置默认连续 2 次命中才触发，避免单次采样抖动误报。
+
+### 3.1 本地阈值早警（`[alerts]`，软件阈值）
+
+`[alerts]` 的 8 个阈值不依赖 E1h；`0` 关闭单项。demo 用低阈值触发（真机默认值见
+conf example，真机后调参）：
+
+```bash
+cat > /tmp/threshold.conf <<'EOF'
+[alerts]
+power_w = 50
+EOF
+MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --once --config /tmp/threshold.conf; echo "exit=$?"  # 2
+# stderr: ALERT [warning] power_high: ...: measured 87.9, limit 50
+MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --once -f json --config /tmp/threshold.conf | python3 -m json.tool | grep -A2 threshold
+MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --once -f prometheus --config /tmp/threshold.conf | grep msi_psu_threshold
+MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --once --no-alerts --config /tmp/threshold.conf; echo "exit=$?"  # 0
+uv run --group dev pytest -q tests/test_daemon.py -k threshold
+```
+
+默认值（REQ-14 初值）：1200 W / 70 ℃ / 12 A / 5 A / 50 A / 108.33 A / 22 A / 22 A；
+`--dump-config` 可查生效值，0xE0 读失败不会清除已 latched 的阈值告警。
 
 ## 4. daemon + 历史 + prometheus + dashboard（一条龙）
 
@@ -337,11 +412,18 @@ MSI_PSU_DEMO=1 timeout 3 .venv/bin/msi-psu-monitor --watch 1 -O /tmp/frames.log
 .venv/bin/msi-psu-monitor --dashboard -O /tmp/page.html; echo "exit=$?"   # 2：dashboard 没有输出文件
 .venv/bin/msi-psu-monitor --dashboard --serial ABC; echo "exit=$?"        # 2：dashboard 读历史不认设备
 .venv/bin/msi-psu-monitor --ocp --show-log;             echo "exit=$?"   # 2：两个查询互斥
+.venv/bin/msi-psu-monitor --dump-config --once;        echo "exit=$?"   # 2：dump-config 不碰设备
+.venv/bin/msi-psu-monitor --ocp-set 9,6,10,12,60;      echo "exit=$?"   # 2：OCP 范围越界
+.venv/bin/msi-psu-monitor --dump-thresholds --ocp;     echo "exit=$?"   # 2：两个查询互斥
 ```
 
 约定：`0` 正常 / `1` 程序或参数错误 / `2` 告警或参数冲突（argparse 用法错误）。
 
 ## 7. 打包与发布
+
+源码 .deb、二进制 tar 和 hardware kit 都随附 `CHANGELOG.md`、
+`docs/prometheus-rules.yml`、`docs/verify.md` 与配置样例；发布前用
+`bash scripts/soak.sh 5000` + `bash scripts/smoke.sh` 复核。
 
 下面两个是**开发/CI 用**的源码包（`Depends: python3`）；官网下载用 §7.1 的自包含产物。
 
@@ -462,6 +544,11 @@ journalctl -u msi-psu-monitor -f
     exit 1（机型门），且不产生错误寄存器写入；
 13. `--set-rail` 切换前后 `--ocp` 的 multirail 标志与读回一致；切换后的 OCP 行为
     （单轨总电流 vs 各轨独立限流）与 MSI Center 的 Multi Rail/Single Rail 一致；
+13b. OCP 阈值写（仅 MPG TS）：先 `--dump-thresholds -f json > before.json` 留底；
+    用 `--ocp-set` 写一组远离当前值的合法值（如 13,6,10,12,60），输出必须读回一致且
+    F1h 后断电重启仍保持；再用 `--load-thresholds before.json` 恢复。写前后 `--ocp` 的
+    4 个阈值必须与 MSI Center 一致。越界值应被 CLI 拒绝（exit 2），不能等到电源侧 clamp。
+    常规运行不要自动改保护点；
 14. MEG Ai1300P 上 `AC Input`（0x20）接近市电电压（220-240 V），MPG TS 上不出现该行
     且不产生 NAK 重试；Ai1600T 若 NAK 则自然省略，不算失败；
 15. 触发一次真实告警并恢复：`alerts-YYYYMMDD.log` 先出现 `ALERT` 行、恢复后出现

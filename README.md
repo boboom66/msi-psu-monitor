@@ -13,24 +13,32 @@ Python standard library only — no third-party runtime dependencies.
 - **One-shot, watch and machine-readable output** — text, JSON and Prometheus.
 - **Per-pin 12V-2x6 current** with a software mirror of the PSU's own OCP thresholds
   (single pin ≥ 12 A — the C0h trip point is inclusive — spread > 5 A per connector).
+- **Local threshold alerts** — configurable early-warning limits for total power,
+  temperature, 12V-2x6 pin current/spread, per-connector current and rail current
+  (`[alerts]` in the config file; set a limit to 0 to disable it). They use the
+  same debounce/exit-code/alert-log path as the hardware alerts.
 - **Alerting with exit codes** — hardware alert bits (E1h) plus the software mirror,
   debounced, reported on stderr; `0` normal / `1` fault / `2` alert. The daemon also
   appends every alert edge and recovery to `alerts-YYYYMMDD.log` (5 MiB rotation,
   30-day retention), and `--show-alert-log` prints it (MSI Center's AlertLog/ViewLog).
 - **Fan display and control** — read mode/duty/Zero Fan (41h/42h), write and save a
   custom duty (41h + F1h) or toggle Zero Fan (43h + F1h), both with read-back
-  verification; silence the 12+4 OCP buzzer (C2h); `performance` is accepted as the
+  verification; toggle the 12+4 OCP buzzer switch (C2h, no read-back); `performance` is accepted as the
   PCIE5 Cooling Wizard's name for the PSU curve (`auto`).
 - **Rail protection mode** — switch the MEG Ai1000P/Ai1300P between single-rail and
-  multi-rail OCP (`--set-rail`, C0h 1 byte + F1h) and verify the read-back; the
-  8-byte 12V-2x6 threshold write remains read-only until a separately approved batch
-  and a real-unit validation.
+  multi-rail OCP (`--set-rail`, C0h 1 byte + F1h) and verify the read-back.
+- **12V-2x6 OCP threshold write** — dump (`--dump-thresholds`), write (`--ocp-set`) or
+  load (`--load-thresholds`) the 8-byte configuration (C0h + F1h) with strict range
+  validation and read-back verification (MPG TS models; a real protection write that
+  still needs bench acceptance).
 - **AC input voltage** — `vin` on the MEG models (0x20, an MSI-compatible extra
   removed from the REV6 table), shown as `AC Input` and exported as
   `msi_psu_input_voltage`.
 - **Black-box dump** — the last 10 GPU Safeguard+ trip records (`--show-log`).
 - **OCP threshold inspection** — display the 12V-2x6 OCP configuration (pin trip point,
-  pin spread, trigger and warning times) and the per-connector state, read-only (`--ocp`).
+  pin spread, trigger and warning times) and the per-connector state (`--ocp`, read-only);
+  the same configuration is dumpable/writable as JSON via `--dump-thresholds` /
+  `--load-thresholds`.
 - **Resident daemon** — 1 s alert evaluation, 30 s atomic Prometheus textfile,
   60 s history line, rescan after 5 read failures (unplug/replug recovery).
 - **Cumulative statistics** — average power/efficiency and integrated energy (kWh)
@@ -114,6 +122,7 @@ sudo msi-psu-monitor --once
 # No PSU at hand? Drive the whole pipeline with the synthetic device
 MSI_PSU_DEMO=1 msi-psu-monitor --once
 MSI_PSU_DEMO=1 MSI_PSU_DEMO_MODEL=ai1300p msi-psu-monitor --once   # multi-rail model
+MSI_PSU_DEMO=1 MSI_PSU_DEMO_MODEL=mpg_ai1300ts msi-psu-monitor --once  # 1300W TS model
 
 # Continuous text refresh
 sudo msi-psu-monitor --watch        # or --watch 1 for a 1s interval
@@ -132,8 +141,9 @@ msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
                 [--export] [--from FROM_SPEC]
                 [--columns COLUMNS] [--dashboard] [--port PORT] [--show-log]
                 [--show-alert-log]
-                [--ocp] [--no-alerts] [--config CONFIG] [--verbose] [--quiet]
-                [--version]
+                [--ocp] [--dump-thresholds] [--ocp-set ...]
+                [--load-thresholds FILE] [--no-alerts] [--config CONFIG]
+                [--dump-config] [--verbose] [--quiet] [--version]
 
   -f, --format     Output format: text (default), json, prometheus
   -w, --watch      Watch mode; optional refresh seconds (default: [monitor]
@@ -149,7 +159,8 @@ msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
                    and is refused together with --fan-mode auto/performance
       --zero-fan   Enable/disable Zero Fan (43h) and save it (F1h); 12+4
                    (MPG TS) models only
-      --buzzer-off Silence the 12+4 OCP buzzer (C2h); MPG TS models only. The
+      --buzzer-off Toggle the 12+4 OCP buzzer switch (C2h); write-only, no
+                   read-back; MPG TS models only. The
                    method is a switch on the PSU (no read-back): test the second
                    invocation on hardware before treating it as idempotent
       --set-rail   Switch 12V protection between multi and single rail
@@ -165,8 +176,20 @@ msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
       --show-alert-log  Print the local alerts-*.log (MSI AlertLog equivalent)
       --ocp        Show the OCP view (C0h/C1h): 12V-2x6 thresholds + state on
                    the MPG TS models, the multirail flag on the MEG P models
+      --dump-thresholds / --ocp-dump
+                   Print the hardware 12V-2x6 OCP thresholds (C0h 8 bytes) as
+                   text or JSON; read-only
+      --ocp-set POINT,DIFF,TRIGGER,DIFF_TRIGGER,WARNING[,on|off]
+                   Write the hardware OCP thresholds (C0h + F1h) and verify by
+                   read-back; MPG TS only. Ranges: 10-14 A / 4-8 A / 5-30 s /
+                   5-30 s / 30-240 s. REAL PROTECTION WRITE: test on a bench PSU
+                   first and have the previous values ready
+      --load-thresholds FILE / --ocp-load FILE
+                   Load the same values from a JSON dump and write + verify
       --no-alerts  Skip the E1h alert poll
       --config     Explicit config file
+      --dump-config  Print the effective configuration (including all [alerts]
+                   limits) and exit; text or json; no PSU access
 ```
 
 Exit codes: `0` normal, `1` program/argument fault (a read failed), `2` alert active
@@ -188,7 +211,7 @@ sudo msi-psu-monitor --ocp
 sudo msi-psu-monitor --fan-duty 75
 sudo msi-psu-monitor --fan-mode auto
 
-# Zero Fan toggle and buzzer silence (MPG TS models)
+# Zero Fan toggle and buzzer switch (MPG TS models)
 sudo msi-psu-monitor --zero-fan off
 sudo msi-psu-monitor --buzzer-off
 
@@ -198,6 +221,15 @@ sudo msi-psu-monitor --set-rail multi
 
 # Local alert audit trail and its viewer
 sudo msi-psu-monitor --show-alert-log
+
+# Hardware OCP thresholds: inspect, then write + verify (MPG TS only)
+sudo msi-psu-monitor --dump-thresholds -f json > ocp.json
+sudo msi-psu-monitor --ocp-set 13,6,10,12,60
+sudo msi-psu-monitor --load-thresholds ocp.json
+
+# Effective settings (including [alerts] limits), no PSU needed
+msi-psu-monitor --dump-config
+msi-psu-monitor --dump-config -f json
 
 # Last two hours of temperature and fan as CSV
 sudo msi-psu-monitor --export --from 2h --columns temp,fan -O psu-2h.csv
@@ -263,6 +295,13 @@ MSI PSU: MPG Ai1600TS
 feature is unavailable and exits `0` (the same choice `--show-log` makes for an empty
 black box, so scripts can call it unconditionally).
 
+`--dump-thresholds` prints the same configuration as text or JSON. `--ocp-set` /
+`--load-thresholds` **change the PSU's protection points**: the ranges are validated
+(10-14 A / 4-8 A / 5-30 s / 5-30 s / 30-240 s, no silent clamp), the 8-byte write is
+followed by `F1h` and read-back (up to 3 attempts), and re-applying the current values
+is a no-op. Keep a `--dump-thresholds -f json` copy first, verify on a bench unit, and
+restore with `--load-thresholds`; never call it from automation.
+
 ## Prometheus integration
 
 The `prometheus` format targets the
@@ -276,7 +315,14 @@ it is `0`, `msi_psu_info{product,vendor,fw,serial}`, rail voltages/currents,
 `msi_psu_efficiency`, `msi_psu_efficiency_avg`, `msi_psu_temperature`,
 `msi_psu_fan_speed`, `msi_psu_zero_fan{state}`,
 `msi_psu_status_12v_2x6{status}`, `msi_psu_total_energy_kwh`,
-`msi_psu_alert{alert}` and the uptime counters. `--ocp -f prometheus` exports the OCP
+`msi_psu_alert{alert}`, the local thresholds as
+`msi_psu_threshold_limit{name}`/`msi_psu_threshold_alert{alert}`, and the uptime
+counters. The energy counter is exported under both its descriptive name and the
+REQ-8 name: `msi_psu_total_energy_kwh` and `msi_psu_energy_kwh_total` carry the same
+value. Empty label sets are written in canonical exposition form (`metric{} value`,
+no space). Ready-to-use alerting rules ship as
+[`docs/prometheus-rules.yml`](docs/prometheus-rules.yml) (down/stale/scrape-error,
+hardware alerts and threshold alerts). `--ocp -f prometheus` exports the OCP
 limits as `msi_psu_ocp_available` (`1` when this model answers the C0h/C1h registers),
 `msi_psu_ocp_enabled`, `msi_psu_ocp_pin_point_a`, `msi_psu_ocp_pin_diff_a`,
 `msi_psu_ocp_trigger_s`, `msi_psu_ocp_diff_trigger_s`, `msi_psu_ocp_warning_s`,
@@ -313,6 +359,14 @@ journalctl -u msi-psu-monitor -f          # ALERT lines land here
 Optional INI file, resolved as `/etc/msi-psu-monitor.conf` then
 `~/.config/msi-psu-monitor/config.ini`; CLI flags always win. See
 [`docs/msi-psu-monitor.conf.example`](docs/msi-psu-monitor.conf.example).
+
+The `[alerts]` section also carries the local early-warning limits
+(`power_w`, `temp_c`, `pin_max_a`, `pin_imbalance_a`,
+`connector_a`, `rail_12v_a`, `rail_5v_a`, `rail_3v3_a`);
+0 disables one. They are separate from the PSU's own E1h protection bits and
+show up as `Thresholds: ...` in text, `threshold_alerts`/
+`threshold_limits` in JSON, and `msi_psu_threshold_alert`/
+`msi_psu_threshold_limit` in Prometheus.
 
 The optional `[fan]` section re-applies a fan profile on every daemon (re)open — the
 way MSI Center re-asserts its profile when it takes the device over. It is off unless
@@ -401,6 +455,10 @@ the user-space tool**; there is no kernel module to build today.
 See [`docs/protocol.md`](docs/protocol.md) for full protocol documentation, including
 the 62-byte `0xE0` bulk read layout and the register map.
 
+A Chinese walkthrough of the major features added on top of the upstream tool —
+what each one does, how it is implemented, and which parts still need real hardware
+— is in [`docs/新增功能与实现方案.md`](docs/新增功能与实现方案.md).
+
 ## Security and support
 
 - [SECURITY.md](SECURITY.md) — reporting a vulnerability, security properties and
@@ -422,6 +480,9 @@ tests — is described in [`DEV_PROGRESS.md`](DEV_PROGRESS.md) and
 The protocol details were cross-checked against the CWT REV6 USB command
 specification that ships with the PSU and against MSI Center's own reading
 behaviour; no vendor code was copied.
+
+See [CHANGELOG.md](CHANGELOG.md) for the unreleased changes and the
+1.0.0 release notes.
 
 ## License
 

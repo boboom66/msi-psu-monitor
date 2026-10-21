@@ -259,6 +259,27 @@ def test_no_document_still_forbids_repo_wide_ruff_format():
     assert not offenders, f'still forbids repo-wide formatting: {offenders}'
 
 
+SCRIPT_ARTIFACT_RE = re.compile(
+    r'msi-psu-monitor_\d+\.\d+\.\d+_(?:all|amd64|arm64|linux_[a-z0-9_]+)'
+)
+
+
+def test_shell_scripts_do_not_hardcode_the_release_artifact_version():
+    """A literal artifact name silently inspects the previous release after a bump.
+
+    scripts/smoke.sh hardcoded msi-psu-monitor_1.0.0_all.deb, so the next version
+    bump would have built a new .deb and then read the old one's contents (or a
+    missing file) for the packaging checks.
+    """
+    version = tomllib.loads((ROOT / 'pyproject.toml').read_text())['project']['version']
+    offenders = []
+    for path in sorted((ROOT / 'scripts').rglob('*.sh')):
+        for literal in SCRIPT_ARTIFACT_RE.findall(path.read_text(encoding='utf-8')):
+            if not literal.startswith(f'msi-psu-monitor_{version}_'):
+                offenders.append(f'{path.relative_to(ROOT)}: {literal} (project {version})')
+    assert not offenders, '\n'.join(offenders)
+
+
 def test_the_readme_has_no_duplicate_section_heading():
     """A duplicated `## ...` heading means a merge lost a paragraph boundary.
 

@@ -15,6 +15,19 @@ def test_hardware_scripts_pass_bash_syntax():
         assert result.returncode == 0, result.stderr
 
 
+def test_the_kit_start_page_reports_the_real_build_glibc():
+    """START-HERE hardcoded 'glibc 2.39' while CI builds on 2.35.
+
+    The page is the first thing the hardware tester reads, and it claimed a
+    minimum glibc the shipped binary did not have; setup.sh's fallback exists
+    precisely for that mismatch, so the text must quote BUILD-INFO's value.
+    """
+    text = (ROOT / 'scripts' / 'build_hardware_kit.sh').read_text(encoding='utf-8')
+    assert 'glibc __GLIBC__' in text, 'START-HERE must not hardcode a glibc version'
+    assert 's/__GLIBC__/$GLIBC/g' in text, 'the placeholder must be substituted'
+    assert 'printf "build_glibc=%s' in text and '"$GLIBC"' in text
+
+
 def test_the_kit_builder_ships_binary_source_and_docs():
     text = (ROOT / 'scripts' / 'build_hardware_kit.sh').read_text(encoding='utf-8')
     for needle in (

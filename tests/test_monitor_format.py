@@ -93,8 +93,8 @@ def test_prometheus_shapes():
     assert 'msi_psu_pin_current{connector="2",pin="6"} 0.0' in out
     assert out.count('msi_psu_pin_current{') == 12
     assert '# TYPE msi_psu_uptime counter' in out
-    assert 'msi_psu_power_total {} 660.0' in out
-    assert 'msi_psu_fan_speed {} 2050' in out
+    assert 'msi_psu_power_total{} 660.0' in out
+    assert 'msi_psu_fan_speed{} 2050' in out
 
 
 def test_vin_has_a_text_line_and_a_prometheus_metric():
@@ -136,3 +136,49 @@ def test_prometheus_labels_cannot_be_broken_by_device_control_characters():
     assert 'msi_psu_up 1' in prom.splitlines()
     info = [line for line in prom.splitlines() if line.startswith('msi_psu_info{')][0]
     assert 'PSU  msi_psu_up 0' in info
+
+
+def multi_rail_sensors():
+    sensors = full_sensors()
+    sensors.update(
+        {
+            'product': 'MEG Ai1300P',
+            'vout_12v_rails': ([12.0, 12.1, 12.2, 12.3, 12.4], 'V'),
+            'iout_12v_rails': ([10.0, 20.0, 30.0, 40.0, 50.0], 'A'),
+            'vin': (230.1, 'V'),
+        }
+    )
+    return sensors
+
+
+def test_text_multi_rail_shows_per_rail_voltage_and_cpu_gpu_split():
+    out = format_text(multi_rail_sensors())
+    assert 'Per-rail 12V:' in out
+    assert '12V1:   12.000 V   10.000 A' in out
+    assert '12V2:   12.100 V   20.000 A' in out
+    assert '12V5:   12.400 V   50.000 A' in out
+    # CPU = 12V2, GPU = 12V3+12V4+12V5 (MSI Center's own split).
+    assert 'CPU' in out and 'GPU' in out
+    assert 'CPU' in out and '242.0 W' in out  # CPU = 12.1 * 20
+    assert 'GPU' in out and '1478.0 W' in out  # GPU = 12.2*30 + 12.3*40 + 12.4*50
+    assert 'AC Input' in out and '230.1 V' in out
+
+
+def test_prometheus_multi_rail_uses_rail_labels_and_cpu_gpu_metrics():
+    out = format_prometheus(multi_rail_sensors())
+    assert 'msi_psu_rail_voltage{rail="12V1"} 12.0' in out
+    assert 'msi_psu_rail_current{rail="12V5"} 50.0' in out
+    assert 'msi_psu_cpu_watts{} 242.0' in out
+    assert 'msi_psu_gpu_watts{}' in out
+    assert 'msi_psu_input_voltage 230.1' in out
+    # Canonical empty-label form: no space between name and braces.
+    assert 'msi_psu_cpu_watts {}' not in out
+
+
+def test_prometheus_uses_partial_rail_voltages_without_index_error():
+    sensors = full_sensors()
+    sensors['iout_12v_rails'] = ([10.0, 20.0], 'A')
+    sensors['vout_12v_rails'] = ([12.0], 'V')
+    out = format_prometheus(sensors)
+    assert 'msi_psu_rail_current{rail="12V2"} 20.0' in out
+    assert 'msi_psu_rail_voltage{rail="12V2"}' not in out

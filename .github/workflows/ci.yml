@@ -48,6 +48,10 @@ jobs:
       # OCP, fan write, daemon -> prometheus + history, dashboard HTTP.
       - name: Smoke test (no hardware)
         run: bash scripts/smoke.sh
+      # 5k accelerated samples: proves the resident loop keeps its state files
+      # fresh and stays within the RSS/fd ceilings. Demo mode only.
+      - name: Soak (5k accelerated samples)
+        run: bash scripts/soak.sh 5000
       - name: Build the .deb
         run: bash scripts/build_deb.sh
 

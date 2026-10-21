@@ -23,8 +23,18 @@ artifact can be kept offline for rollback.
 - MSI PSUs: MPG Ai1300TS / Ai1600TS (REV6), MEG Ai1000P / Ai1300P / Ai1600T.
 - Hardware-specific behaviour that still needs a real unit is listed in
   [docs/verify.md](docs/verify.md); the demo mode exercises the rest.
+- The hardware OCP threshold write (`--ocp-set` / `--load-thresholds`) exists only
+  on the MPG TS models and changes real protection points. Keep a
+  `--dump-thresholds -f json` copy before writing, bench-validate it, and restore
+  the dump afterwards; the daemon never writes these thresholds on its own.
 
 ## Getting help
 
 Open a GitHub issue for a reproducible bug or a feature request. Report a
 security problem through the private channel described in [SECURITY.md](SECURITY.md).
+
+When reporting a field problem, attach: the artifact version (`--version`), OS/arch,
+PSU product + firmware from `--once`, `--dump-config`, the relevant
+`journalctl -u msi-psu-monitor` window, and (for threshold issues) the
+`--dump-thresholds -f json` output. Never attach a raw serial if you do not want
+it public; the CLI never logs it in write-audit lines.

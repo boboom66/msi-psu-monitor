@@ -250,20 +250,18 @@ class MonitorDaemon:
         sensors.update(monitor.read_fan_fields(psu))
         # [monitor] no_alerts: documented as "skip the E1h alert poll entirely
         # (same as --no-alerts)", and honoured here the way the CLI honours it --
-        # no poll, and no status/alerts keys, so no Status line, no alert metrics
-        # and no alert log lines. It used to be ignored by the daemon, i.e. a
-        # documented switch that did nothing in the tool's normal mode.
+        # no poll, and no status/alerts/threshold keys, so no Status line, no
+        # alert metrics and no alert log lines. It used to be ignored by the
+        # daemon, i.e. a documented switch that did nothing in normal mode.
         if not self.cfg.get('no_alerts'):
-            active, have_e1h, fired = [], False, []
+            fired = []
             try:
-                fired, active, have_e1h = monitor.collect_alerts(psu, self.engine, sensors)
+                fired = monitor.attach_alerts(psu, self.engine, sensors, self.cfg)
             except Exception as exc:  # pragma: no cover - defensive against odd devices
                 logger.debug(f'Alert poll failed: {exc}')
             # take_cleared() must run even when the log is disabled, or the
             # engine's recovery buffer would grow for the life of the daemon.
             self._record_alerts(fired, self.engine.take_cleared())
-            sensors['alerts'] = active
-            sensors['status'] = monitor.status_from(active, have_e1h)
         try:
             monitor.apply_stats(sensors, self.state)
         except Exception as exc:
@@ -462,14 +460,24 @@ class MonitorDaemon:
             self._next_history = now + self.history_interval
 
         if now >= self._next_prune:
-            stats.prune_history(self.state_dir, days=self.retention_days)
-            stats.prune_alert_logs(self.state_dir, days=self.retention_days)
+            # Housekeeping must never be able to kill the resident daemon: a
+            # state directory whose permissions changed under it (or a file
+            # system that refuses readdir) raised straight out of tick(), so a
+            # PSU that had been monitored for an hour crashed on the first prune
+            # and systemd restarted it into the same wall every hour.
+            try:
+                stats.prune_history(self.state_dir, days=self.retention_days)
+                stats.prune_alert_logs(self.state_dir, days=self.retention_days)
+            except OSError as exc:
+                logger.warning(f'Cannot prune old files in {self.state_dir}: {exc}')
+            except Exception as exc:  # pragma: no cover - defensive against odd paths
+                logger.warning(f'Unexpected error while pruning {self.state_dir}: {exc}')
             self._next_prune = now + PRUNE_INTERVAL_S
 
         return not self.stopping
 
     def run(self, iterations=None):
-        """Sample until SIGTERM/SIGINT (or ``iterations`` samples, for tests)."""
+        """Sample until SIGTERM/SIGINT, or for a bounded number of loop passes."""
         self._install_signal_handlers()
         logger.info(
             f'msi-psu-monitor daemon {__version__} started '
@@ -520,7 +528,8 @@ def build_parser():
         type=_positive_iterations,
         default=None,
         metavar='N',
-        help='Stop after N positive samples instead of running forever (smoke tests)',
+        help='Stop after N sample-loop passes instead of running forever '
+        '(failed reads still count; smoke tests)',
     )
     parser.add_argument(
         '--verbose', '-v', action='store_true', help='Verbose diagnostics on stderr'
@@ -533,6 +542,16 @@ def build_parser():
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
+    # An unset $DIR is not "use the default": silently ignoring it left the
+    # daemon writing to the packaged state directory instead of the one the
+    # caller named. --config "" behaves the same way, so it is a usage error
+    # here too instead of a ConfigError one exit code later.
+    if args.config is not None and not args.config:
+        parser.error('--config requires a path')
+    if args.state_dir is not None and not args.state_dir:
+        parser.error('--state-dir requires a path')
+    if args.prom_path is not None and not args.prom_path:
+        parser.error('--prom-path requires a path')
     try:
         cfg = load_config(args.config)
     except ConfigError as exc:

@@ -8,13 +8,13 @@ runtime imports.
 
 | Module | Role |
 |--------|------|
-| `protocol.py` | HID framing, register map, variant dispatch, `MSIPSU.get_sensors()`, fan/Zero Fan/buzzer/multirail writes, VIN, alert/black-box/OCP reads, `HIDDevice` + `flock` |
-| `monitor.py` | CLI: argument validation, three sensor formatters + three `--ocp` formatters, exit codes, fan/Zero Fan/buzzer/multirail writes, `--export`, `--show-log`, `--show-alert-log`, `--ocp`, device selection, `open_psu()` |
+| `protocol.py` | HID framing, register map, variant dispatch, init-handshake retry, `MSIPSU.get_sensors()`, fan/Zero Fan/buzzer/multirail/OCP-threshold writes, VIN, alert/black-box/OCP reads, `HIDDevice` + `flock` |
+| `monitor.py` | CLI: argument validation, three sensor formatters + three `--ocp` formatters, exit codes, fan/Zero Fan/buzzer/multirail/OCP-threshold writes, `--dump-thresholds`/`--ocp-set`/`--load-thresholds`, `--export`, `--show-log`, `--show-alert-log`, `--ocp`, `--dump-config`, device selection, `open_psu()` |
 | `state.py` | `MonitorState` (avg + energy integral), `state.json` atomic persistence, `daily-*.log` history, `alerts-*.log` audit trail, `latest.json` live cache, `--from`/`--columns`/`build_export` |
 | `daemon.py` | Resident sample loop: 1 s alerts, 30 s atomic prometheus incl. the OCP block (`msi_psu_ocp_*` on TS / `msi_psu_multirail_ocp` on MEG P; variant-gated, refreshed every write because C1h is a 5 s rolling average), the same file rewritten with `msi_psu_up 0` + reason on a failed read, 1 s `latest.json`, alert-log append, 60 s history, rescan after 5 failures |
 | `dashboard.py` | Loopback-only `http.server` reading the history/`latest.json` files; non-loopback Host → 421, CSP/Permissions-Policy on every response; charts are hand-drawn `<canvas>` JS |
-| `alerts.py` | `AlertEngine` (edge-triggered + consecutive debounce), severities, per-pin OCP/imbalance mirror |
-| `config.py` | INI config, precedence CLI > file > `DEFAULTS` |
+| `alerts.py` | `AlertEngine` (edge-triggered + consecutive debounce), severities, per-pin OCP/imbalance mirror, local threshold evaluation (power/temperature/rails/connector) |
+| `config.py` | INI config, precedence CLI > file > `DEFAULTS`; `[alerts]` local limits via `threshold_limits()` |
 | `demo.py` | `MSI_PSU_DEMO=1` synthetic PSU; the only synthetic source in the package |
 
 ## Protocol (normative: docs/protocol.md)
@@ -24,7 +24,7 @@ runtime imports.
   `0xC0` and `0xC1` are **overloaded addresses** (see Invariants) — the model gate, not the
   payload length, decides which command you are talking to.
 - Registers: `0x10-0x13` ident, `0x20` VIN (non-TS MSI-compatible extra), `0x22-0x42` sensors, `0x41` fan setting,
-  `0x42` fan duty, `0x43` Zero Fan enable (write-only), `0xC2` buzzer silence,
+  `0x42` fan duty, `0x43` Zero Fan enable (write-only), `0xC2` buzzer switch,
   `0xC0` multirail **or** 12V-2x6 OCP config (TS only),
   `0xC1` OCP state (InfoID 0) / alert log (InfoID 1-10), `0xD0/0xD1` control,
   `0xE0` bulk read, `0xE1` alert status, `0xF1` save settings.
@@ -47,6 +47,10 @@ runtime imports.
 
 - **Exit codes**: `EXIT_OK=0`, `EXIT_ERROR=1`, `EXIT_ALERT=2`. Alerts print
   `ALERT [severity] name: description` on **stderr**; stdout stays machine-parseable.
+- **Init handshake retries 3x**: `MSIPSU._handshake()` tries FA51 up to 3 times
+  (`HANDSHAKE_RETRY_DELAYS = (0.5, 1.0)`, REQ-18) before declaring the device
+  unresponsive. Only the handshake retries; sampling failures stay on the daemon's
+  5-failure rescan path, and tests monkeypatch `protocol.time.sleep`.
 - **A device error is a failure, never an exception**: every ``os.read``/``os.write``/
   ``select`` in ``HIDDevice.send_command`` maps ``OSError`` (ENODEV on unplug, EBADF on a
   closed fd) to ``None``, exactly like a NAK. The daemon rescan counts those; a traceback
@@ -58,21 +62,39 @@ runtime imports.
 - **A history file is identified by its header, not its existence**: ``append_history()``
   writes the header whenever the file is missing *or empty*, so a crash between open and
   the header cannot leave a day file whose first data row DictReader reads as columns.
-- **Every write is atomic and fsynced**: `path.with_name(name + '.tmp')` +
+- **Atomic writes apply to data files, not to output targets**: `state.json` and the
+  prometheus textfile use scratch+fsync+`os.replace`; `-O`/`--export -O` on a
+  symlink/FIFO/device is written through instead (renaming the name would replace the link
+  itself, and `/dev/stdout` is a link).
+- **Every data write is atomic and fsynced**: `path.with_name(name + '.tmp')` +
   `flush` + `os.fsync` + `os.replace()`, then a best-effort directory fsync, for
   `state.json` and the prometheus textfile. Never write the target in place: a rename
   that outruns the data can leave a complete-looking empty file after a power cut.
+- **A failed payload read is not a recovery**: when the 0xE0 frame is missing, E1h-only names
+  still update, but mirror-owned names (`ocp_pin*`, `pin_imbalance`) are left out of the
+  poll so the engine keeps them latched; `retain()` must keep `pin_imbalance` while the model
+  reports `ocp_pin*` bits (DEF-025).
+- **Daemon housekeeping is guarded**: the hourly prune is wrapped; an `OSError` from a state
+  dir that changed under the daemon must never escape `tick()` (DEF-024).
 - **A failed read must not leave a healthy-looking textfile behind**: the daemon
   rewrites it with `msi_psu_up 0` + `msi_psu_error_info{reason}` (once per distinct
   reason, not once per tick), because node_exporter re-exports the last file forever.
 - **Energy integral is frozen**: `wh += watts * dt / 3600`, and gaps longer than
   `MAX_SAMPLE_GAP_S` (300 s) advance the clock without integrating.
-- **`collect_alerts()` returns `have_e1h`** ("did the E1h bitmap answer?"): the pin
-  mirror only sees the OCP pins and their imbalance, not `opp`/`otp`/`fan`, so a poll
-  without the bitmap renders as `Unknown`, never as `Normal` — and it never clears an
-  alert the engine already fired. A poll that answers does the opposite: `retain()` drops
-  the names this device cannot report, so a model swap cannot leave a foreign alert
-  latched (a name with no bit never gets the `False` that would clear it).
+- **`collect_alerts()` returns `(fired, active_security, have_e1h, threshold_active)`**:
+  `have_e1h` says whether the E1h bitmap answered. The pin mirror only sees the OCP pins
+  and their imbalance, not `opp`/`otp`/`fan`, so a poll without the bitmap renders as
+  `Unknown`, never as `Normal` — and it never clears an alert the engine already fired.
+  A poll that answers does the opposite: `retain()` drops the names this device cannot
+  report, so a model swap cannot leave a foreign alert latched (a name with no bit never
+  gets the `False` that would clear it).
+- **Local thresholds ride the same engine, but differently**: `[alerts]` limits are
+  evaluated by `alerts.evaluate_threshold_alerts()`; their names are in
+  `THRESHOLD_ALERT_NAMES` and deliberately distinct from E1h names. They are returned as
+  `threshold_active` (not in the 12V-2x6 status), share debounce/exit-2/alert-log, and a
+  missing sensor reading is omitted so `retain()` keeps a latched threshold alert.
+  `configured_threshold_names()` supplies the retain() capability (connector limits need
+  per-pin sensing). Never fold them into `sensors['alerts']`.
 - **The E1h bit order is per model** (`ALERT_INDEXES`, mirroring the three
   `Alert_Index_*` arrays at `CPSU.cs:1046`): byte 0 is 12V OVP on a MEG and 12V OCP on
   a MPG TS, and the Ai1600T sends 13 bytes, not 18. Never index that bitmap with a
@@ -90,9 +112,15 @@ runtime imports.
   start-up so "nothing reported" is not mistaken for "all normal").
 - **`--ocp` is read-only and model-gated**: `MSIPSU.supports_ocp_config` (TS variants only,
   mirroring `CPSU.cs:843`) guards the read; a MEG model gets the explanation and `EXIT_OK`,
-  never an error. The 8-byte threshold write stays frozen for a later approved batch.
-  The separate 1-byte multirail switch is `--set-rail` (MEG P only, write + `F1h` +
-  read-back); never merge the two C0 meanings.
+  never an error. The 8-byte threshold write is the separate `--ocp-set` /
+  `--load-thresholds` path (`--dump-thresholds` is its read-only dump), also gated on
+  `supports_ocp_config`: values are range-validated (never clamped), the amp fields are
+  written as `value << 4` + `0xE0`, the three times as whole seconds, then `F1h` saves
+  them, and the command verifies by read-back (3 attempts, `EXIT_ERROR` on mismatch).
+  Re-applying the current config is a no-op; the write method itself rejects out-of-range
+  or unknown-model requests. CI only proves demo/mock behaviour -- bench acceptance is
+  required. The separate 1-byte multirail switch is `--set-rail` (MEG P only, write +
+  `F1h` + read-back); never merge the two C0 meanings.
 - **VIN is an extra, not REV6**: `read_vin()` is tried on the non-TS models only and is
   omitted on NAK; `format_text` calls it `AC Input` and Prometheus exports
   `msi_psu_input_voltage`. Units are volts (`ValueCalc` direct), not millivolts.
@@ -101,7 +129,10 @@ runtime imports.
   recovered edges from `AlertEngine.take_cleared()`; `--show-alert-log` reads local files
   only. A write failure is warned and never breaks sampling.
 - **Live dashboard**: the daemon writes `latest.json` without fsync every sample; the page
-  polls `/api/live` once a second. A stale/missing file must be 503, never a frozen chart.
+  polls `/api/live` once a second. The endpoint adds the history column aliases
+  (`dashboard._live_view`) because the page reuses its history rows array; without them only
+  `temp` matches the daemon snapshot keys and every other chart stands still. A
+  stale/missing file must be 503, never a frozen chart.
 - **Dashboard Host/CSP**: a non-loopback `Host` is 421 (DNS-rebinding defence), and every
   response carries a self-contained CSP plus Permissions-Policy. GET and HEAD share
   `_route()`; do not add a second response path.
@@ -129,7 +160,8 @@ runtime imports.
   `[fan]` restore. Zero Fan uses the matching `apply_zero_fan_setting(psu, enabled)`
   (43h + F1h + 42h byte-4 read-back); the daemon restores `[fan] zero_fan` with the
   same helper. Never add a second write path. `silence_buzzer()` is the one-shot C2h
-  with no read-back, gated to the TS models like `CPSU.cs:1152`.
+  switch with no read-back, gated to the TS models like `CPSU.cs:1148-1159`; it
+  toggles, so never report it as "silenced" -- only as acknowledged.
 - `dashboard.py` resolves a request once in `_route()` and both `do_GET`/`do_HEAD`
   consume that tuple: never write a second response path, or HEAD starts lying about
   404s and Content-Length.
@@ -153,7 +185,7 @@ runtime imports.
 ## Verification (no hardware required)
 
 ```bash
-uv run --group dev pytest -q              # 645 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
+uv run --group dev pytest -q              # 736 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
 uv run --group dev ruff check .           # must be clean
 uv run --group dev mypy msi_psu_monitor/  # must be clean
 uv run --group dev coverage run --branch -m pytest -q
@@ -165,6 +197,10 @@ that mix quote styles are excluded by `[tool.ruff.format] exclude` with
 `[tool.ruff] force-exclude = true`, which also blocks them when named explicitly.
 Format the files you touch (`ruff format <path>`); the exclusion list is the fix, so
 do not re-add a repo-wide warning.
+
+`tests/test_prometheus_exposition.py` is the stdlib promtool stand-in: it parses our
+exposition output strictly (HELP/TYPE, labels/escapes, finite values, duplicate
+series, canonical `metric{} value`).
 
 Full no-hardware walkthrough (demo mode, daemon + dashboard chain, `.deb`):
 `docs/verify.md`.

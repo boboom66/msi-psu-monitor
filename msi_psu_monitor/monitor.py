@@ -28,8 +28,27 @@ import time
 from msi_psu_monitor import __version__
 from msi_psu_monitor import demo
 from msi_psu_monitor import state as stats
-from msi_psu_monitor.alerts import AlertEngine, evaluate_pin_alerts, format_alert_line
-from msi_psu_monitor.config import ConfigError, load_config
+from msi_psu_monitor.alerts import (
+    CONNECTOR_ALERTS,
+    CONNECTOR_LIMIT_KEY,
+    IMBALANCE_ALERT,
+    PIN_IMBALANCE_THRESHOLD_A,
+    PIN_OCP_THRESHOLD_A,
+    THRESHOLD_ALERT_NAMES,
+    THRESHOLD_SOURCES,
+    AlertEngine,
+    configured_threshold_names,
+    describe,
+    evaluate_pin_alerts,
+    evaluate_threshold_alerts,
+    format_alert_line,
+)
+from msi_psu_monitor.config import (
+    KNOWN_OPTIONS,
+    ConfigError,
+    load_config,
+    threshold_limits,
+)
 from msi_psu_monitor.protocol import MSIPSU, DeviceBusyError, HIDDevice, detect_device
 
 EXIT_OK = 0
@@ -146,6 +165,8 @@ def format_text(sensors):
 
     if 'status' in sensors:
         lines.append(f'  12V-2x6 Status: {sensors["status"]}')
+    if sensors.get('threshold_alerts'):
+        lines.append(f'  Thresholds    : {", ".join(sensors["threshold_alerts"])}')
 
     if 'vin' in sensors:
         value, unit = sensors['vin']
@@ -266,12 +287,12 @@ def format_prometheus(sensors):
     if watts is not None:
         lines.append('# HELP msi_psu_cpu_watts Wattage drawn by the CPU rail (12V2) in watts')
         lines.append('# TYPE msi_psu_cpu_watts gauge')
-        lines.append(f'msi_psu_cpu_watts {{}} {watts[0]}')
+        lines.append(f'msi_psu_cpu_watts{{}} {watts[0]}')
         lines.append(
             '# HELP msi_psu_gpu_watts Wattage drawn by the GPU rails (12V3+12V4+12V5) in watts'
         )
         lines.append('# TYPE msi_psu_gpu_watts gauge')
-        lines.append(f'msi_psu_gpu_watts {{}} {watts[1]}')
+        lines.append(f'msi_psu_gpu_watts{{}} {watts[1]}')
     if 'iout_pins' in sensors:
         pins, _ = sensors['iout_pins']
         lines.append('# HELP msi_psu_pin_current Per-pin current on 12V-2x6 connector in amps')
@@ -285,30 +306,30 @@ def format_prometheus(sensors):
         value, _ = sensors['power_total']
         lines.append('# HELP msi_psu_power_total Total output power in watts')
         lines.append('# TYPE msi_psu_power_total gauge')
-        lines.append(f'msi_psu_power_total {{}} {value}')
+        lines.append(f'msi_psu_power_total{{}} {value}')
     if 'power_avg' in sensors:
         lines.append('# HELP msi_psu_power_avg Cumulative mean output power in watts')
         lines.append('# TYPE msi_psu_power_avg gauge')
-        lines.append(f'msi_psu_power_avg {{}} {_value(sensors["power_avg"])}')
+        lines.append(f'msi_psu_power_avg{{}} {_value(sensors["power_avg"])}')
     if 'efficiency' in sensors:
         value, _ = sensors['efficiency']
         lines.append('# HELP msi_psu_efficiency Efficiency in percent')
         lines.append('# TYPE msi_psu_efficiency gauge')
-        lines.append(f'msi_psu_efficiency {{}} {value}')
+        lines.append(f'msi_psu_efficiency{{}} {value}')
     if 'efficiency_avg' in sensors:
         lines.append('# HELP msi_psu_efficiency_avg Cumulative mean efficiency in percent')
         lines.append('# TYPE msi_psu_efficiency_avg gauge')
-        lines.append(f'msi_psu_efficiency_avg {{}} {_value(sensors["efficiency_avg"])}')
+        lines.append(f'msi_psu_efficiency_avg{{}} {_value(sensors["efficiency_avg"])}')
     if 'temp' in sensors:
         value, _ = sensors['temp']
         lines.append('# HELP msi_psu_temperature Temperature in celsius')
         lines.append('# TYPE msi_psu_temperature gauge')
-        lines.append(f'msi_psu_temperature {{}} {value}')
+        lines.append(f'msi_psu_temperature{{}} {value}')
     if 'fan_rpm' in sensors:
         value, _ = sensors['fan_rpm']
         lines.append('# HELP msi_psu_fan_speed Fan speed in RPM')
         lines.append('# TYPE msi_psu_fan_speed gauge')
-        lines.append(f'msi_psu_fan_speed {{}} {value}')
+        lines.append(f'msi_psu_fan_speed{{}} {value}')
     if 'zero_fan' in sensors:
         state = 'on' if sensors['zero_fan'] else 'off'
         lines.append('# HELP msi_psu_zero_fan Zero Fan mode state (1 for the active state)')
@@ -319,9 +340,16 @@ def format_prometheus(sensors):
         lines.append('# TYPE msi_psu_status_12v_2x6 gauge')
         lines.append(f'msi_psu_status_12v_2x6{{status="{_label(sensors["status"])}"}} 1')
     if 'total_energy' in sensors:
+        energy = _value(sensors['total_energy'])
         lines.append('# HELP msi_psu_total_energy_kwh Cumulative energy drawn in kWh')
         lines.append('# TYPE msi_psu_total_energy_kwh counter')
-        lines.append(f'msi_psu_total_energy_kwh {{}} {_value(sensors["total_energy"])}')
+        lines.append(f'msi_psu_total_energy_kwh{{}} {energy}')
+        # REQ-8 draft names the counter msi_psu_energy_kwh_total. Keep both so
+        # recording rules written against either name work; they carry the same
+        # counter value in the same scrape.
+        lines.append('# HELP msi_psu_energy_kwh_total Cumulative energy drawn in kWh (REQ-8 name)')
+        lines.append('# TYPE msi_psu_energy_kwh_total counter')
+        lines.append(f'msi_psu_energy_kwh_total{{}} {energy}')
 
     alerts = sensors.get('alerts')
     if alerts:
@@ -329,6 +357,19 @@ def format_prometheus(sensors):
         lines.append('# TYPE msi_psu_alert gauge')
         for alert_name in alerts:
             lines.append(f'msi_psu_alert{{alert="{_label(alert_name)}"}} 1')
+
+    limits = sensors.get('threshold_limits')
+    if limits:
+        lines.append('# HELP msi_psu_threshold_limit Configured local early-warning limit')
+        lines.append('# TYPE msi_psu_threshold_limit gauge')
+        for name in sorted(limits):
+            lines.append(f'msi_psu_threshold_limit{{name="{_label(name)}"}} {limits[name]}')
+    threshold_alerts = sensors.get('threshold_alerts')
+    if threshold_alerts:
+        lines.append('# HELP msi_psu_threshold_alert Local limit reached (software early warning)')
+        lines.append('# TYPE msi_psu_threshold_alert gauge')
+        for alert_name in threshold_alerts:
+            lines.append(f'msi_psu_threshold_alert{{alert="{_label(alert_name)}"}} 1')
 
     for key in ['uptime', 'uptime_total']:
         if key in sensors:
@@ -421,6 +462,184 @@ MULTIRAIL_UNSUPPORTED = (
     'Multirail OCP status is not available on this model '
     '(the 1-byte 0xC0 flag exists only on the MEG Ai1300P / MEG Ai1000P).'
 )
+
+
+_OCP_AMP_KEYS = ('point_a', 'diff_a')
+_OCP_TIME_KEYS = ('trigger_s', 'diff_trigger_s', 'warning_s')
+_OCP_ALL_KEYS = _OCP_AMP_KEYS + _OCP_TIME_KEYS
+
+
+def _ocp_setting(text):
+    """argparse type for --ocp-set: POINT,DIFF,TRIGGER,DIFF_TRIGGER,WARNING[,on|off].
+
+    Values are validated here rather than clamped later: a protection limit is
+    not a place where a typo should be silently rounded into something else.
+    """
+    parts = [part.strip() for part in str(text).split(',')]
+    if len(parts) not in (5, 6):
+        raise argparse.ArgumentTypeError(
+            '--ocp-set needs 5 comma-separated values: '
+            'POINT_A,DIFF_A,TRIGGER_S,DIFF_TRIGGER_S,WARNING_S[,on|off]'
+        )
+    values = {}
+    for key, raw in zip(_OCP_ALL_KEYS, parts[:5]):
+        try:
+            value = int(raw)
+        except ValueError:
+            raise argparse.ArgumentTypeError(f'{key} must be an integer: {raw!r}') from None
+        low, high = _OCP_RANGES[key]
+        if not low <= value <= high:
+            raise argparse.ArgumentTypeError(f'{key} must be {low}-{high}, got {value}')
+        values[key] = value
+    if len(parts) == 6:
+        flag = parts[5].lower()
+        if flag in ('on', 'enable', 'enabled', 'yes'):
+            values['enabled'] = True
+        elif flag in ('off', 'disable', 'disabled', 'no'):
+            values['enabled'] = False
+        else:
+            raise argparse.ArgumentTypeError(f'enabled must be on or off: {parts[5]!r}')
+    return values
+
+
+def _normalize_ocp_thresholds(values):
+    """Validate a partial OCP threshold mapping from --load-thresholds."""
+    if not isinstance(values, dict):
+        raise ValueError('threshold file must contain a JSON object')
+    normalized = {}
+    if 'enabled' in values:
+        if not isinstance(values['enabled'], (bool, int)):
+            raise ValueError('enabled must be true/false')
+        normalized['enabled'] = bool(values['enabled'])
+    for key in _OCP_ALL_KEYS:
+        if key not in values:
+            continue
+        raw = values[key]
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            raise ValueError(f'{key} must be a number')
+        value = int(raw)
+        if value != raw:
+            raise ValueError(f'{key} must be an integer, got {raw!r}')
+        low, high = _OCP_RANGES[key]
+        if not low <= value <= high:
+            raise ValueError(f'{key} must be {low}-{high}, got {value}')
+        normalized[key] = value
+    if not normalized:
+        raise ValueError('threshold file carries none of ' + ', '.join(_OCP_ALL_KEYS))
+    return normalized
+
+
+def _read_ocp_thresholds_file(path):
+    """Load a --ocp/--dump-thresholds JSON payload or a flat threshold object."""
+    with open(path, encoding='utf-8') as handle:
+        data = json.load(handle)
+    if isinstance(data, dict) and isinstance(data.get('ocp_config'), dict):
+        data = data['ocp_config']
+    if isinstance(data, dict):
+        allowed = set(_OCP_ALL_KEYS) | {'enabled'}
+        unknown = sorted(set(data) - allowed)
+        if unknown:
+            raise ValueError('unknown threshold key(s): ' + ', '.join(unknown))
+    return _normalize_ocp_thresholds(data)
+
+
+def _ocp_thresholds_equal(left, right):
+    """Compare two OCP config dicts at the precision the hardware stores."""
+    try:
+        if bool(left['enabled']) != bool(right['enabled']):
+            return False
+        for key in _OCP_AMP_KEYS:
+            if int(round(float(left[key]))) != int(round(float(right[key]))):
+                return False
+        for key in _OCP_TIME_KEYS:
+            if int(left[key]) != int(right[key]):
+                return False
+    except (KeyError, TypeError, ValueError):
+        return False
+    return True
+
+
+def apply_ocp_thresholds(psu, requested):
+    """Write + F1h + verified read-back.
+
+    Returns (config, changed), or (None, reason) where reason is unsupported,
+    read or verify. Keeping the reason separate lets the CLI explain which step
+    failed instead of collapsing all failures into one read-back mismatch line.
+
+    The current configuration is read first, so re-applying the values the PSU
+    already holds is a no-op instead of another flash save.
+    """
+    if not getattr(psu, 'supports_ocp_config', False):
+        return None, 'unsupported'
+    current = psu.read_ocp_thresholds()
+    if current is None:
+        return None, 'read'
+    target = dict(current)
+    target.update(requested)
+    if _ocp_thresholds_equal(current, target):
+        return target, False
+    for _ in range(3):
+        if not psu.set_ocp_thresholds(target):
+            continue
+        readback = psu.read_ocp_thresholds()
+        if readback is not None and _ocp_thresholds_equal(readback, target):
+            return target, True
+    return None, 'verify'
+
+
+def run_ocp_thresholds(psu, args):
+    """--dump-thresholds / --ocp-set / --load-thresholds (C0h, MPG TS only)."""
+    product = getattr(psu, 'product', '')
+    if args.dump_thresholds:
+        if not getattr(psu, 'supports_ocp_config', False):
+            logger.error(f'Error: {OCP_UNSUPPORTED}')
+            return EXIT_ERROR
+        config = psu.read_ocp_thresholds()
+        if config is None:
+            logger.error('Error: the PSU did not answer the 0xC0 OCP configuration read.')
+            return EXIT_ERROR
+        emit(OCP_FORMATTERS[args.format](config, None, product), args.output)
+        return EXIT_OK
+
+    requested = {}
+    if args.ocp_set is not None:
+        requested = dict(args.ocp_set)
+    else:
+        try:
+            requested = _read_ocp_thresholds_file(args.load_thresholds)
+        except (OSError, ValueError) as exc:
+            logger.error(f'Error: cannot load OCP thresholds from {args.load_thresholds}: {exc}')
+            return EXIT_ERROR
+
+    config, changed = apply_ocp_thresholds(psu, requested)
+    if config is None:
+        if changed == 'unsupported':
+            logger.error(f'Error: {OCP_UNSUPPORTED}')
+        elif changed == 'read':
+            logger.error('Error: the PSU did not answer the 0xC0 OCP configuration read.')
+        else:
+            logger.error(
+                'Error: the PSU did not accept the OCP threshold write '
+                '(read-back mismatch after 3 attempts).'
+            )
+        return EXIT_ERROR
+    logger.info(
+        f'write ocp_thresholds point={config["point_a"]:.1f} diff={config["diff_a"]:.1f} '
+        f'trigger={config["trigger_s"]} diff_trigger={config["diff_trigger_s"]} '
+        f'warning={config["warning_s"]} enabled={int(bool(config["enabled"]))} '
+        f'verified=true changed={changed} '
+        f'product={getattr(psu, "product", "")!r} fw={getattr(psu, "fw_revision", "")!r}'
+    )
+    line = (
+        f'OCP thresholds: point {config["point_a"]:.1f} A, '
+        f'diff {config["diff_a"]:.1f} A, trigger {config["trigger_s"]} s, '
+        f'diff trigger {config["diff_trigger_s"]} s, warning {config["warning_s"]} s, '
+        f'enabled {"yes" if config["enabled"] else "no"}'
+    )
+    if not changed:
+        line += ' (already set)'
+    emit(line, args.output)
+    return EXIT_OK
 
 
 def _ocp_state_rows(state):
@@ -633,20 +852,61 @@ def read_fan_fields(psu):
     return fields
 
 
-def collect_alerts(psu, engine, sensors):
-    """Merge E1h hardware bits with the software per-pin mirror.
+def _threshold_detail(name, sensors, thresholds):
+    """Alert description with the measured value and configured limit.
 
-    Returns ``(fired, active_names, have_e1h)``. It is True only when
-    the PSU answered the E1h status read. The software mirror is a second,
-    independent measurement, but it only sees the OCP pins and their imbalance:
-    it cannot see the E1h-only bits (``opp``, ``otp``, and ``fan`` -- the one
+    Static names alone make the journal line useless for tuning: an operator
+    needs "measured 1512 W, limit 1200 W" to decide whether the threshold is
+    wrong or the load is. Falls back to the generic description when the reading
+    is not available.
+    """
+    if name in THRESHOLD_SOURCES:
+        sensor_key, limit_key = THRESHOLD_SOURCES[name]
+        value = sensors.get(sensor_key)
+        if isinstance(value, tuple):
+            value = value[0]
+        try:
+            measured = float(value)
+        except (TypeError, ValueError):
+            return describe(name)
+        limit = float(thresholds.get(limit_key) or 0.0)
+        return f'{describe(name)}: measured {measured:g}, limit {limit:g}'
+    if name in CONNECTOR_ALERTS:
+        pins = sensors.get('iout_pins')
+        if isinstance(pins, tuple):
+            pins = pins[0]
+        try:
+            index = CONNECTOR_ALERTS.index(name)
+            measured = sum(float(pin) for pin in pins[index * 6 : (index + 1) * 6])
+        except (TypeError, ValueError):
+            return describe(name)
+        limit = float(thresholds.get(CONNECTOR_LIMIT_KEY) or 0.0)
+        return f'{describe(name)}: measured {measured:.3g} A, limit {limit:g} A'
+    return describe(name)
+
+
+def collect_alerts(psu, engine, sensors, thresholds=None):
+    """Merge E1h bits, the per-pin mirror and the configured local thresholds.
+
+    Returns (fired, active_security, have_e1h, threshold_active). have_e1h is
+    True only when the PSU answered the E1h status read. The software mirror is
+    a second, independent measurement, but it only sees the OCP pins and their
+    imbalance: it cannot see the E1h-only bits (opp, otp, and fan -- the one
     critical bit, "shutdown imminent"), so a mirror-only poll must not be
     rendered as "Normal". A PSU that answers neither source is not complete
     either, so callers never read a silent read failure as "all OK".
 
+    Local thresholds (power/temperature/rail current/connector current) are
+    software-only early warnings. They use the same engine and the same
+    consecutive-poll debounce, but are returned separately so the "12V-2x6
+    Status" line keeps its hardware meaning.
+
     Names the caller leaves out keep the state the engine already has: a failed
-    E1h read never clears an alert that is already firing.
+    E1h read never clears an alert that is already firing. The same holds for a
+    failed 0xE0 read: no sensor was measured, so a missing name must not be read
+    as a recovery.
     """
+    thresholds = thresholds or {}
     active = {}
     have_e1h = False
     hardware = psu.read_alert_status()
@@ -655,27 +915,62 @@ def collect_alerts(psu, engine, sensors):
         have_e1h = True
 
     pins = sensors.get('iout_pins')
-    software = evaluate_pin_alerts(pins[0] if isinstance(pins, tuple) else pins)
+    pin_values = pins[0] if isinstance(pins, tuple) else pins
+    pin_max = thresholds.get('pin_max_a', PIN_OCP_THRESHOLD_A)
+    imbalance = thresholds.get('pin_imbalance_a', PIN_IMBALANCE_THRESHOLD_A)
+    mirror_enabled = pin_max > 0 or imbalance > 0
+    software = evaluate_pin_alerts(pin_values, pin_max, imbalance)
     if software:
         for name, value in software.items():
             active[name] = active.get(name, False) or value
+    local = evaluate_threshold_alerts(sensors, thresholds)
+    for name, value in local.items():
+        active[name] = active.get(name, False) or value
 
     if not active and not have_e1h:
-        return [], [], False
+        return [], [], False, []
 
     if have_e1h:
-        # The E1h answer is what defines the names this device has (its index
-        # array, plus the mirror's own names when the payload carried pins). Drop
+        if mirror_enabled and not software:
+            # The 0xE0 payload was missing (or unusable), so the per-pin mirror
+            # did not run. A False bit in the E1h bitmap is not a recovery the
+            # mirror measured: drop it from this poll so the engine keeps the
+            # latched alert until a real pin reading clears it. A True bit still
+            # reports a trip. Without this, one failed payload read silently
+            # turned a live pin alert into a logged RECOVERED edge.
+            for name in [
+                name
+                for name, is_active in active.items()
+                if not is_active and name.startswith('ocp_pin')
+            ]:
+                del active[name]
+        # The E1h answer defines the names this device has (its index array),
+        # plus the mirror's and local thresholds' names when they applied. Drop
         # anything else the engine latched while a different model was attached:
         # a name this device never reports can never be cleared by a False.
-        # Only on a successful read -- an unanswered E1h poll must not clear an
-        # alert that is already firing.
-        engine.retain(active)
+        # Only on a successful E1h read -- an unanswered poll must not clear an
+        # alert that is firing.
+        known = set(hardware) | set(software)
+        has_per_pin_data = isinstance(pin_values, list) and len(pin_values) >= 12
+        if not has_per_pin_data and any(name.startswith('ocp_pin') for name in hardware):
+            # A TS model with the payload missing still reports ocp_pin* bits,
+            # which is how retain() knows the mirror's imbalance alert belongs
+            # to this device (it has no E1h bit of its own).
+            has_per_pin_data = True
+        if mirror_enabled and not software and imbalance > 0 and has_per_pin_data:
+            known.add(IMBALANCE_ALERT)
+        known |= configured_threshold_names(thresholds, has_per_pin_data)
+        engine.retain(known)
 
     fired = engine.update(active)
     for alert in fired:
+        if alert.name in THRESHOLD_ALERT_NAMES:
+            alert.description = _threshold_detail(alert.name, sensors, thresholds)
         logger.warning(format_alert_line(alert))
-    return fired, engine.active_alerts, have_e1h
+    active_all = engine.active_alerts
+    security = [name for name in active_all if name not in THRESHOLD_ALERT_NAMES]
+    threshold_active = [name for name in active_all if name in THRESHOLD_ALERT_NAMES]
+    return fired, security, have_e1h, threshold_active
 
 
 def status_from(active_names, have_e1h):
@@ -687,6 +982,22 @@ def status_from(active_names, have_e1h):
     if active_names:
         return ', '.join(active_names)
     return STATUS_NORMAL if have_e1h else STATUS_UNKNOWN
+
+
+def attach_alerts(psu, engine, sensors, cfg):
+    """Poll alerts and publish the alert/status/threshold fields on sensors.
+
+    One place for the CLI and the daemon, so the three output formats always
+    see the same field set. Returns the alerts fired by this poll (threshold
+    alerts included) for the daemon's audit log.
+    """
+    thresholds = threshold_limits(cfg)
+    fired, active, have_e1h, threshold_active = collect_alerts(psu, engine, sensors, thresholds)
+    sensors['alerts'] = active
+    sensors['status'] = status_from(active, have_e1h)
+    sensors['threshold_alerts'] = threshold_active
+    sensors['threshold_limits'] = {key: value for key, value in thresholds.items() if value > 0}
+    return fired
 
 
 # Any of these proves the bulk payload was decoded; ident-only keys (vendor,
@@ -805,6 +1116,19 @@ class OutputError(Exception):
     """The requested output path could not be written (not a PSU failure)."""
 
 
+def _must_write_through(path):
+    """True when 'path' has to be opened, not renamed over.
+
+    os.replace() replaces the *name*, so a symlink would be swapped for a plain
+    file and the real target left untouched. That is merely surprising for a user
+    symlink, and destructive for the system names: with stdout redirected to a
+    regular file, -O /dev/stdout looks like a regular file, and running as root
+    would replace /dev/stdout itself. A FIFO or a device node cannot be renamed
+    over either, so all three are written through instead of atomically.
+    """
+    return os.path.islink(path) or (os.path.exists(path) and not os.path.isfile(path))
+
+
 def emit(output, output_path):
     """Write ``output`` to stdout, or replace ``output_path`` atomically."""
     if not output_path:
@@ -820,8 +1144,9 @@ def emit(output, output_path):
             raise OutputError(f'cannot write output: {exc}') from exc
         return
     try:
-        if os.path.exists(output_path) and not os.path.isfile(output_path):
-            # A fifo or /dev/stdout cannot be replaced, only written into.
+        if _must_write_through(output_path):
+            # A fifo, a device node or a symlink cannot be replaced, only written
+            # into (see _must_write_through for why a symlink counts).
             with open(output_path, 'w', encoding='utf-8') as handle:
                 handle.write(output + '\n')
             return
@@ -844,9 +1169,7 @@ def run_once(psu, args, cfg, monitor_state, engine):
 
     sensors.update(read_fan_fields(psu))
     if not args.no_alerts:
-        _, active, have_e1h = collect_alerts(psu, engine, sensors)
-        sensors['alerts'] = active
-        sensors['status'] = status_from(active, have_e1h)
+        attach_alerts(psu, engine, sensors, cfg)
     apply_stats(sensors, monitor_state)
     if monitor_state is not None:
         # Same retention the daemon uses: pruning with the built-in default
@@ -858,7 +1181,7 @@ def run_once(psu, args, cfg, monitor_state, engine):
     # An active alert outranks a failed payload read: the E1h bit is a separate
     # register and is the safety-critical signal, so it must reach exit 2 even
     # when the sensor payload is missing.
-    if sensors.get('alerts'):
+    if sensors.get('alerts') or sensors.get('threshold_alerts'):
         if not complete:
             logger.error(f'Warning: {_missing_payload(sensors)}')
         return EXIT_ALERT
@@ -909,9 +1232,7 @@ def run_watch(psu, args, cfg, monitor_state, engine):
                 continue
             sensors.update(read_fan_fields(psu))
             if not args.no_alerts:
-                _, active, have_e1h = collect_alerts(psu, engine, sensors)
-                sensors['alerts'] = active
-                sensors['status'] = status_from(active, have_e1h)
+                attach_alerts(psu, engine, sensors, cfg)
             apply_stats(sensors, monitor_state)
 
             now = time.time()
@@ -1002,16 +1323,27 @@ def apply_rail_mode(psu, mode):
     MSI Center's DC Output page exposes this as Multi Rail / Single Rail and
     sends SET_MULTIRAIL_OCP + SAVE_SETTING without a read-back (C_PSU.cs:1392);
     we verify the single-byte register, which answers immediately. Three
-    attempts, like the other control writes. Returns the applied mode or None
-    when the model does not support it or the read-back disagrees.
+    attempts, like the other control writes.
+
+    The current mode is read before the write: re-writing the value the PSU
+    already holds is not a no-op on the real hardware (REQ-11: read first and
+    return when the value already matches; the hardware errors on a same-value
+    write) and it also burns a flash save every time.
+
+    Returns (mode, changed), where changed is False when the PSU was already in
+    the requested mode, or None when the model does not support it or the
+    read-back disagrees.
     """
     enabled = mode == RAIL_MODE_MULTI
+    current = psu.read_multirail_ocp()
+    if current is not None and bool(current) == enabled:
+        return mode, False
     for _ in range(3):
         if not psu.set_multirail_ocp(enabled):
             continue
         current = psu.read_multirail_ocp()
         if current is not None and bool(current) == enabled:
-            return mode
+            return mode, True
     return None
 
 
@@ -1031,9 +1363,10 @@ def run_write_controls(psu, args):
 
     Zero Fan goes first: that is the order MSI Center's Cooling Wizard uses
     (zero fan, then fan mode) and both are persisted by the F1h the protocol
-    methods send. Buzzer silence is a one-shot C2h with no read-back, so success
-    only means the PSU acknowledged it. One emit() at the end keeps ``-O`` from
-    being overwritten by each line.
+    methods send. The buzzer command is a one-shot C2h switch with no read-back
+    (MSI calls it BUZZER_SWITCH and it toggles), so success only means the PSU
+    acknowledged it. One emit() at the end keeps -O from being overwritten by
+    each line.
     """
     lines = []
     if args.set_rail is not None:
@@ -1044,11 +1377,12 @@ def run_write_controls(psu, args):
                 '(read-back mismatch, or only the MEG Ai1000P/Ai1300P support it).'
             )
             return EXIT_ERROR
+        rail_mode, changed = applied
         logger.info(
-            f'write rail mode={applied} verified=true '
+            f'write rail mode={rail_mode} verified=true changed={changed} '
             f'product={getattr(psu, "product", "")!r} fw={getattr(psu, "fw_revision", "")!r}'
         )
-        lines.append(f'Rail mode: {applied}')
+        lines.append(f'Rail mode: {rail_mode}' + ('' if changed else ' (already set)'))
     if args.zero_fan is not None:
         enabled = args.zero_fan == 'on'
         applied = apply_zero_fan_setting(psu, enabled)
@@ -1076,17 +1410,21 @@ def run_write_controls(psu, args):
         duty_text = '' if mode in (FAN_MODE_AUTO, FAN_MODE_PERFORMANCE) else f'   Duty: {duty}%'
         lines.append(f'Fan mode: {mode}{duty_text}')
     if args.buzzer_off:
+        # C2h carries no value and has no read-back: MSI Center calls it
+        # BUZZER_SWITCH (CPSU.cs:1148-1159), so it toggles. Saying "silenced"
+        # claimed a state the tool cannot observe -- and a second run re-arms the
+        # alarm while the user believes it is off.
         if not psu.silence_buzzer():
             logger.error(
-                'Error: the PSU did not accept the buzzer-off command '
-                '(or the model does not support it).'
+                'Error: the PSU did not accept --buzzer-off '
+                '(the C2h buzzer switch; or the model does not support it).'
             )
             return EXIT_ERROR
         logger.info(
-            f'write buzzer=silenced verified=false '
+            f'write buzzer=toggled verified=false '
             f'product={getattr(psu, "product", "")!r} fw={getattr(psu, "fw_revision", "")!r}'
         )
-        lines.append('Buzzer: silenced')
+        lines.append('Buzzer: switch toggled (no read-back)')
     emit('\n'.join(lines), args.output)
     return EXIT_OK
 
@@ -1197,11 +1535,11 @@ def run_export(args, cfg):
         _write_csv(sys.stdout, header, rows)
         return EXIT_OK
     # A regular file is replaced atomically: a failed write must not destroy the
-    # previous export. A fifo/character device (e.g. /dev/stdout) cannot be
-    # renamed over, so it keeps the direct stream path.
+    # previous export. A fifo/device/symlink cannot be renamed over (see
+    # _must_write_through), so it keeps the direct stream path.
     target = args.output
     try:
-        if os.path.exists(target) and not os.path.isfile(target):
+        if _must_write_through(target):
             with open(target, 'w', newline='', encoding='utf-8') as handle:
                 _write_csv(handle, header, rows)
         else:
@@ -1275,7 +1613,17 @@ def build_parser():
         prog='msi-psu-monitor',
         description='MSI PSU Monitor - read sensors from MSI PSUs via USB HID',
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__,
+        epilog=__doc__
+        + """
+
+Notes:
+  - 12V-2x6 per-pin currents and the total 12V current are 5-second rolling averages.
+  - Efficiency comes from the 0xE0 bulk payload (offset 32), not a separate register.
+  - Pin order is Conn1 pins 1-6, then Conn2 pins 1-6.
+  - Local early-warning limits live in [alerts] (power_w, temp_c, pin_max_a,
+    pin_imbalance_a, connector_a, rail_12v_a, rail_5v_a, rail_3v3_a; 0 disables one).
+    Use --dump-config to print the effective values.
+""",
     )
     parser.add_argument(
         '-f',
@@ -1341,7 +1689,7 @@ def build_parser():
     parser.add_argument(
         '--buzzer-off',
         action='store_true',
-        help='Silence the 12+4 OCP buzzer (C2h; 12+4 models only)',
+        help='Toggle the 12+4 OCP buzzer switch (C2h; write-only, no read-back; 12+4 models only)',
     )
     parser.add_argument(
         '--set-rail',
@@ -1395,6 +1743,32 @@ def build_parser():
         'MPG TS models, the multirail mode flag on the MEG P models',
     )
     parser.add_argument(
+        '--dump-thresholds',
+        '--ocp-dump',
+        dest='dump_thresholds',
+        action='store_true',
+        help='Print the hardware OCP thresholds (C0h 8 bytes) as text or JSON',
+    )
+    parser.add_argument(
+        '--ocp-set',
+        type=_ocp_setting,
+        default=None,
+        metavar='POINT,DIFF,TRIGGER,DIFF_TRIGGER,WARNING[,on|off]',
+        help='Write the 12V-2x6 OCP thresholds (C0h + F1h) and verify by read-back; '
+        'MPG TS models only. Protection limits: 10-14 A / 4-8 A / 5-30 s / 5-30 s / '
+        '30-240 s',
+    )
+    parser.add_argument(
+        '--load-thresholds',
+        '--ocp-load',
+        dest='load_thresholds',
+        type=str,
+        default=None,
+        metavar='FILE',
+        help='Load OCP thresholds from a JSON file (--dump-thresholds -f json or '
+        '--ocp -f json output) and write them with read-back verification',
+    )
+    parser.add_argument(
         '--no-alerts',
         action='store_true',
         help='Skip the E1h alert poll (default: alerts are checked)',
@@ -1409,12 +1783,103 @@ def build_parser():
         '--verbose', '-v', action='store_true', help='Verbose diagnostics on stderr'
     )
     parser.add_argument('--quiet', '-q', action='store_true', help='Errors only on stderr')
+    parser.add_argument(
+        '--dump-config',
+        action='store_true',
+        help='Print the effective configuration (including [alerts] limits) and exit; '
+        'no PSU access; text or json',
+    )
     parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
     return parser
 
 
 def _validate_args(parser, args):
     """Reject conflicting flag combinations before touching the device."""
+    if args.dump_config:
+        # The dump reads the config files only. Anything that would touch the
+        # device/history/page must be rejected instead of silently ignored.
+        if (
+            args.once
+            or args.watch is not None
+            or args.interval is not None
+            or args.export
+            or args.show_log
+            or args.show_alert_log
+            or args.ocp
+            or args.dashboard
+            or args.serial is not None
+            or args.port is not None
+            or args.from_spec is not None
+            or args.columns is not None
+            or args.dump_thresholds
+            or args.ocp_set is not None
+            or args.load_thresholds is not None
+            or _write_requested(args)
+            or args.format not in (None, 'text', 'json')
+        ):
+            parser.error(
+                '--dump-config prints the effective configuration only: it cannot be '
+                'combined with device/history/dashboard/threshold flags or a control '
+                'write, and only supports text or json'
+            )
+        if args.output is not None and not args.output:
+            parser.error('--output requires a path')
+        if args.config is not None and not args.config:
+            parser.error('--config requires a path')
+        return
+    threshold_dump = args.dump_thresholds
+    threshold_write = args.ocp_set is not None or args.load_thresholds is not None
+    if threshold_dump and (
+        args.ocp
+        or args.watch is not None
+        or args.export
+        or args.show_log
+        or args.show_alert_log
+        or args.dashboard
+        or _write_requested(args)
+        or threshold_write
+        or args.interval is not None
+        or args.port is not None
+        or args.from_spec is not None
+        or args.columns is not None
+    ):
+        parser.error(
+            '--dump-thresholds reads the hardware OCP configuration only: it cannot be '
+            'combined with --ocp, --watch, --export, --show-log, --show-alert-log, '
+            '--dashboard, a control write or a threshold write'
+        )
+    if threshold_dump and args.format not in (None, 'text', 'json'):
+        parser.error('--dump-thresholds supports only the text and json formats')
+    if threshold_write and (
+        args.ocp
+        or args.watch is not None
+        or args.export
+        or args.show_log
+        or args.show_alert_log
+        or args.dashboard
+        or _write_requested(args)
+        or args.interval is not None
+        or args.port is not None
+        or args.from_spec is not None
+        or args.columns is not None
+    ):
+        parser.error(
+            'threshold writes (--ocp-set/--load-thresholds) cannot be combined with '
+            '--ocp, --watch, --export, --show-log, --show-alert-log, --dashboard or '
+            'another control write'
+        )
+    if threshold_write and args.format not in (None, 'text'):
+        parser.error('threshold writes report text; --format does not apply')
+    if args.ocp_set is not None and args.load_thresholds is not None:
+        parser.error('--ocp-set and --load-thresholds are mutually exclusive')
+    if args.load_thresholds is not None and not args.load_thresholds:
+        parser.error('--load-thresholds requires a path')
+    if args.output is not None and not args.output:
+        parser.error('--output requires a path')
+    if args.config is not None and not args.config:
+        parser.error('--config requires a path')
+    if threshold_dump or threshold_write:
+        return
     if args.show_log and (
         args.watch is not None or args.export or args.format not in (None, 'text')
     ):
@@ -1526,6 +1991,32 @@ def _validate_args(parser, args):
         parser.error('--port is only valid together with --dashboard')
 
 
+def _ini_value(value):
+    """Render a config value so --dump-config output stays INI-parseable."""
+    if isinstance(value, bool):
+        return 'yes' if value else 'no'
+    if value is None:
+        return ''
+    return str(value)
+
+
+def _dump_effective_config(cfg, fmt):
+    """Effective config as INI text or JSON, including every known section key."""
+    if fmt == 'json':
+        return json.dumps({key: cfg[key] for key in sorted(cfg)}, indent=2, sort_keys=True)
+    lines = []
+    for section in ('monitor', 'alerts', 'daemon', 'fan'):
+        options = KNOWN_OPTIONS.get(section)
+        if not options:
+            continue
+        lines.append(f'[{section}]')
+        for key in sorted(options):
+            if key in cfg:
+                lines.append(f'{key} = {_ini_value(cfg[key])}')
+        lines.append('')
+    return '\n'.join(lines).rstrip()
+
+
 def _redirect_stdout_to_devnull():
     """Point stdout at /dev/null after a broken pipe, so shutdown cannot re-raise."""
     try:
@@ -1619,13 +2110,18 @@ def _main():
             f'--watch prints the text format only; ignoring [monitor] format = {cfg["format"]!r}'
         )
         args.format = 'text'
-    if args.format != 'text' and (
-        args.dashboard
-        or args.export
-        or args.show_log
-        or args.show_alert_log
-        or _write_requested(args)
-    ):
+    threshold_write = args.ocp_set is not None or args.load_thresholds is not None
+    if (
+        args.format != 'text'
+        and (
+            args.dashboard
+            or args.export
+            or args.show_log
+            or args.show_alert_log
+            or threshold_write
+            or _write_requested(args)
+        )
+    ) or ((args.dump_config or args.dump_thresholds) and args.format not in ('text', 'json')):
         # These modes have a fixed output shape; accepting [monitor] format from
         # the config file and silently printing text/CSV anyway is the same
         # silent no-op the CLI-level checks reject.
@@ -1634,6 +2130,9 @@ def _main():
         )
         args.format = 'text'
 
+    if args.dump_config:
+        emit(_dump_effective_config(cfg, args.format), args.output)
+        sys.exit(EXIT_OK)
     if args.dashboard:
         sys.exit(run_dashboard(args, cfg))
     if args.export:
@@ -1676,6 +2175,8 @@ def _main():
         psu.open()
         psu.init()
 
+        if args.dump_thresholds or args.ocp_set is not None or args.load_thresholds is not None:
+            sys.exit(run_ocp_thresholds(psu, args))
         if _write_requested(args):
             sys.exit(run_write_controls(psu, args))
         if args.show_log:

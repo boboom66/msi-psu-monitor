@@ -112,6 +112,14 @@ class DemoPSU:
         #: Set by --zero-fan; None keeps the load-dependent demo behaviour.
         self.zero_fan_override = None
         self.buzzer_silenced = False
+        self._ocp_thresholds = {
+            'enabled': True,
+            'point_a': 12.0,
+            'diff_a': 5.0,
+            'trigger_s': 20,
+            'diff_trigger_s': 20,
+            'warning_s': 180,
+        }
 
     # ---- lifecycle -------------------------------------------------------
 
@@ -249,14 +257,33 @@ class DemoPSU:
         """
         if not self.supports_ocp_config:
             return None
-        return {
-            'enabled': True,
-            'point_a': 12.0,
-            'diff_a': 5.0,
-            'trigger_s': 20,
-            'diff_trigger_s': 20,
-            'warning_s': 180,
-        }
+        return dict(self._ocp_thresholds)
+
+    def set_ocp_thresholds(self, config):
+        """Emulate the verified OCP threshold write + F1h save (MPG TS only)."""
+        if not self.supports_ocp_config:
+            return False
+        try:
+            updated = dict(self._ocp_thresholds)
+            updated['enabled'] = bool(config['enabled'])
+            for key, (low, high) in (('point_a', (10, 14)), ('diff_a', (4, 8))):
+                value = int(config[key])
+                if not low <= value <= high:
+                    return False
+                updated[key] = float(value)
+            for key, (low, high) in (
+                ('trigger_s', (5, 30)),
+                ('diff_trigger_s', (5, 30)),
+                ('warning_s', (30, 240)),
+            ):
+                value = int(config[key])
+                if not low <= value <= high:
+                    return False
+                updated[key] = value
+        except (KeyError, TypeError, ValueError):
+            return False
+        self._ocp_thresholds = updated
+        return True
 
     def read_ocp_state(self):
         """C1h state: pin currents derived from the same load model as the report."""
