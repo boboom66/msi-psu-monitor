@@ -34,6 +34,14 @@ README = ROOT / 'README.md'
 DEFAULT_CONFIG_PATH = '/etc/msi-psu-monitor.conf'
 
 
+def _version() -> str:
+    """The single home of the version: pyproject.toml."""
+    text = PYPROJECT.read_text(encoding='utf-8')
+    match = re.search(r'^version\s*=\s*"([^"]+)"', text, re.M)
+    assert match, 'no project version in pyproject.toml'
+    return match.group(1)
+
+
 def _exec_start_paths() -> list[str]:
     """Paths passed as `--config <path>` on the unit's ExecStart line."""
     text = UNIT.read_text(encoding='utf-8')
@@ -300,7 +308,8 @@ def test_the_changelog_is_shipped_and_the_soak_gate_is_in_ci():
     """Release/ops artifacts must be in every package, not only in the tree."""
     assert CHANGELOG.is_file()
     changelog = CHANGELOG.read_text(encoding='utf-8')
-    assert '## [Unreleased]' in changelog
+    # The changelog must carry the section for the version being released.
+    assert f'## [{_version()}]' in changelog
     for script in (BUILD_DEB_SH, BUILD_BINARY_SH, BUILD_HARDWARE_KIT_SH):
         assert 'CHANGELOG.md' in script.read_text(encoding='utf-8'), script
     assert SOAK_SH.is_file()

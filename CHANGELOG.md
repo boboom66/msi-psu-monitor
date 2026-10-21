@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and releases use
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.1] - 2026-10-21
 
 ### Added
 
@@ -53,6 +53,36 @@ All notable changes to this project are documented here. The format follows
   (`/dev/stdout`) instead of renaming the link away.
 - The hourly state-dir prune can no longer raise out of the daemon tick.
 - A failed payload read no longer clears latched per-pin or threshold alerts.
+
+### Known issues
+
+Software-level, all with machine-checked reproductions:
+
+- The Prometheus exposition uses names that `promtool check metrics` flags as
+  non-canonical: `_total` on non-counters (`msi_psu_power_total`,
+  `msi_psu_current_12v_total`), counters without `_total`
+  (`msi_psu_total_energy_kwh`, `msi_psu_uptime`, `msi_psu_ocp_total_time`)
+  and abbreviated units in OCP metric names (`msi_psu_ocp_trigger_s`,
+  `msi_psu_ocp_diff_trigger_s`, `msi_psu_ocp_warning_s`). Scraping is
+  unaffected; renaming would break the `msi_psu_energy_kwh_total` alias
+  required by the requirement sheet, so the decision is deferred.
+- A hand-edited `state.json` with a negative or absurd `count` is accepted and
+  can render a negative average power.
+- `[monitor] output` and `serial` in the config file are ignored in
+  local-only modes, where the equivalent command-line flags are rejected.
+- `--show-log` cannot distinguish "the device did not answer" from "the device
+  holds no records"; both print the same line and exit 0.
+
+Not verified in this release — no sample hardware was available:
+
+- Real PSU reads and writes for all five models, including the per-model E1h
+  bit order, VIN, the black box, OCP, the multirail switch, fan / Zero Fan /
+  buzzer actions and power-cycle persistence.
+- The 12V-2x6 OCP threshold write is a real protection write. It is exercised
+  by the demo and by mocks only; it must be bench-validated before production
+  use, and the original values must be restored afterwards.
+- arm64 execution, a real root/systemd/udev install, a real desktop browser
+  and the 24 h / 72 h soak.
 
 ## [1.0.0] - 2026-10-19
 

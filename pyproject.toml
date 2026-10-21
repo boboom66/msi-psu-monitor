@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "msi-psu-monitor"
-version = "1.0.0"
+version = "1.0.1"
 description = "Userspace monitoring tool for MSI MPG Ai1600TS PSU with GPU Safeguard+ per-pin current monitoring"
 readme = "README.md"
 license = {file = "LICENSE"}
