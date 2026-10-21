@@ -96,3 +96,90 @@ Phase 2 会把上表映射为 TEST-xxx，并在 `test-cases.md` 中记录前置�
 | DEF-020 | P3 | 已修复 | `--serial ""`（未设置变量）被接受，变成搜索空 serial，而不是参数错误 | 新增 `['--serial', '']` 到 CLI 参数校验用例 | 脚本报错难诊断 | argparse exit 2，`--serial requires a value` |
 
 | DEF-021 | P3 | 已修复 | `--serial` 发现过程中设备 `open/init` 抛非 OSError 时 traceback；CLI 崩溃 | `test_serial_discovery_skips_an_unexpected_parser_error` | 一个坏设备阻断整次按序列号发现 | `resolve_device` 将意外异常记为 blocked 并继续扫描 |
+
+
+## 10. 2026-10-19 第五轮：全项目深度审计（DEF-022..031）
+
+完整台账（含根因/复现/证据）：[bug-audit/BUG_TRACKER.md](../../bug-audit/BUG_TRACKER.md)。
+
+| ID | 严重度 | 状态 | 描述 | 证据（回归测试） | 影响 | 处理 |
+|---|---|---|---|---|---|---|
+| DEF-022 | P1 | 已修复/已验证 | `-O`/`--export -O` 目标是符号链接时，`os.replace` 替换链接本身；`-O /dev/stdout` + stdout 重定向到普通文件时，root 下可替换系统 `/dev/stdout`，非 root 直接失败 | `test_output_through_a_symlink_keeps_the_symlink`、`test_export_through_a_symlink_keeps_the_symlink`、`test_output_to_dev_stdout_follows_the_symlink` | 用户链接/系统设备名被破坏，输出路径错误 | 新增 `_must_write_through()`：symlink/FIFO/设备改为直接写入，仅普通文件走原子替换 |
+| DEF-023 | P2 | 已修复/已验证 | Dashboard 1 s `/api/live` 覆盖层键名不匹配（latest.json 用 `vout_12v` 等，图表用 `12v` 等），10 个序列只有 `temp` 会动 | HTTP 键名测试 + Node 执行页面 JS 的集成测试；修复前 3 行数据但 12V 序列仅 1 点 | 实时曲线大部分冻结，页面宣称的 1 s 刷新名不副实 | `/api/live` 增加 `_live_view()` 历史列别名，原键保留 |
+| DEF-024 | P1 | 已修复/已验证 | 每小时 prune 的 OSError 未捕获，从 `tick()` 抛出杀死常驻 daemon；systemd 会每小时重启循环 | `test_a_failing_prune_does_not_kill_the_daemon` | 长期运行稳定性 | prune 包 try/except，告警后继续采样 |
+| DEF-025 | P2 | 已修复/已验证 | 0xE0 读失败但 E1h 应答时，E1h 的 False 被当成镜像告警的"恢复"：记 RECOVERED、`pin_imbalance` 被 retain 静默丢弃 | `test_a_failed_payload_read_does_not_clear_a_mirror_alert` | 告警消失且没有真实测量依据 | payload 缺失时镜像专属名字不进入 update；retain 保留 `pin_imbalance` |
+| DEF-026 | P2 | 已修复/已验证 | `smoke.sh` 硬编码 `1.0.0_all.deb`、真实入口测试硬编码版本；版本升级后检查旧产物/误报失败 | `test_shell_scripts_do_not_hardcode_the_release_artifact_version` + e2e 版本测试 | 发布流程在下次 bump 时静默检查错产物 | 版本唯一来源 pyproject；e2e 用 `__version__` |
+| DEF-027 | P3 | 已修复/已验证 | hardware kit `START-HERE.md` 写死 glibc 2.39（CI 实际 2.35） | `test_the_kit_start_page_reports_the_real_build_glibc` | 真机验收读错兼容下限 | `__GLIBC__` 从 `ldd` 注入，BUILD-INFO 同源 |
+| DEF-028 | P3 | 已修复/已验证 | daemon `--state-dir ""`/`--prom-path ""` 被静默忽略，回落打包默认路径 | `test_empty_path_arguments_are_usage_errors`（3 参数） | 脚本变量未设置时写错目录 | 空路径按 argparse 用法错误 exit 2 |
+| DEF-029 | P3 | 已修复/已验证 | `iter_alert_log(limit)` 先加载全部日志行再取尾部；30 天 5 MiB 日志可达数百 MB | `test_iter_alert_log_limit_keeps_the_newest_lines_in_order` | 小内存主机 OOM | 有 limit 时用 `deque(maxlen)` 流式保留最新 N 行 |
+| DEF-030 | P4 | 已修复/已验证 | `--iterations` 帮助说 "positive samples"，实际按循环次数计（失败读也算） | `--help` 实测文本 | 文档/行为不一致 | 帮助与 docstring 改为 sample-loop passes |
+| DEF-031 | P3 | 已修复/已验证 | 无 state 目录时未知 `/api/typo` 返回 503 而不是 404 | `test_an_unknown_api_route_is_404_even_without_a_state_dir` | 客户端拼写错误被误诊为服务端故障 | 目录检查只作用于 4 个真实 API 路由 |
+
+回归：659 passed；ruff/format/mypy、smoke 58、coverage 92% 全绿（命令与输出见
+[bug-audit/TEST_REPORT.md](../../bug-audit/TEST_REPORT.md)）。`DEF-002` 与 NR-001..006
+仍未关闭，硬件/arm64/真实 systemd/桌面浏览器/24h 仍 BLOCKED。
+
+## 11. 2026-10-19 第六轮：psu-file 需求资料对比（DEF-032..035）
+
+对比对象：`psu-file/01_需求文档`（定稿需求、CLI 手册、技术评估 F-01..F-22、
+PSU-7ZPU 草案 REQ-1..19）、`04_MSI-Center源码`、`03_参考实现`、`05_截图`。
+完整矩阵：[psu-file-gap-analysis.md](psu-file-gap-analysis.md)。
+
+| ID | 严重度 | 状态 | 描述 | 证据（参考实现 / 测试） | 处理 |
+|---|---|---|---|---|---|
+| DEF-032 | P2 | 已修复/已验证 | `--buzzer-off` 宣称 "Buzzer: silenced"，但 C2h 是 MSI 的无参数、无回读 `BUZZER_SWITCH`（toggle）：第二次执行会重新打开蜂鸣 | `CPSU.cs:1148-1159`；`verify.md` §8.11 早已写"switch 还是静音待确认" | 输出/帮助/审计/README/协议统一为 "switch toggled (no read-back)"；行为不变（仍只发一次 C2h） |
+| DEF-033 | P2 | 已修复/已验证 | `--set-rail` 即使已是目标模式也会写 0xC0 + F1h；草案 REQ-11 要求先读回、同值直接返回（硬件同值会报错），且幂等调用会多消耗 flash 保存 | `PSU-7ZPU...md` REQ-11 | `apply_rail_mode()` 先读后写，同值返回 `(mode, False)`，输出 "already set" |
+| DEF-034 | P3 | 已修复/已验证 | Dashboard 的 7 张曲线里缺独立效率图、多了 MSI 没有的 12V 总电流图，效率混在功率图（W/% 同轴） | 技术评估 §2（温度/12V/5V/3.3V/风扇/效率/瓦数 CPU-GPU-Total）；实屏 02 | CHARTS 改为 12V/5V/3.3V/效率/温度/风扇/功率(CPU/GPU/Total)；总电流仍进历史/导出/Prometheus |
+| DEF-035 | P3 | 已修复/已验证 | MEG 序列号取 0x13 整包，依赖 24 字节后的报告为零；非零尾部会进入日志/Prometheus 标签 | `CPSU.cs:515-528`（MEG 固定 24 字节；TS 长度前缀） | 按机型分支读取：TS 长度前缀 / MEG 固定 24 字节 / 未知机型旧启发式 |
+
+回归：661 passed，coverage 92%，smoke 58/58；完整命令见
+[bug-audit/TEST_REPORT.md](../../bug-audit/TEST_REPORT.md)。
+
+## 12. 2026-10-19 功能补齐：本地阈值与告警（FEAT-01，非缺陷）
+
+按用户 2026-10-19 决定：**桌面通知不需要；阈值和告警必须有**。原草案
+`thresholds.yaml` 改为 stdlib-only 的 INI `[alerts]` 段（项目不引入 YAML 依赖）：
+
+| 配置键 | 默认 | 含义 |
+|---|---:|---|
+| `power_w` | 1200 | 总输出功率上限（W） |
+| `temp_c` | 70 | PSU 内部温度上限（℃） |
+| `pin_max_a` | 12 | 单针电流上限（A；C0h 出厂点） |
+| `pin_imbalance_a` | 5 | 同一 12V-2x6 连接器 6 针的针差上限（A） |
+| `connector_a` | 50 | 单个 12V-2x6 连接器 6 针电流和上限（A，600W/12V） |
+| `rail_12v_a` / `rail_5v_a` / `rail_3v3_a` | 108.33 / 22 / 22 | 合并轨电流上限（A，产品规格） |
+
+- 0 = 关闭该项。
+- 阈值告警与硬件告警共用 AlertEngine（连续去抖）、stderr `ALERT`、exit 2、
+  `alerts-*.log` 边沿/恢复日志；名字独立（`power_high`/`temp_high`/
+  `rail_*_high`/`connector*_high`），不混入 12V-2x6 Status。
+- 输出：text 增加 `Thresholds    : ...`；JSON 增加 `threshold_alerts`/
+  `threshold_limits`；Prometheus 增加 `msi_psu_threshold_alert`/
+  `msi_psu_threshold_limit`。
+- 0xE0 读失败不清除已 latched 的阈值告警（缺读数 != 恢复）；`--no-alerts` 连阈值一起关闭。
+- 回归：`test_alerts.py`、`test_config.py`、`test_cli_features.py`、
+  `test_daemon.py`；全套 **680 passed**，coverage 92%，smoke 58/58。
+
+## 13. 2026-10-19 运维/CLI 打磨（FEAT-02，非缺陷）
+
+- Prometheus 空 label 指标改为规范写法 `metric{} value`（去掉 name 与 braces 间空格），
+  消除 NR-001 的解析不确定性；
+- 电量 counter 同时导出 `msi_psu_total_energy_kwh` 与 REQ-8 名 `msi_psu_energy_kwh_total`；
+- 新增 `docs/prometheus-rules.yml`（Down/Stale/ScrapeError/HardwareAlert/ThresholdAlert），
+  源码 .deb / 二进制 tar / hardware kit 均随包发布，并有 packaging 测试；
+- 新增 `--dump-config`（text/json，无 PSU 访问，打印含 `[alerts]` 的生效配置）；
+- `--help` 注明 per-pin/12V total 为 5 s 平均、EFF 来自 0xE0 offset 32、Conn1/Conn2 针序；
+- 阈值告警 stderr 行带 measured/limit，便于真机调参。
+- 回归：**689 passed**，coverage 92%，smoke 58/58。
+
+## 14. 2026-10-19 硬件 OCP 阈值写（FEAT-03，非缺陷，保护写）
+
+- 新增 `--dump-thresholds`（text/JSON）与 `--ocp-set`/`--load-thresholds`：
+  `0xC0` 8 字节（amp LINEAR11 exp -4，`value<<4 + 0xE0`）+ `0xF1`；范围
+  10-14 A / 4-8 A / 5-30 s / 5-30 s / 30-240 s，越界拒绝不 clamp；写后读回最多 3 次；
+  同值不写；不支援机型（MEG/Ai1600T）exit 1。
+- 安全边界：CI 只覆盖 demo/mock；真机需先导出原值、bench 验证、断电保持、再恢复。
+  不是自动路径，daemon 不会调用。
+- 初始化握手补 3 次 + 0.5/1.0 s 退避（REQ-18 的可安全实现部分；采样失败仍走 5 次重扫）。
+- 新增严格 exposition 解析测试替代 promtool（无工具/无网络）。
+- 全量回归：**735 passed**。

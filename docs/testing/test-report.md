@@ -170,7 +170,7 @@ daemon + alert 注入                              alerts-YYYYMMDD.log 写入，
   覆盖率纳入 dev 依赖与 CI；release workflow 增加 ruff/format/mypy/smoke 门禁；
   冻结二进制 smoke 增加 performance/多轨/AlertLog/VIN 检查。
 - smoke：**58 passed, 0 failed**；本地二进制重新构建通过。
-- 硬件验收 kit：`build_hardware_kit.sh` 构建通过；kit 内 `setup.sh`（二进制/源码回退）在用户命名空间中安装/卸载通过；`acceptance.sh --demo` 26 项 PASS、3 项 MANUAL；证据 tar 生成。
+- 硬件验收 kit：`build_hardware_kit.sh` 构建通过；kit 内 `setup.sh`（二进制/源码回退）在用户命名空间中安装/卸载通过；`acceptance.sh --demo` 30 项 PASS、3 项 MANUAL、2 SKIP；证据 tar 生成。
 - 仍 BLOCKED/NOT RUN：真实 hidraw/PSU、root/systemd/udev、安装卸载、22.04/arm64、真实浏览器、
   24h/72h 长稳、真实 tag 发布。
 
@@ -251,7 +251,7 @@ systemd-analyze verify                 exit 0
 - 产物在 22.04 chroot 内实际执行：`--version`、`--once`、`--show-alert-log` 均通过。
 - 冻结 smoke 8 项：once / zero-fan / buzzer / performance / rail / alertlog / VIN / clean-env 全 PASS。
 - 本地 `.deb`：`msi-psu-monitor_1.0.0_amd64.deb`，`Depends: libc6 (>= 2.35), zlib1g`。
-- `.deb` 解包后同样在 22.04 内运行 `--version/--once` 通过；硬件 kit 的 `acceptance.sh --demo` 26 PASS/0 FAIL。
+- `.deb` 解包后同样在 22.04 内运行 `--version/--once` 通过；硬件 kit 的 `acceptance.sh --demo` 30 PASS/0 FAIL。
 - 复现步骤：[build-2204-chroot.md](build-2204-chroot.md)；证据：[evidence-2204-build.txt](evidence-2204-build.txt)。
 - **限制**：这是本地 chroot，不是 GitHub Actions 的 `ubuntu-22.04` runner；arm64 仍未构建。
 
@@ -270,7 +270,7 @@ systemd-analyze verify                 exit 0
 
 - DEF-015：`--export -O` 改为 scratch + fsync + replace；失败保留旧文件，新增回归。
 - DEF-016：`-f/--format` 与 `--serial` 在固定输出/本地历史模式中不再静默忽略；配置文件 format 给出 warning。
-- 当前全套 **645 passed**；新增测试已实际执行。
+- 当时全套 **645 passed**；新增测试已实际执行。
 
 ### 10.11 第三轮稳健性修复（2026-10-19）
 
@@ -278,9 +278,114 @@ systemd-analyze verify                 exit 0
 - DEF-018：0 W 样本不再被 `_valid_sample` 跳过。
 - DEF-019：默认 state 路径是普通文件时回退 XDG。
 - DEF-020：空 `--serial` 改为 argparse exit 2。
-- 当前全套 **645 passed**；新增测试实际执行。
+- 当时全套 **645 passed**；新增测试实际执行。
 
 ### 10.12 第四轮发现/修复（2026-10-19）
 
 - DEF-021：`resolve_device` 在按 serial 扫描时，单个设备的意外异常会 traceback；现记为 blocked、继续扫描。
-- 当前全套 **645 passed**；新增测试实际执行。
+- 当时全套 **645 passed**；新增测试实际执行。
+## 11. 第五轮全项目深度审计（2026-10-19）
+
+完整命令、复现与未执行清单：[bug-audit/TEST_REPORT.md](../../bug-audit/TEST_REPORT.md)。
+
+### 11.1 基线
+
+- 干净基线 `fdfc97d`：实际执行 **645 passed**（17.98 s），ruff/format/mypy 全绿。
+- 本轮先复现再修复：符号链接输出、1 s 实时曲线键名、prune 异常、payload 丢失清告警、
+  版本硬编码、kit glibc、空路径参数、AlertLog 内存、未知 API 404。
+
+### 11.2 修复后验证（真实执行）
+
+| 检查 | 结果 |
+|---|---|
+| `pytest -q` | **659 passed**（18.84 s） |
+| `ruff check .` / `ruff format --check .` | clean / 53 formatted |
+| `mypy msi_psu_monitor/` | clean（10 files） |
+| `coverage run --branch` + `coverage report --fail-under=90` | **92%**（2586 stmts / 188 missed；874 branches / 67 partial） |
+| `bash scripts/smoke.sh` | **58 passed, 0 failed** |
+| `shellcheck -S warning scripts/*.sh scripts/hardware/*.sh` | clean |
+| `systemd-analyze verify` / `udevadm verify` | clean / Success 1, Fail 0 |
+| Node 执行页面 JS（live 覆盖层） | 3 行数据 → 每个图表序列 3 点；修复前仅 1 点 |
+| 270 组 CLI 参数组合、200 个随机配置、19 个畸形 HTTP 请求、并发 daemon+dashboard+CLI | 无 traceback、无状态损坏 |
+| daemon `--iterations` 帮助 | 已改为 sample-loop passes（失败读也计数） |
+
+### 11.3 未执行（不得算 PASS）
+
+- 真实 PSU 全部读写/告警/黑盒/OCP/多轨/拔插：**BLOCKED**（无 hidraw）。
+- arm64 运行、真实 root/systemd/udev、桌面浏览器、24h/72h：**BLOCKED / NOT RUN**。
+- 浏览器：本地 headless shell 缺 `libnspr4.so` 无法启动；JS 改用 Node DOM stub 执行。
+- `promtool check metrics`：未安装、无网络安装渠道（NR-001）。
+
+### 11.4 结论
+
+软件自动化门禁全绿，DEF-022..031 全部有可复现回归；但真机、arm64、真实安装、
+浏览器与长稳仍是发布阻塞项，且本轮修复尚未进入任何已发布产物。
+
+## 12. 第六轮：psu-file 需求资料对比（2026-10-19）
+
+- 对照 `psu-file` 的定稿需求、CLI 手册、技术评估 F-01..F-22、草案 REQ-1..19、
+  MSI Center 源码与参考实现；完整差距矩阵见
+  [psu-file-gap-analysis.md](psu-file-gap-analysis.md)。
+- 确认并修复 DEF-032..035：蜂鸣器 toggle 误报为静音、`--set-rail` 同值仍写、
+  Dashboard 7 张曲线构成不符、MEG 序列号未按固定 24 字节读取。
+- 复核后 **661 passed**；ruff/format/mypy clean；coverage 92%；smoke 58/58。
+- 冻结范围（定稿需求 + missing-features 清单）内未发现整块功能缺失；
+  草案未冻结项（thresholds.yaml 快路 power/temp、OCP 写/dump/load、桌面通知、
+  promtool 自检、命令级重试/退避、udev 固定软链、Prometheus rules）明确列入
+  差距文档 §5，不伪装成已实现。
+- 硬件/arm64/真实 systemd/桌面浏览器/24h/72h 仍 BLOCKED，结论不变。
+
+## 13. 第七轮：本地阈值/告警补齐（2026-10-19）
+
+- 需求：用户确认桌面通知不做，但阈值与告警必须有；原 `thresholds.yaml` 草案改为
+  stdlib-only INI `[alerts]`（8 个键，0=关闭），默认值即 REQ-14 初值。
+- 实现：`alerts.evaluate_threshold_alerts/configured_threshold_names`、
+  `config.threshold_limits`、`monitor.attach_alerts`（文本/JSON/Prometheus/
+  exit 2/告警日志统一链路）、daemon 复用同一入口。
+- 设计约束：阈值名与 E1h 名分离，不污染 12V-2x6 Status；缺读数不视为恢复；
+  `--no-alerts` 连阈值一起关闭；0 = 关闭单项。
+- 结果：**680 passed**；ruff/format/mypy clean；coverage 92%；smoke 58/58。
+  详细命令/未执行项见 [bug-audit/TEST_REPORT.md](../../bug-audit/TEST_REPORT.md)。
+
+## 14. 第八轮：运维/CLI 打磨（2026-10-19）
+
+- 依据：U-04/U-06/U-07/F-19 的剩余可做项 + 产品打磨。
+- 变更：Prometheus 规范 exposition（空 label 无空格，消除 NR-001 的语法不确定）；
+  电量 counter 双名（`msi_psu_total_energy_kwh` + REQ-8 的 `msi_psu_energy_kwh_total`）；
+  `docs/prometheus-rules.yml`（Down/Stale/ScrapeError/HardwareAlert/ThresholdAlert）随源码
+  .deb/二进制 tar/hardware kit 发布；`--dump-config`（text/json，无 PSU 可打印生效阈值）；
+  `--help` 注明 5s 平均/EFF 源/针序；阈值 ALERT 行带 measured vs limit。
+- 结果：**689 passed**；ruff/format/mypy clean；coverage 92%；smoke 58/58。
+- 仍未执行：`promtool check metrics`（无工具/无网络）；真实 PSU、arm64、桌面浏览器、
+  24h/72h 仍 BLOCKED。
+
+## 15. 第九轮：OCP 阈值写 + 握手退避 + promtool 替代（2026-10-19）
+
+- 用户要求"除没有真机无法修补的，其它能补的都补"。本轮补齐：
+  - 硬件 OCP 阈值写：`--ocp-set`（5 值 + 可选 on/off）、`--load-thresholds`（接受
+    `--ocp/-f json` 的 `ocp_config` 或扁平 JSON）、`--dump-thresholds`（text/JSON）；
+    `0xC0` 8 字节（amp LINEAR11 exp -4）+ `F1h`，范围硬校验、读回最多 3 次、同值不写、
+    不支援机型 exit 1。**保护写，CI 只覆盖 demo/mock，真机 bench 未做**。
+  - 初始化握手 3 次 + 0.5/1.0 s 指数退避（REQ-18）。
+  - 新增 `tests/test_prometheus_exposition.py`：严格解析我们自己的 exposition，
+    作为 promtool 的本机替代（promtool 仍无工具可跑）。
+- 回归：**736 passed**；ruff/format/mypy clean；覆盖率 **93%**（2957 stmts / 195 missed / 1084 branches）；smoke 58/58。
+- 仍 NOT RUN：promtool 官方校验、真实 PSU 的 OCP 写/断电保持、arm64、真实
+  root/systemd/udev、桌面浏览器、24h/72h。
+
+## 16. 第十轮：可靠性/发布收口（2026-10-19）
+
+- `scripts/soak.sh`：可重复 5k 采样门禁（CI 已接线），50k 本地长跑 exit 0、
+  peak RSS 16.4 MB、fd=3、状态目录 28 KB；`tests/test_soak.py` 覆盖坏参数与短线。
+- 确定性 fuzz（`tests/test_robustness.py`）：400 随机 0xE0 payload × 5 机型、
+  120 随机配置、120 随机 `--ocp-set`，无 traceback / 无 NaN、inf 外泄。
+- 多轨 formatter 回归（12V1-5 电压/电流 + CPU/GPU 拆分 + Prometheus rail 标签）。
+- OCP 写诊断：不支援机型、配置读取失败、未知 JSON 键、可选 on/off 均有明确退出码。
+- 发布文档：新增 `CHANGELOG.md` 并随源码 deb、二进制 deb、tar、kit 发布；
+  RELEASE_READINESS/support/incident/SECURITY/protocol 同步 OCP 写边界。
+- 环境复核：venv Python 3.12.3 **736 passed**；裸 Python 3.13.15（uv 缓存解释器，
+  只装 pytest）**736 passed**；3.10 由 ruff/mypy/ast 静态兜底（本机无 3.10）。
+- 冻结二进制本地重建（ALLOW_NEWER_GLIBC=1，仅验证打包链路）：CLI/daemon 7.8 MB，
+  binary .deb Depends 仍仅 libc6/zlib1g，hardware-kit demo **30 PASS**。
+- 当前门禁：736 passed、ruff/format/mypy clean、coverage **93%**、smoke 58/58、
+  soak 5k PASS、acceptance demo 30 PASS。
