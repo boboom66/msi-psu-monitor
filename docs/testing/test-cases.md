@@ -1,7 +1,7 @@
 # 测试用例（第二阶段）
 
 - 基线提交：`650076a`；当前修复后工作树：Phase 2（见 git log）。
-- 全量自动化用例由 `pytest --collect-only` 收集，当前 **645** 个；本文件记录本轮新增/关键用例、
+- 全量自动化用例由 `pytest --collect-only` 收集，当前 **736** 个；本文件记录本轮新增/关键用例、
   人工 E2E 用例和仍无法执行的真机/root 用例。
 - 状态：PASS 已实际执行且符合预期；FAIL 已实际执行且不符合；BLOCKED 环境/权限/硬件限制；
   NOT RUN 尚未执行；N/A 不适用。
@@ -94,3 +94,57 @@
 | TEST-069 | FUNC-001 | 空 serial | `--serial ''` | argparse exit 2 | 通过 | PASS（DEF-020） |
 
 | TEST-070 | FUNC-044 | serial 发现异常设备 | fake MSIPSU.init 抛 ValueError | path=None、blocked 含设备、无 traceback | 通过 | PASS（DEF-021） |
+## C. 第五轮深审计新增用例（2026-10-19）
+
+| ID | FUNC | 目的 | 输入/步骤 | 预期 | 实际 | 状态 |
+|---|---|---|---|---|---|---|
+| TEST-071 | FUNC-013/011 | 输出路径符号链接 | `-O link` / `--export -O link`（link→普通文件）；`-O /dev/stdout` 且 stdout 重定向到文件 | 链接仍是链接、真实目标被写入；/dev/stdout 未被替换 | 通过 | PASS（DEF-022） |
+| TEST-072 | FUNC-158 | 1 s 实时曲线键名 | `/api/live` 响应 + 从 PAGE 提取的图表 key；再用 Node 执行页面 JS | 每个图表序列都能取到 live 值；3 行数据后每个序列 3 点 | 通过 | PASS（DEF-023） |
+| TEST-073 | FUNC-137 | prune 异常不杀 daemon | 时钟 +3601 s，monkeypatch `prune_history` 抛 PermissionError | `tick()` 返回 True、告警日志、继续采样 | 通过 | PASS（DEF-024） |
+| TEST-074 | FUNC-033 | payload 丢失不清镜像告警 | TS：pins=20 A 触发告警；删除 `iout_pins` 后再采样 | 告警仍在、`take_cleared()` 为空 | 通过 | PASS（DEF-025） |
+| TEST-075 | FUNC-191 | 版本文档一致性 | 扫描 `scripts/**/*.sh` 中字面量 artifact 版本；e2e `--version` | 只允许当前 pyproject 版本；e2e 与 `__version__` 一致 | 通过 | PASS（DEF-026） |
+| TEST-076 | FUNC-193 | kit glibc 来源 | 检查 `build_hardware_kit.sh` 占位符与 `BUILD-INFO` | START-HERE 的 glibc 来自 `ldd` | 通过 | PASS（DEF-027） |
+| TEST-077 | FUNC-130 | daemon 空路径参数 | `--config ""`、`--state-dir ""`、`--prom-path ""` | argparse exit 2 | 通过 | PASS（DEF-028） |
+| TEST-078 | FUNC-022 | AlertLog 内存边界 | 两天多行日志，`iter_alert_log(limit=3)` / `limit=None` | 最新 3 行（顺序正确）；None 返回全部 | 通过 | PASS（DEF-029） |
+| TEST-079 | FUNC-130 | iterations 帮助文本 | `msi-psu-monitor-daemon --help` | 描述 sample-loop passes、失败读也计数 | 通过 | PASS（DEF-030） |
+| TEST-080 | FUNC-160 | 未知 API 路由 | 无 state 目录服务器 GET `/api/typo` 与 `/api/state` | 404 与 503 | 通过 | PASS（DEF-031） |
+
+回归与未执行项见 [bug-audit/TEST_REPORT.md](../../bug-audit/TEST_REPORT.md)。
+
+## D. 第六轮 psu-file 对比新增用例（2026-10-19）
+
+| ID | 目的 | 输入/步骤 | 预期 | 实际 | 状态 |
+|---|---|---|---|---|---|
+| TEST-081 | 蜂鸣器语义不夸大 | `--buzzer-off`（stub 接受） | 输出 `Buzzer: switch toggled (no read-back)`；审计行 `buzzer=toggled` | 通过 | PASS（DEF-032） |
+| TEST-082 | set-rail 幂等 | stub 当前已是 multi，执行 `--set-rail multi` | exit 0、不产生写入、输出 "already set" | 通过 | PASS（DEF-033） |
+| TEST-083 | 7 张曲线构成 | 从 PAGE 提取 CHARTS id 与 keys | id = 12v,5v,3v3,eff,temp,fan,power；power 不含 eff | 通过 | PASS（DEF-034） |
+| TEST-084 | MEG 序列号固定长度 | 0x13 返回 24 字节序列号 + 非零尾部 | 尾部不进入 serial | 通过 | PASS（DEF-035） |
+
+## E. 第七轮：本地阈值/告警用例（2026-10-19）
+
+| ID | 目的 | 输入/步骤 | 预期 | 实际 | 状态 |
+|---|---|---|---|---|---|
+| TEST-085 | 阈值数学与禁用 | power/temp/rail/connector 边界值；0 关闭；缺读数 | 边界包含（>=）触发；0 不产生名字；缺读数不伪造 False | 通过 | PASS（FEAT-01） |
+| TEST-086 | 配置解析 | `[alerts]` 覆盖 8 个键；负值；非数字 | 覆盖生效；负值告警并归 0；坏值回落默认 | 通过 | PASS |
+| TEST-087 | CLI 阈值告警 | demo 配置 `power_w = 50` / stub 1500W | exit 2；stderr ALERT；text Thresholds 行；JSON/Prometheus 字段；`--no-alerts` 关闭 | 通过 | PASS |
+| TEST-088 | daemon 阈值链路 | 高功率样本 | 告警写 `alerts-*.log`、prometheus 指标、stderr；payload 失败不清告警；恢复记 RECOVERED | 通过 | PASS |
+| TEST-089 | 阈值与硬件状态分离 | 同时有 E1h 告警与阈值告警 | `sensors['alerts']` 只含硬件/镜像；`threshold_alerts` 单独；Status 行不被阈值名污染 | 通过 | PASS |
+
+## F. 第八轮：运维/CLI 打磨用例（2026-10-19）
+
+| ID | 目的 | 输入/步骤 | 预期 | 实际 | 状态 |
+|---|---|---|---|---|---|
+| TEST-090 | `--dump-config` | 默认配置 / 覆盖文件 / `-f json` / `-O file` | 无 PSU 也输出生效配置（含 [alerts] 阈值）；json 可解析；conflict 参数 exit 2 | 通过 | PASS（FEAT-02） |
+| TEST-091 | Prometheus 规范与别名 | `-f prometheus` 输出 | 空 label 为 `metric{}`（无空格）；电量同时有 `msi_psu_total_energy_kwh` 与 `msi_psu_energy_kwh_total` | 通过 | PASS |
+| TEST-092 | 阈值告警明细 + 规则随包 | 触发 power_high；检查 config 包内容 | stderr 含 measured/limit；`docs/prometheus-rules.yml` 由三个安装脚本随包发布 | 通过 | PASS |
+| TEST-093 | 硬件 kit 自测覆盖阈值 | `acceptance.sh --demo`（临时 power_w=1 + `--dump-config`） | demo 30 PASS/0 FAIL/3 MANUAL/2 SKIP，阈值 exit 2 与生效配置均被检查 | 通过 | PASS |
+
+| TEST-094 | OCP 阈值写编码 | `MSIPSU.set_ocp_thresholds()`：13 A/6 A/10 s/12 s/60 s | 写 `(0xC0, 1, 0xD0, 0xE0, 0x60, 0xE0, 10, 12, 60)` 再 `(0xF1,)`；越界/缺字段/非 TS 返回 False 且不写 | 通过 | PASS |
+| TEST-095 | OCP 阈值写 CLI | `--ocp-set` / `--load-thresholds` / `--dump-thresholds`（text+JSON） | 写后读回一致、同值 no-op、读回不符重试 3 次后 exit 1、不支援机型 exit 1、范围错误 exit 2 | 通过 | PASS（保护写仅 demo/mock，真机 bench 仍待做） |
+| TEST-096 | 初始化握手退避 | 前两次 FA51 失败、第三次成功 / 全失败 | 3 次后成功；sleep 序列 0.5/1.0；全失败仍不抛异常 | 通过 | PASS |
+| TEST-097 | 严格 exposition 解析 | `test_prometheus_exposition.py` 解析三种 formatter 输出 | HELP/TYPE、label 转义、数值、重复序列均校验；旧 `metric {} value` 写法被拒 | 通过 | PASS（promtool 本机替代） |
+
+| TEST-098 | 可重复 soak | `bash scripts/soak.sh 5000`；坏参数 abc/10/0 | 5000 采样 exit 0、SOAK PASS、state/latest/prom/日志齐全；坏参数 exit 2 | 通过 | PASS（5k 5.5s；50k 本地长跑 RSS 16.4 MB/fd=3） |
+| TEST-099 | 确定性 fuzz | 400 随机 0xE0 payload×5 机型 / 120 随机配置 / 120 随机 `--ocp-set` | 无 traceback、NaN/inf 不外泄、越界被拒 | 通过 | PASS |
+| TEST-100 | 多轨 formatter | `iout_12v_rails/vout_12v_rails/vin` | text 显示 12V1-5/CPU/GPU；prometheus 有 rail 标签与 CPU/GPU/input | 通过 | PASS |
+| TEST-101 | OCP 写诊断 | 不支援 dump / 读失败 / JSON 未知键 / `off` 尾参 | 各自明确错误/生效，exit 1；不写时无 set 调用 | 通过 | PASS |

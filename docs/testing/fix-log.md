@@ -2,7 +2,7 @@
 
 - 项目：msi-psu-monitor
 - 更新时间：2026-10-19
-- 当前测试：645 passed；源语句覆盖率 92%；smoke 58
+- 当前测试：736 passed；源语句覆盖率 92%；smoke 58
 - 约定：只有真实执行并通过的回归测试才记为“已验证”。
 
 ## 已修复缺陷
@@ -43,3 +43,60 @@
 | DEF-020 | `msi_psu_monitor/monitor.py` | `--serial ''` parser test |
 
 | DEF-021 | `msi_psu_monitor/monitor.py` | `test_serial_discovery_skips_an_unexpected_parser_error` |
+## 第五轮追加（2026-10-19，全项目深度审计）
+
+| ID | 修改文件 | 回归测试 |
+|---|---|---|
+| DEF-022 | `msi_psu_monitor/monitor.py` | `test_output_through_a_symlink_keeps_the_symlink`、`test_export_through_a_symlink_keeps_the_symlink`、`test_output_to_dev_stdout_follows_the_symlink` |
+| DEF-023 | `msi_psu_monitor/dashboard.py` | `test_the_live_snapshot_can_feed_every_charted_series`、`test_the_live_overlay_actually_moves_every_chart_series` |
+| DEF-024 | `msi_psu_monitor/daemon.py` | `test_a_failing_prune_does_not_kill_the_daemon` |
+| DEF-025 | `msi_psu_monitor/monitor.py` | `test_a_failed_payload_read_does_not_clear_a_mirror_alert` |
+| DEF-026 | `scripts/smoke.sh`、`tests/test_e2e_cli.py`、`tests/test_docs_consistency.py` | `test_shell_scripts_do_not_hardcode_the_release_artifact_version`、e2e 版本测试 |
+| DEF-027 | `scripts/build_hardware_kit.sh` | `test_the_kit_start_page_reports_the_real_build_glibc` |
+| DEF-028 | `msi_psu_monitor/daemon.py` | `test_empty_path_arguments_are_usage_errors` |
+| DEF-029 | `msi_psu_monitor/state.py` | `test_iter_alert_log_limit_keeps_the_newest_lines_in_order` |
+| DEF-030 | `msi_psu_monitor/daemon.py` | `--help` 实测文本（文档型修复） |
+| DEF-031 | `msi_psu_monitor/dashboard.py` | `test_an_unknown_api_route_is_404_even_without_a_state_dir` |
+
+全部 659 tests / ruff / format / mypy / smoke 58 / coverage 92% / shellcheck / systemd-analyze /
+udevadm verify 均通过；详细命令与未执行项见 [bug-audit/TEST_REPORT.md](../../bug-audit/TEST_REPORT.md)。
+
+## 第六轮追加（2026-10-19，psu-file 对比）
+
+| ID | 修改文件 | 回归测试 |
+|---|---|---|
+| DEF-032 | `msi_psu_monitor/monitor.py`、`protocol.py`、README/docs/AGENTS、`scripts/smoke.sh` | `test_buzzer_off_writes_and_reports_the_switch`、审计行断言、smoke |
+| DEF-033 | `msi_psu_monitor/monitor.py` | `test_set_rail_is_a_noop_when_already_in_the_requested_mode` |
+| DEF-034 | `msi_psu_monitor/dashboard.py` | `test_the_seven_charts_match_the_msi_dashboard`、Node live harness |
+| DEF-035 | `msi_psu_monitor/protocol.py`、`docs/protocol.md` | `test_a_meg_serial_is_cut_to_the_msi_fixed_length` |
+
+对照矩阵与未完成项分类：[psu-file-gap-analysis.md](psu-file-gap-analysis.md)。
+
+## 第七轮追加（2026-10-19，本地阈值/告警 FEAT-01）
+
+| ID | 修改文件 | 回归测试 |
+|---|---|---|
+| FEAT-01 | `msi_psu_monitor/alerts.py`（阈值评估/名字/描述）、`config.py`（8 个键 + `threshold_limits`）、`monitor.py`（`attach_alerts`、文本/JSON/Prometheus、exit 2）、`daemon.py`、example/README/verify | `test_alerts.py`、`test_config.py`、`test_cli_features.py`、`test_daemon.py` 新增用例 |
+
+说明：桌面通知按用户确认不做；OCP 8 字节阈值写/ dump-load 仍按冻结批次保留。
+
+## 第八轮追加（2026-10-19，运维/CLI 打磨 FEAT-02）
+
+| ID | 修改文件 | 回归测试 |
+|---|---|---|
+| FEAT-02 | `msi_psu_monitor/monitor.py`（规范 exposition、电量双名、`--dump-config`、`--help` 注释、阈值告警带 measured/limit）、`docs/prometheus-rules.yml`、`scripts/build_{deb,binary,hardware_kit}*`、README/verify | `test_cli_features.py`（dump-config/别名/描述）、`test_packaging.py`（规则随包）、`test_monitor_format.py` |
+
+## 第九轮追加（2026-10-19，硬件 OCP 阈值写 + 握手退避 + promtool 替代）
+
+| ID | 修改文件 | 回归测试 |
+|---|---|---|
+| FEAT-03 | `msi_psu_monitor/protocol.py`（`set_ocp_thresholds()`、`_handshake()` 3 次退避）、`monitor.py`（`--dump-thresholds`/`--ocp-set`/`--load-thresholds`、范围校验、读回 3 次、同值不写）、`demo.py`（阈值状态）、README/AGENTS/protocol/verify | `test_ocp.py`（写字节/拒绝/保存失败/demo）、`test_cli_features.py`（14 例 dump/set/load/幂等/读回失败/机型门/冲突/越界）、`test_psu_sensors.py`（握手重试/退避）、`test_prometheus_exposition.py`（严格 exposition 解析） |
+
+## 第十轮追加（2026-10-19，可靠性/发布收口）
+
+| ID | 修改文件 | 回归测试 |
+|---|---|---|
+| QUAL-01 | `scripts/soak.sh` + CI 步骤（5k 采样）、`tests/test_soak.py`；`.github/workflows/ci.yml` | soak 坏参数/短线长跑/CI 接线；50k 本地 soak（RSS 16.4 MB、fd=3） |
+| QUAL-02 | `tests/test_robustness.py`（随机 0xE0/配置/--ocp-set fuzz）、`tests/test_monitor_format.py`（多轨 formatter） | 随机 400 payload ×5 机型、120 配置、120 set spec；多轨 12V1-5/CPU/GPU |
+| QUAL-03 | OCP 写诊断：不支援机型的 dump、读失败、未知 JSON 键、可选 on/off；`protocol/demo` | `test_ocp.py`/`test_cli_features.py` 新增边界 |
+| DOC-01 | `CHANGELOG.md`（随源码/二进制 deb、tar、kit 发布）、RELEASE_READINESS/support/incident/SECURITY/protocol/README/verify 同步 | `test_packaging.py` 锁定 CHANGELOG/soak/CI 接线 |
