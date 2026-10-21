@@ -8,7 +8,7 @@ Protocol rules live in `msi_psu_monitor/AGENTS.md` (auto-loaded via `opencode.js
 
 ```bash
 uv sync --group dev                                  # py>=3.10, dev toolchain (pytest/ruff/mypy), zero runtime deps
-uv run --group dev pytest -q                         # 645 tests, no hardware needed
+uv run --group dev pytest -q                         # 736 tests, no hardware needed
 uv run --group dev pytest -q tests/test_state.py     # single file
 uv run --group dev ruff check .                      # must be clean
 uv run --group dev mypy msi_psu_monitor/             # must be clean
@@ -25,6 +25,7 @@ msi-psu-monitor --dashboard --port 8899              # loopback charts over the 
 bash scripts/build_deb.sh                            # dev/CI source .deb into dist/
 bash scripts/build_binary.sh                          # self-contained tarball (build group)
 bash scripts/build_deb_binary.sh                      # zero-Python .deb from the binaries
+bash scripts/soak.sh 5000                            # 5k accelerated demo samples (CI reliability gate)
 bash scripts/build_hardware_kit.sh                    # test-machine kit (binary + source fallback)
 sudo ./scripts/install.sh                            # package + systemd daemon unit
 ```
@@ -66,6 +67,10 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12/3.13.
   NAK is `[0x51, 0xFE]`, a refused write is `[0x50, <reg>, 0xFE]`, and a data reply whose
   first payload byte happens to be `0xFE` (11.984 V = `0xCEFE`, or an uptime that lands on
   it) is ordinary data — it must not be discarded as a refusal (`docs/protocol.md` §NAK).
+- **Init handshake retries 3x**: `MSIPSU._handshake()` sends FA51 up to 3 times
+  with 0.5/1.0 s backoff (`HANDSHAKE_RETRY_DELAYS`, REQ-18) before declaring the
+  device unresponsive; only the handshake retries — sampling failures remain the
+  daemon's 5-failure rescan.
 - **Default run is one-shot**: `if args.once or args.watch is None` — do not require
   `--once`. `--watch` is text-format only (no JSON streaming) and flushes every frame.
 - **Exit codes are load-bearing**: `0` normal / `1` program or argument fault / `2`
@@ -81,6 +86,28 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12/3.13.
   the device reported, because a name a model has no bit for (``ocp_pin1`` on a MEG) would
   otherwise stay latched forever after a model swap -- exporting and printing an alert the
   attached PSU cannot produce.
+- **Local thresholds are software-only early warnings**: `[alerts]` carries
+  `power_w`/`temp_c`/`pin_max_a`/`pin_imbalance_a`/`connector_a`/`rail_*_a`
+  (0 disables one). Their names (`power_high`, `temp_high`, `rail_*_high`,
+  `connector*_high`) are deliberately distinct from E1h names so the
+  `12V-2x6 Status` line keeps its hardware meaning; they share the same AlertEngine,
+  debounce, exit-2 and alert-log path, are returned separately as
+  `sensors['threshold_alerts']`, and are exported as `msi_psu_threshold_*`.
+  `collect_alerts()` returns `(fired, active_security, have_e1h, threshold_active)`;
+  a missing reading must never clear a latched threshold alert.
+- **Prometheus output is canonical and has an alias**: empty-label metrics are
+  `metric{} value` (no space before the braces); the energy counter is exported as
+  both `msi_psu_total_energy_kwh` and REQ-8's `msi_psu_energy_kwh_total`; ready-made
+  alert rules live in `docs/prometheus-rules.yml` and every installer ships them.
+  `--dump-config` prints the effective config (text/json) with no PSU access and must
+  stay free of device/history flags. Threshold ALERT lines carry measured vs limit.
+  Our own exposition output is parsed by a strict test
+  (`tests/test_prometheus_exposition.py`) as the local promtool stand-in.
+- **Reliability gates are executable**: `scripts/soak.sh 5000` drives the
+  demo daemon through 5k samples in CI and enforces state-file freshness, RSS <=256 MiB
+  and fd <=64; `tests/test_robustness.py` fuzzes random 0xE0 payloads/configs/OCP
+  specs; `CHANGELOG.md` is shipped by every package. Keep these wired instead of
+  documenting "we ran it once".
 - **`docs/protocol.md` now matches the code** for 0xE1 (alert status), 0xC1 (alert log
   + OCP state), 0x41/0x42 (fan), 0xC0 (OCP) and 0xF1 (save). Treat the code as truth where
   they differ again, but do not describe implemented registers as "unimplemented".
@@ -94,12 +121,15 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12/3.13.
   `format_blackbox` displays it in that order; the cumulative counters are shown next to
   each line but never used to reorder it (they can wrap or reset). Keep the demo's slot
   numbers and counters in the same direction.
-- **`--ocp` is read-only by scope**: 一期 only *inspects* the thresholds. The write
-  (`0xC0` 8 bytes + `0xF1`, clamped to 10-14 A / 4-8 A / 5-30 s / 30-240 s) is a separate,
-  separately approved batch — do not add it while "fixing" the display. The *other*
-  meaning of 0xC0, the MEG P 1-byte multirail switch, is exposed explicitly as
-  `--set-rail` (write + `F1h` + read-back); it is not the threshold write and must stay
-  model-gated.
+- **OCP threshold writes are explicit, validated and read-back-verified**: `--ocp`
+  stays read-only; `--dump-thresholds` dumps the 8-byte C0h config; `--ocp-set` and
+  `--load-thresholds` are the only write path (`0xC0` 8 bytes + `F1h`), MPG TS only via
+  `supports_ocp_config`. Ranges 10-14 A / 4-8 A / 5-30 s / 5-30 s / 30-240 s are
+  rejected, never clamped; the values are read back (up to 3 attempts) and re-applying
+  the current config is a no-op. This is a real protection write: CI only exercises the
+  demo/mocks, hardware acceptance is still required, and nothing may call it
+  automatically. The *other* meaning of 0xC0, the MEG P 1-byte multirail switch, stays
+  `--set-rail` (write + `F1h` + read-back); never merge the two C0 meanings.
 - **An unsupported model is not an error**: `--ocp` on a MEG prints the reason and exits
   `0`, matching how `--show-log` treats an empty black box. Keep scripts callable blindly.
 - **`argparse` exits `2`** for usage errors and it is deliberately not remapped, so `2`
@@ -148,6 +178,18 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12/3.13.
 - **Dashboard live path**: the daemon writes `latest.json` every sample (no fsync) and the
   page polls `/api/live` once a second, overlaying it on the one-minute history; it never
   touches hidraw. A stopped daemon must leave the endpoint 503/stale, not a frozen chart.
+- **Dashboard live payload keys**: `/api/live` adds the daily-*.log column aliases
+  (`_live_view`); the page pushes that JSON straight into its history rows, so removing
+  the aliases silently freezes every chart except `temp` even while latest.json updates.
+- **Output paths are written through, not renamed**: `-O`/`--export -O` on a symlink,
+  FIFO or device node opens the target directly; only a regular file is atomically replaced.
+  `/dev/stdout` is a symlink whenever stdout is redirected, and renaming it away is
+  destructive as root (DEF-022). Keep `_must_write_through` as the single decision point.
+- **Daemon housekeeping is guarded**: the hourly prune must never raise out of `tick()` --
+  a state-dir permission change turned into an hourly systemd restart loop before DEF-024.
+- **The version has one home**: `pyproject.toml`. `scripts/smoke.sh` and
+  `tests/test_e2e_cli.py` derive it, and a docs-consistency test rejects literal artifact
+  versions in `scripts/**/*.sh` (DEF-026).
 - **Dashboard Host/CSP**: `_route()` rejects a non-loopback `Host` with 421
   (DNS-rebinding defence), and every response carries a self-contained CSP plus
   Permissions-Policy. GET and HEAD share `_route()`; do not add a second response path.

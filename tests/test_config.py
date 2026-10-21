@@ -278,3 +278,57 @@ def test_performance_mode_drops_a_configured_duty(tmp_path):
     cfg = _fan_conf(tmp_path, 'mode = performance\nduty = 60\n')
     assert cfg['fan_mode'] == 'performance'
     assert cfg['fan_duty'] is None
+
+
+# ---- local early-warning thresholds -------------------------------------
+
+
+def test_threshold_defaults_match_the_req14_initial_set():
+    cfg = load_config()
+    assert cfg['power_w'] == 1200.0
+    assert cfg['temp_c'] == 70.0
+    assert cfg['pin_max_a'] == 12.0
+    assert cfg['pin_imbalance_a'] == 5.0
+    assert cfg['connector_a'] == 50.0
+    assert cfg['rail_12v_a'] == 108.33
+    assert cfg['rail_5v_a'] == 22.0
+    assert cfg['rail_3v3_a'] == 22.0
+
+
+def test_thresholds_can_be_overridden_and_disabled(tmp_path):
+    from msi_psu_monitor.config import threshold_limits
+
+    conf = tmp_path / 'psu.conf'
+    conf.write_text(
+        '[alerts]\n'
+        'power_w = 900\n'
+        'temp_c = 60\n'
+        'pin_max_a = 10\n'
+        'pin_imbalance_a = 4\n'
+        'connector_a = 40\n'
+        'rail_12v_a = 90\n'
+        'rail_5v_a = 20\n'
+        'rail_3v3_a = 0\n',
+        encoding='utf-8',
+    )
+    cfg = load_config(str(conf))
+    limits = threshold_limits(cfg)
+    assert limits['power_w'] == 900.0
+    assert limits['pin_max_a'] == 10.0
+    assert limits['rail_3v3_a'] == 0.0, '0 disables that limit'
+
+
+def test_a_negative_threshold_disables_it_with_a_warning(tmp_path, caplog):
+    conf = tmp_path / 'psu.conf'
+    conf.write_text('[alerts]\npower_w = -5\n', encoding='utf-8')
+    with caplog.at_level(logging.WARNING, logger='msi_psu.config'):
+        cfg = load_config(str(conf))
+    assert cfg['power_w'] == 0.0
+    assert 'negative' in caplog.text
+
+
+def test_unparsable_threshold_keeps_the_safe_default(tmp_path):
+    conf = tmp_path / 'psu.conf'
+    conf.write_text('[alerts]\ntemp_c = soon\n', encoding='utf-8')
+    cfg = load_config(str(conf))
+    assert cfg['temp_c'] == 70.0

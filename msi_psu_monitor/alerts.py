@@ -29,6 +29,41 @@ for _rail in range(1, 6):
 for _pin in range(1, 13):
     ALERT_DESCRIPTIONS[f'ocp_pin{_pin}'] = f'12+4 pin {_pin} over-current'
 
+# Locally configured early-warning limits (the REQ-13/14 "thresholds" part).
+# Names are deliberately distinct from the E1h bit names: an E1h "ocp_12v" is
+# the PSU's own protection trip, while "rail_12v_high" is our configured limit.
+POWER_ALERT = 'power_high'
+TEMP_ALERT = 'temp_high'
+RAIL_12V_ALERT = 'rail_12v_high'
+RAIL_5V_ALERT = 'rail_5v_high'
+RAIL_3V3_ALERT = 'rail_3v3_high'
+CONNECTOR_ALERTS = ('connector1_high', 'connector2_high')
+THRESHOLD_ALERT_NAMES = frozenset(
+    {POWER_ALERT, TEMP_ALERT, RAIL_12V_ALERT, RAIL_5V_ALERT, RAIL_3V3_ALERT} | set(CONNECTOR_ALERTS)
+)
+ALERT_DESCRIPTIONS.update(
+    {
+        POWER_ALERT: 'total output power at or above the configured limit',
+        TEMP_ALERT: 'PSU temperature at or above the configured limit',
+        RAIL_12V_ALERT: '12V rail current at or above the configured limit',
+        RAIL_5V_ALERT: '5V rail current at or above the configured limit',
+        RAIL_3V3_ALERT: '3.3V rail current at or above the configured limit',
+        CONNECTOR_ALERTS[0]: '12V-2x6 connector 1 total current at or above the configured limit',
+        CONNECTOR_ALERTS[1]: '12V-2x6 connector 2 total current at or above the configured limit',
+    }
+)
+
+# Which sensor reading and config key drive each threshold alert (connectors are
+# sums over the per-pin currents and are handled separately).
+THRESHOLD_SOURCES = {
+    POWER_ALERT: ('power_total', 'power_w'),
+    TEMP_ALERT: ('temp', 'temp_c'),
+    RAIL_12V_ALERT: ('iout_12v_total', 'rail_12v_a'),
+    RAIL_5V_ALERT: ('iout_5v', 'rail_5v_a'),
+    RAIL_3V3_ALERT: ('iout_3v3', 'rail_3v3_a'),
+}
+CONNECTOR_LIMIT_KEY = 'connector_a'
+
 # Software mirror of the PSU's own 12V-2x6 thresholds (REV6 C0h factory
 # defaults, frozen 2026-10-16): one pin over 12 A, or a spread wider than
 # 5 A between the pins of the same connector, counts as an alert even
@@ -142,11 +177,20 @@ class AlertEngine:
         return sorted(self._fired)
 
 
-def evaluate_pin_alerts(pins):
-    """Map per-pin currents (A) to ``name -> bool``, mirroring C0h thresholds.
+def evaluate_pin_alerts(
+    pins,
+    pin_max_a=PIN_OCP_THRESHOLD_A,
+    imbalance_a=PIN_IMBALANCE_THRESHOLD_A,
+):
+    """Map per-pin currents (A) to name -> bool, mirroring the configured limits.
 
     Imbalance is evaluated per 6-pin connector when all 12 pins are present,
     because each 12V-2x6 connector is protected independently.
+
+    A limit of 0 disables that family: pin names disappear when pin_max_a is 0
+    and the imbalance name disappears when imbalance_a is 0 (config users may
+    want only one of the two). An invalid pin list still yields no measurements
+    at all, which the caller uses to distinguish "disabled" from "unreadable".
     """
     if not pins:
         return {}
@@ -154,14 +198,75 @@ def evaluate_pin_alerts(pins):
         values = [float(value) for value in pins]
     except (TypeError, ValueError):
         return {}
-    active = {
-        f'ocp_pin{index}': value >= PIN_OCP_THRESHOLD_A
-        for index, value in enumerate(values, start=1)
-    }
-    groups = [values[0:6], values[6:12]] if len(values) == 12 else [values]
-    spread = 0.0
-    for group in groups:
-        if group:
-            spread = max(spread, max(group) - min(group))
-    active[IMBALANCE_ALERT] = spread > PIN_IMBALANCE_THRESHOLD_A
+    active = {}
+    if pin_max_a > 0:
+        for index, value in enumerate(values, start=1):
+            active[f'ocp_pin{index}'] = value >= pin_max_a
+    if imbalance_a > 0:
+        groups = [values[0:6], values[6:12]] if len(values) == 12 else [values]
+        spread = 0.0
+        for group in groups:
+            if group:
+                spread = max(spread, max(group) - min(group))
+        active[IMBALANCE_ALERT] = spread > imbalance_a
     return active
+
+
+def _reading(sensors, key):
+    """Return one numeric reading from a sensors dict, or None if unavailable."""
+    value = sensors.get(key)
+    if isinstance(value, tuple):
+        value = value[0]
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def evaluate_threshold_alerts(sensors, thresholds):
+    """Evaluate the configured local early-warning limits for one sample.
+
+    Returns name -> bool for every limit that is enabled AND has a reading this
+    poll. A limit set to 0 is disabled; a missing reading is left out entirely so
+    the caller can keep a latched alert instead of treating silence as recovery.
+    """
+    active = {}
+    for name, (sensor_key, config_key) in THRESHOLD_SOURCES.items():
+        limit = float(thresholds.get(config_key) or 0.0)
+        if limit <= 0:
+            continue
+        value = _reading(sensors, sensor_key)
+        if value is None:
+            continue
+        active[name] = value >= limit
+    connector_limit = float(thresholds.get(CONNECTOR_LIMIT_KEY) or 0.0)
+    if connector_limit > 0:
+        pins = sensors.get('iout_pins')
+        if isinstance(pins, tuple):
+            pins = pins[0]
+        if isinstance(pins, list) and len(pins) == 12:
+            try:
+                values = [float(pin) for pin in pins]
+            except (TypeError, ValueError):
+                values = None
+            if values is not None:
+                for index, offset in enumerate((0, 6), start=1):
+                    total = sum(values[offset : offset + 6])
+                    active[f'connector{index}_high'] = total >= connector_limit
+    return active
+
+
+def configured_threshold_names(thresholds, has_per_pin_data):
+    """Names the engine may keep latched for this configuration/device.
+
+    Mirrors evaluate_threshold_alerts' capability: every limit over 0 is a name
+    this device reports when the payload arrives; connector limits additionally
+    need per-pin sensing.
+    """
+    names = set()
+    for name, (_sensor_key, config_key) in THRESHOLD_SOURCES.items():
+        if float(thresholds.get(config_key) or 0.0) > 0:
+            names.add(name)
+    if has_per_pin_data and float(thresholds.get(CONNECTOR_LIMIT_KEY) or 0.0) > 0:
+        names.update(CONNECTOR_ALERTS)
+    return names

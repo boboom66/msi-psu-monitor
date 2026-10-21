@@ -6,6 +6,7 @@ cd "$ROOT"
 ARCH=${1:-x86_64}
 case "$ARCH" in x86_64|aarch64) ;; *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; esac
 VERSION=$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)
+GLIBC=$(ldd --version | head -1 | awk '{print $NF}')
 BIN_DIR=dist/bin/linux-$ARCH
 [ -x "$BIN_DIR/msi-psu-monitor" ] || { echo "missing $BIN_DIR; run scripts/build_binary.sh first" >&2; exit 1; }
 STAGE=dist/hardware-kit/msi-psu-monitor-hardware-kit-$VERSION-linux-$ARCH
@@ -22,16 +23,16 @@ cp scripts/hardware/uninstall.sh "$STAGE/uninstall.sh"
 chmod 755 "$STAGE/setup.sh" "$STAGE/acceptance.sh" "$STAGE/uninstall.sh"
 cp systemd/99-msi-psu.rules systemd/msi-psu-monitor.service "$STAGE/systemd/"
 cp docs/msi-psu-monitor.conf.example "$STAGE/msi-psu-monitor.conf.example"
-cp README.md LICENSE SECURITY.md "$STAGE/"
+cp README.md LICENSE SECURITY.md CHANGELOG.md "$STAGE/"
 cp docs/verify.md docs/protocol.md docs/support.md docs/hardware-acceptance.md \
-   docs/machine-setup.md "$STAGE/docs/"
+   docs/machine-setup.md docs/prometheus-rules.yml "$STAGE/docs/"
 
 {
     printf "version=%s\n" "$VERSION"
     printf "arch=%s\n" "$ARCH"
     printf "built=%s\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     printf "commit=%s\n" "$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
-    printf "build_glibc=%s\n" "$(ldd --version | head -1 | awk '{print $NF}')"
+    printf "build_glibc=%s\n" "$GLIBC"
 } > "$STAGE/BUILD-INFO"
 
 cat > "$STAGE/START-HERE.md" <<'EOF'
@@ -41,7 +42,7 @@ cat > "$STAGE/START-HERE.md" <<'EOF'
 
 这个包包含：
 
-- 自包含二进制 `bin/msi-psu-monitor`（目标机不需要 Python；本包二进制构建于 glibc 2.39，
+- 自包含二进制 `bin/msi-psu-monitor`（目标机不需要 Python；本包二进制构建于 glibc __GLIBC__，
   22.04 上若无法运行会自动回退到 `source/` 的 Python 3.10 标准库源码）；
 - `setup.sh`：安装 udev 规则、systemd unit、配置、命令；
 - `acceptance.sh`：一键硬件验收，默认只读；`--writes` 才做风扇写测试；
@@ -76,7 +77,8 @@ sudo ./acceptance.sh --writes
 
 系统安装步骤见 `docs/machine-setup.md`；详细验收与排错见 `docs/hardware-acceptance.md`。
 EOF
-sed -i "s/__VERSION__/$VERSION/g; s/__ARCH__/$ARCH/g" "$STAGE/START-HERE.md"
+sed -i "s/__VERSION__/$VERSION/g; s/__ARCH__/$ARCH/g; s/__GLIBC__/$GLIBC/g" \
+    "$STAGE/START-HERE.md"
 
 # SHA256SUMS must not include itself.
 ( cd "$STAGE" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS )

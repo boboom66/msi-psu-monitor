@@ -272,7 +272,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 645 passed
+uv run --group dev pytest -q                     → 736 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 34 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
@@ -287,12 +287,11 @@ bash scripts/smoke.sh                            → 58 项全过（三种格式
 - `tests/test_pid_consistency.py`：五处 USB PID 列表 + README 载荷大小必须与解析器一致。
 - `tests/test_stdlib_only.py`：`python -I` 子进程导入全部模块，第三方依赖混入即失败。
 - `ast.parse(feature_version=(3, 10))`：全部 `.py` 通过 3.10 语法校验（静态兜底）。
-- **3.12 与 3.10 矩阵真跑过**（turn8 重跑）：`uv venv --python /usr/bin/python3.12` 与
-  `uv venv --python 3.10` 各建裸环境（只装 dev 组 pytest，不装本包），把工作树复制一份、
-  不带 `.venv`，直接跑 `python3 -m pytest`：**3.12.3 → 645 通过**、**3.10.21 → 645 通过**。
-  3.10 这条以前根本跑不起来：两个测试模块 `import tomllib`（3.11+），CI 的 3.10 矩阵会在
-  收集阶段就红；本轮加 `tomli>=2; python_version < '3.11'`（dev 组）并 try/except 回退。
-  `bash scripts/smoke.sh`（**58 项全过**）在 3.12 裸环境重跑过（turn10）。
+- **Python 矩阵**：本轮在 `.venv`（3.12.3）跑完整套件 **736 通过**，另用 uv 缓存的裸
+  Python 3.13.15（只装 pytest、不装本包）复跑 **736 通过**；本机没有 python3.10，3.10
+  兼容性由 ruff `target-version` / mypy `python_version` / `ast.parse(feature_version=(3,10))`
+  静态兜底，不宣称 3.10 已复跑。`bash scripts/smoke.sh`（**58 项全过**）在 3.12 环境跑过；
+  CI 矩阵仍按 3.10 / 3.12 / 3.13 执行。
 - CI 含 3.10 / 3.12 / 3.13 三矩阵 + `ruff check` + `ruff format --check` + `mypy` + `pytest`
   + **构建 `.deb`**。
 
@@ -341,7 +340,7 @@ turn7 留下的 11 条已逐条修完；每条都补了「改回旧行为就会�
    测试文件都有行。顺带修正文件名正则不收数字的问题：`test_protocol_lin11.py` 之前根本不在
    两条文档校验的覆盖范围内。测试：`test_the_coverage_table_names_real_test_functions`。
 8. **[P2] turn7 留下的裸计数不在护栏里**：`TEST_COUNT_RE` 补 `通过|通過`。那个未受护栏保护的旧通过数已按裸环境实跑对齐：
-   3.12.3 与 3.10.21 各 **645 通过**（细节见上节「质量门禁」）。
+   当前 3.12.3 venv 与裸 Python 3.13.15 各 **736 通过**；3.10 由静态门禁兜底（本机无 3.10）。
 9. **[P2] 零依赖探针漏了 `__main__.py`**：`SHIPPED_MODULES` 元组补 `__main__`，并新增
    `test_the_probe_covers_every_shipped_module`，把元组与 `msi_psu_monitor/*.py` 精确对齐。
 10. **[P2] `test_pid_consistency.py` 比的是 `bulk_size` 而不是真正的门限 `payload_size`**：README
@@ -353,7 +352,7 @@ turn7 留下的 11 条已逐条修完；每条都补了「改回旧行为就会�
 
 顺带发现并修掉一个 CI 必然失败：3.10 矩阵在**收集阶段**就红——`tests/test_docs_consistency.py`
 与 `tests/test_stdlib_only.py` 直接 `import tomllib`（3.11 才有）。现在改为 try/except 回退到
-`tomli`，dev 组加 `tomli>=2; python_version < '3.11'`，3.10.21 裸环境已全绿。
+`tomli`，dev 组加 `tomli>=2; python_version < '3.11'`；历史上 3.10.21 裸环境已全绿（当时测试集，本轮未复跑）。
 
 ### 产品级加固（turn9，样机前，无硬件可测）
 
@@ -606,7 +605,8 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
   先删掉 override 证明默认目录确实不同，再桩住 `MonitorState.save` 记录本次运行写过的
   每个路径，要求全部落在 tmp 里。
 
-### 真机验收（`docs/verify.md` §8，共 18 项，均待样机）
+
+### 真机验收（`docs/verify.md` §8，共 19 项，均待样机）
 
 诊断命令与判定标准在 `docs/verify.md` §8；这里只列清单，项数与它逐条对齐（文档测试强制）。
 
@@ -614,20 +614,19 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
 2. 抓包核对 62B 与 40B 变体的 `0xE0` 布局。
 3. Ai1300TS（PID `0xAA6F`）变体识别。
 4. `--fan-duty 0/50/100` 读回一致 + F1h 断电重启后仍生效。
-4b. `[fan] mode = customized` 的 daemon 恢复确实改写了电源侧设置（`journalctl` 有
-   `Restored the configured fan profile`）。
+4b. `[fan] mode = customized` 的 daemon 恢复确实改写了电源侧设置。
 5. 满载 >12A/针差 >5A 能触发告警。
 6. 拔插 5 次失败后 daemon 自动重连。
 7. 72h 烤机 kWh 与插座功率计积分对照。
 8. `--ocp` 阈值与 MSI Center/出厂规格一致，且连接器状态与 `12V-2x6 Status` 行不矛盾。
-9. `--ocp` 在 MEG P 系上输出单多轨标志，与 MSI Center 开关一致（不发 NAK、不超时）。
+9. `--ocp` 在 MEG P 系输出单多轨标志，与 MSI Center 开关一致（不发 NAK、不超时）。
 10. `--ocp` 在 MEG Ai1600T 上打印「not available」并 exit 0（不发 NAK、不超时）。
-11. `--zero-fan on/off` 读回一致（42h byte 4）+ `F1h` 断电重启后仍生效；
-    `--buzzer-off` 能让 12+4 OCP 蜂鸣停止（无回读，听感确认），再按一次确认是否为
-    MSI 命名的 switch。
+11. `--zero-fan on/off` 读回一致（42h byte 4）+ F1h 断电保持；`--buzzer-off` 听感确认。
 12. `--set-rail multi/single` 在 MEG Ai1000P/Ai1300P 上读回一致、断电重启后保持；
     MPG TS/Ai1600T 拒绝且 exit 1。
 13. 切换前后 `--ocp` 的 multirail 标志一致，单/多轨 OCP 行为与 MSI Center 一致。
+13b. OCP 阈值写（MPG TS）：导出原值 → `--ocp-set` 写合法新值 → 读回 + F1h 断电保持 →
+    `--load-thresholds` 恢复；越界值必须被 CLI 拒绝（exit 2），不能等电源侧 clamp。
 14. MEG 上 `AC Input`（0x20）接近市电；TS 不显示且不产生 NAK 重试。
 15. 真实告警/恢复各写一行 `alerts-*.log`，`--show-alert-log` 可读，5 MiB 轮转正常。
 16. daemon 运行时 dashboard 每秒前进（`/api/live` 200），停 daemon 后 10 s 变 503/stale。
@@ -661,7 +660,7 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
   Dashboard CPU/GPU 曲线 + 1 s `/api/live`、`--fan-mode performance` 别名。
 - 安全：systemd 地址族/能力/Proc 收敛、设备字符串与 Prometheus 标签清洗、写操作审计行、
   SBOM 生成 + release 集成、SECURITY/support/incident-response 文档。
-- 测试 645（新增 VIN/AlertLog/live/rail/性能/清洗/发布安全）；smoke 58 不变；
+- 测试 735（新增 VIN/AlertLog/live/rail/性能/清洗/发布安全）；smoke 58 不变；
   3.10/3.12 裸环境与 ruff/mypy 在本轮末尾复跑。
 - 变更控制：官网零 Python 覆盖 01 的「源码 .deb 依赖 python3」冻结；8 字节 OCP 阈值写仍冻结，
   多轨 1 字节写仅显式 `--set-rail`，需真机验证。
@@ -676,7 +675,7 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
 - 新增 daemon 300 次迭代 fd 泄漏检查；修复 shellcheck DEF-001 的误判（命令字符串不能加引号）。
 - 覆盖率进入 dev 依赖与 CI（`coverage report --fail-under=90`）；release workflow 补 ruff/format/mypy/smoke 门禁。
 - 冻结二进制 smoke 增加 performance/多轨/AlertLog/VIN 检查。
-- 当前 **645 passed**，smoke **58**，源语句覆盖率 **92%**；本地重建二进制通过。
+- 当前 **736 passed**，smoke **58**，源语句覆盖率 **92%**；本地重建二进制通过。
 - 仍 BLOCKED：真实 PSU、root/systemd/udev、22.04/arm64、浏览器、长稳、真实发版。
 
 ## Phase 3（2026-10-19）：全量生产级审计增量
@@ -685,7 +684,7 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
   非正 interval、performance duty、`--columns all` 拼写、AlertLog limit=0、daemon init fd 泄漏、
   Dashboard CSV 错列。
 - 新增回归：输出路径/`/dev/full` 三类入口、配置边界、解析边界、daemon 资源、Dashboard CSV。
-- 全量 645 tests、ruff/format/mypy、smoke 58、shellcheck、systemd-analyze；覆盖率 92%。
+- 全量 736 tests、ruff/format/mypy、smoke 58、shellcheck、systemd-analyze；覆盖率 92%。
 - 仍未改变 P1：真实 PSU、CI 22.04/arm64、真实 systemd/udev、真实桌面浏览器、24h/72h、正式发版。
 - Playwright headless Chromium：range 切换、7 CSV/7 PNG、8 canvas、无 console/page error、无外部请求；
   320px 视口发现并修复图表网格横向溢出（DEF-012）。
@@ -697,3 +696,30 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
 - GitHub Actions 已发布 v1.0.0：ubuntu-22.04 x86_64 + ubuntu-22.04-arm aarch64 build/publish success；
   release 资产/SBOM/kit/SHA256SUMS 已核对，无 source `_all.deb`；CI release 又暴露并修复 DEF-013/014。
 - demo daemon 20,000 样本加速长稳：RSS 约 16.6MB 稳定、fd=3、prom 稳定；24h/72h 仍未跑。
+
+## 本轮审计收口（2026-10-19）
+
+样机未到，本轮只做不依赖硬件的产品级补齐；每条都有回归测试或可复核命令。
+
+- **本地阈值告警**：`[alerts]` 8 个可配极限（功率/温度/单针/针差/连接器/三条轨），
+  0 关闭；与 E1h 告警共用去抖、stderr ALERT、exit 2、`alerts-*.log`，JSON
+  `threshold_alerts/limits`、Prometheus `msi_psu_threshold_*`；payload 失败不清 latched。
+- **OCP 阈值写/导出/导入**：`--dump-thresholds`（text/JSON）、`--ocp-set`、
+  `--load-thresholds`（0xC0 8B + F1h，范围硬校验、读回 3 次、同值不写、机型门）；
+  真机保护写未验证，不得宣称 PASS。
+- **运维/CLI 打磨**：规范 `metric{} value` exposition、电量 counter 双名、
+  `docs/prometheus-rules.yml` 随包、`--dump-config`、`--help` 标注、阈值告警带
+  measured/limit、握手 3 次指数退避、OCP 写诊断细化。
+- **可靠性门禁**：`scripts/soak.sh 5000` 进入 CI（5k 采样，RSS≤256 MiB、fd≤64）；
+  本地 50k 长跑 exit 0、峰值 RSS 16.4 MB、fd=3；确定性 fuzz（随机 0xE0/配置/
+  --ocp-set）；多轨 formatter；严格 exposition 解析替代 promtool。
+- **发布文档**：新增 `CHANGELOG.md` 并随源码 deb/二进制 deb/tar/kit 发布；
+  RELEASE_READINESS、support/incident/SECURITY、README/verify/protocol 同步。
+- **环境复核**：venv Python 3.12.3 **736 passed**；裸 Python 3.13.15（uv 缓存解释器，
+  只装 pytest）**736 passed**；3.10 由 ruff/mypy/ast 静态兜底（本机无 3.10）。
+  本地重建 frozen binary + binary .deb + hardware kit，kit demo 30 PASS（glibc 2.39
+  本地 smoke build，非 release artifact）。
+- **当前门禁**：736 passed、ruff/format/mypy clean、coverage **93%**、smoke 58/58、
+  soak 5k PASS、acceptance demo 30 PASS。
+- **仍 BLOCKED/NOT RUN**：真机 OCP 写与断电保持、arm64、真实 root/systemd/udev、
+  桌面浏览器、24h/72h、官方 promtool。不得把这些写成 PASS。

@@ -181,6 +181,22 @@ printf "\n[2] queries (read-only)\n"
 run_capture 06-ocp "${MONITOR[@]}" --ocp || true
 run_capture 07-show-log "${MONITOR[@]}" --show-log || true
 run_capture 08-show-alert-log "${MONITOR[@]}" --show-alert-log || true
+
+# Local thresholds + effective-config query (read-only; no writes to the PSU).
+printf '[alerts]\npower_w = 1\n' > "$EVIDENCE/08b-threshold.conf"
+"${MONITOR[@]}" --once --config "$EVIDENCE/08b-threshold.conf" \
+    >"$EVIDENCE/08b-threshold.out" 2>"$EVIDENCE/08b-threshold.err"
+THRESHOLD_RC=$?
+if [ "$THRESHOLD_RC" -eq 2 ] \
+    && grep -Fq 'power_high' "$EVIDENCE/08b-threshold.err" \
+    && grep -Fq 'Thresholds    :' "$EVIDENCE/08b-threshold.out"; then
+    pass "threshold alert exit 2" ""
+else
+    fail "threshold alert" "expected exit 2 with power_high; got $THRESHOLD_RC"
+fi
+run_capture 08c-dump-config "${MONITOR[@]}" --dump-config || true
+check_contains 08c-dump-config "[alerts]"
+check_contains 08c-dump-config "power_w ="
 timeout 3 "${MONITOR[@]}" --watch 1 >"$EVIDENCE/09-watch.out" 2>"$EVIDENCE/09-watch.err"
 WATCH_RC=$?
 if [ "$WATCH_RC" -ne 0 ] && [ "$WATCH_RC" -ne 124 ]; then

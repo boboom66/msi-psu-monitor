@@ -722,6 +722,52 @@ def test_iter_alert_log_zero_limit_returns_nothing(tmp_path):
     assert stats.iter_alert_log(tmp_path, limit=0) == []
 
 
+def test_iter_alert_log_limit_keeps_the_newest_lines_in_order(tmp_path):
+    """A limit bounds memory without changing which lines survive.
+
+    The reader used to load every line of every rotated log (a month can be
+    hundreds of megabytes) and only then take the tail; the bounded deque keeps
+    the same last-N semantics.
+    """
+    for day, lines in ((date(2026, 1, 1), ['a1', 'a2']), (date(2026, 1, 2), ['b1', 'b2', 'b3'])):
+        path = stats.alert_log_path(tmp_path, day)
+        path.write_text(''.join(line + chr(10) for line in lines), encoding='utf-8')
+    assert stats.iter_alert_log(tmp_path, limit=3) == ['b1', 'b2', 'b3']
+    assert stats.iter_alert_log(tmp_path, limit=None) == ['a1', 'a2', 'b1', 'b2', 'b3']
+
+
+def test_an_oversized_json_integer_is_damaged_state_not_a_traceback(tmp_path):
+    """A valid JSON integer too large for float() must not crash startup.
+
+    json.loads accepts a 1000-digit number, but float(big_int) raises
+    OverflowError on Python 3.10. The old _finite_float caught only TypeError
+    and ValueError, so this editable state file killed the daemon at startup.
+    """
+    path = tmp_path / 'state.json'
+    huge = int('9' * 1000)
+    path.write_text(
+        json.dumps(
+            {
+                'version': 1,
+                'count': huge,
+                'watt_sum': huge,
+                'energy_wh': huge,
+                'last_ts': huge,
+                'daily': {'2026-01-01': huge},
+            }
+        ),
+        encoding='utf-8',
+    )
+    state = stats.MonitorState.load(path)
+    assert state.count == 0
+    assert state.watt_sum == 0.0
+    assert state.energy_wh == 0.0
+    assert state.last_ts is None
+    assert state.daily == {}
+    # strict mode must not crash either; the field is sanitised by from_dict.
+    stats.MonitorState.load(path, strict=True)
+
+
 def test_state_dir_falls_back_when_the_default_path_is_a_regular_file(monkeypatch, tmp_path):
     """A stray /var/lib/msi-psu-monitor file must not become a state directory."""
     monkeypatch.delenv('MSI_PSU_STATE_DIR', raising=False)

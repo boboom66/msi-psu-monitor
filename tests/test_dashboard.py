@@ -498,11 +498,21 @@ def test_an_idle_connection_cannot_pin_a_thread_forever():
     assert 0 < dashboard.DashboardHandler.timeout <= 60
 
 
-def test_the_power_chart_has_cpu_and_gpu_series(live_server):
+def test_the_seven_charts_match_the_msi_dashboard(live_server):
+    """MSI's real-time dashboard has seven specific curves.
+
+    The page used to chart 12V total current instead of a standalone efficiency
+    graph and mixed efficiency into the wattage chart, so it was neither MSI's
+    set nor a coherent seven-chart layout.
+    """
     status, body = _get(live_server + '/')
     assert status == 200
+    ids = re.findall(r"\{id:'([a-z0-9]+)'", body)
+    assert ids == ['12v', '5v', '3v3', 'eff', 'temp', 'fan', 'power']
+    assert "['eff','#6ea8fe']" in body
     assert "['cpu_w'" in body and "['gpu_w'" in body
-    assert "['eff','#6ea8fe','%']" in body
+    power_card = body.split("{id:'power'", 1)[1].split('],', 1)[0]
+    assert "'eff'" not in power_card, 'efficiency belongs in its own chart (percent axis)'
     assert 'loadLive' in body
     assert "fetch('/api/live')" in body
     assert 'setInterval(loadLive, 1000)' in body
@@ -521,10 +531,58 @@ def test_live_endpoint_serves_a_fresh_snapshot(live_server, tmp_path):
     assert 'serial' not in payload
 
 
+def test_the_live_snapshot_can_feed_every_charted_series(live_server, tmp_path):
+    """The 1 s overlay reused the history column names only by accident.
+
+    latest.json stores the daemon's sensor keys (vout_12v, power_total, ...)
+    while the charts read daily-*.log column names (12v, power, ...). The page
+    pushes /api/live straight into the history rows, so without the alias only
+    'temp' -- the one name the two shapes share -- ever moved live; every other
+    chart stayed frozen between the one-minute history writes.
+    """
+    sensors = _sensors()
+    sensors['iout_12v_rails'] = ([10.0, 20.0, 15.0, 5.0, 0.0], 'A')
+    sensors['vout_12v_rails'] = ([12.1, 12.1, 12.1, 12.1, 12.1], 'V')
+    stats.write_live_snapshot(tmp_path, sensors, ts=time.time())
+    _, body = _get(live_server + '/api/live')
+    payload = json.loads(body)
+    chart_keys = set(re.findall(r"\['([0-9a-z_]+)','#", dashboard.PAGE))
+    assert chart_keys, 'the chart definitions moved; update this assertion'
+    missing = chart_keys - set(payload)
+    assert not missing, f'live payload cannot feed these series: {sorted(missing)}'
+    # The raw sensor keys stay available to other consumers of /api/live.
+    assert payload['vout_12v'] == 12.1
+
+
 def test_live_endpoint_is_503_without_a_fresh_snapshot(live_server):
     with pytest.raises(HTTPError) as excinfo:
         _get(live_server + '/api/live')
     assert excinfo.value.code == 503
+
+
+def test_an_unknown_api_route_is_404_even_without_a_state_dir(tmp_path):
+    """A client typo must not be reported as a broken installation.
+
+    The state-directory check ran for every /api/ path before routes were
+    matched, so /api/typo answered 503 "no state directory" on a host where the
+    daemon had never run -- blaming the server for the caller's bad URL.
+    """
+    missing = tmp_path / 'never-created'
+    httpd = dashboard.make_server('127.0.0.1', 0, missing)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    base = f'http://127.0.0.1:{httpd.server_port}'
+    try:
+        with pytest.raises(HTTPError) as excinfo:
+            _get(base + '/api/typo')
+        assert excinfo.value.code == 404
+        with pytest.raises(HTTPError) as excinfo:
+            _get(base + '/api/state')
+        assert excinfo.value.code == 503
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=5)
 
 
 def _raw_http(url, host_header):
@@ -570,6 +628,129 @@ def test_the_embedded_javascript_is_syntactically_valid(tmp_path):
     target.write_text(script, encoding='utf-8')
     result = subprocess.run([node, '--check', str(target)], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+_LIVE_JS_HARNESS = r"""
+const fs = require('fs');
+const vm = require('vm');
+const pagePath = process.argv[2];
+const livePath = process.argv[3];
+const page = fs.readFileSync(pagePath, 'utf8');
+const live = JSON.parse(fs.readFileSync(livePath, 'utf8'));
+class El {
+  constructor() {
+    this.textContent = ''; this.innerHTML = ''; this.dataset = {}; this.href = '';
+    this.style = {}; this.classList = {toggle() {}, add() {}, remove() {}};
+    this.clientWidth = 340; this.clientHeight = 120;
+  }
+  addEventListener() {}
+  getContext() {
+    return new Proxy({}, {get: (target, name) => {
+      if (name === 'measureText') return () => ({width: 10});
+      if (name === 'canvas') return {};
+      if (name in target) return target[name];
+      return () => {};
+    }});
+  }
+}
+const els = {};
+function el(id) { return els[id] || (els[id] = new El()); }
+const histRow = {time: '2000-01-01T00:00:00+00:00', '12v': '12.100', '5v': '5.040',
+  '3v3': '3.320', total_a: '50.000', temp: '56.0', fan: '2050', power: '600.0',
+  eff: '94.00', cpu_w: '242.0', gpu_w: '121.0'};
+const statePayload = {product: 'MPG Ai1600TS', serial: 'SN1', count: 1, power_avg: 600.0,
+  efficiency_avg: 94.0, total_energy_kwh: 0.01, last_ts: 1600000000, daily: {}};
+let liveCalls = 0;
+const sandbox = {
+  console,
+  document: {getElementById: el, createElement: () => new El(), querySelector: () => new El(),
+             querySelectorAll: () => []},
+  window: {devicePixelRatio: 1, addEventListener() {}},
+  fetch: async (url) => ({
+    ok: true,
+    async json() {
+      if (url.includes('/api/history')) return {rows: [histRow]};
+      if (url.includes('/api/state')) return statePayload;
+      if (url.includes('/api/live')) {
+        const out = Object.assign({}, live);
+        out.ts = 1600000000 + (++liveCalls);
+        return out;
+      }
+      return {};
+    },
+    async text() { return ''; },
+  }),
+  setInterval: () => 0,
+  Date, JSON, Math, Number, Object, Array, String, isNaN, parseFloat, parseInt,
+  URL: {createObjectURL: () => 'blob:x', revokeObjectURL() {}},
+  Blob: function () {},
+  setTimeout, Promise,
+};
+sandbox.globalThis = sandbox;
+vm.createContext(sandbox);
+vm.runInContext(page, sandbox, {filename: 'page.js'});
+(async () => {
+  await new Promise(resolve => setTimeout(resolve, 20));
+  await sandbox.__api.load();
+  const before = sandbox.__probe();
+  await sandbox.__api.loadLive();
+  await sandbox.__api.loadLive();
+  const after = sandbox.__probe();
+  console.log(JSON.stringify({before, after}));
+})();
+"""
+
+
+def test_the_live_overlay_actually_moves_every_chart_series(tmp_path):
+    """Execute the page JS with the real /api/live payload shape.
+
+    A Python-side check that the keys exist cannot prove the browser uses them;
+    the page pushes the JSON straight into its history rows. This harness runs
+    the shipped script against a stubbed DOM/fetch: before the server added the
+    history aliases the 12V series kept exactly one point while three rows were
+    on screen, because only 'temp' existed under both names.
+    """
+    node = shutil.which('node')
+    if node is None:
+        pytest.skip('node is not installed')
+    sensors = _sensors()
+    sensors['iout_12v_rails'] = ([10.0, 20.0, 15.0, 5.0, 0.0], 'A')
+    sensors['vout_12v_rails'] = ([12.1, 12.1, 12.1, 12.1, 12.1], 'V')
+    stats.write_live_snapshot(tmp_path, sensors, ts=1600000000)
+    served = dashboard._live_view(stats.read_live_snapshot(tmp_path, now=1600000001))
+    assert served is not None
+
+    script = dashboard.render_page().split('<script>', 1)[1].split('</script>', 1)[0]
+    script += (
+        '\n;globalThis.__api = {load, loadLive};'
+        '\nglobalThis.__probe = () => ({'
+        '\n  rows: rows.length,'
+        '\n  charts: Object.fromEntries(CHARTS.map(c => [c.id,'
+        ' c.keys.map(([key]) => series(key).length)])),'
+        '\n  last12: document.getElementById("last-12v").textContent,'
+        '\n});'
+    )
+    (tmp_path / 'page.js').write_text(script, encoding='utf-8')
+    (tmp_path / 'live.json').write_text(json.dumps(served), encoding='utf-8')
+    (tmp_path / 'harness.js').write_text(_LIVE_JS_HARNESS, encoding='utf-8')
+    result = subprocess.run(
+        [
+            node,
+            str(tmp_path / 'harness.js'),
+            str(tmp_path / 'page.js'),
+            str(tmp_path / 'live.json'),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    probes = json.loads(result.stdout)
+    assert probes['before']['rows'] == 1
+    assert probes['after']['rows'] == 3
+    for chart, lengths in probes['after']['charts'].items():
+        assert lengths == [3] * len(lengths), f'{chart} did not move live: {lengths}'
+    assert probes['after']['last12'] != '--'
 
 
 def test_export_endpoint_quotes_a_comma_in_a_value(tmp_path):

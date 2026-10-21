@@ -9,7 +9,7 @@ example, docs) ship next to them in a tarball.
 
 | File | Arch | Contents |
 |------|------|----------|
-| `msi-psu-monitor_<version>_linux_x86_64.tar.gz` | x86_64 | both executables, `install.sh`, `uninstall.sh`, unit, udev rule, config example, README/LICENSE/docs, `SHA256SUMS` |
+| `msi-psu-monitor_<version>_linux_x86_64.tar.gz` | x86_64 | both executables, `install.sh`, `uninstall.sh`, unit, udev rule, config example, README/LICENSE/CHANGELOG/docs, `SHA256SUMS` |
 | `msi-psu-monitor_<version>_linux_aarch64.tar.gz` | arm64 | same |
 | `msi-psu-monitor_<version>_amd64.deb` | x86_64 | the same executables under `/usr/bin`, `Depends: libc6 (>= 2.35), zlib1g` |
 | `msi-psu-monitor_<version>_arm64.deb` | arm64 | same |
@@ -46,6 +46,9 @@ bash scripts/build_binary.sh          # dist/bin/... + dist/*.tar.gz + .sha256
 bash scripts/build_deb_binary.sh      # dist/*.deb from the same binaries
 python3 scripts/build_sbom.py --dist dist --output dist/SBOM-x86_64.json --arch x86_64
 ```
+
+The source `.deb` stage also ships `CHANGELOG.md`, `docs/prometheus-rules.yml` and
+`docs/verify.md`.
 
 `scripts/build_binary.sh` also smoke-tests the frozen executables before
 packaging: `--version`, `--once` on `MSI_PSU_DEMO=1`, one daemon iteration,

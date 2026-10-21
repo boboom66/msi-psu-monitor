@@ -136,6 +136,19 @@ def test_serial_legacy_printable_first_byte():
     assert psu.serial == 'ABC123'
 
 
+def test_a_meg_serial_is_cut_to_the_msi_fixed_length():
+    """MSI reads exactly 24 serial bytes on the MEG models (CPSU.cs:515-523).
+
+    The previous fallback used the whole 0x13 reply and relied on the report
+    being zero-padded after byte 24. A non-zero tail would have been appended to
+    the serial, which then lands in logs/Prometheus labels.
+    """
+    length = 24
+    serial = b'SN' + b'0' * (length - 2)
+    psu = _psu_1600t(registers={0x13: serial + b'NOT-THE-SERIAL'})
+    assert psu.serial == serial.decode('ascii')
+
+
 def test_read_alert_status_bitmap():
     raw = bytearray(18)
     raw[3] = 1
@@ -897,3 +910,49 @@ def test_short_fan_registers_never_raise(payload):
 def test_a_short_blackbox_record_is_skipped_not_invented():
     psu = _psu_1300ts(commands={(0x51, 0xC1, 1): b'\xff' * 3})
     assert psu.read_blackbox() == []
+
+
+# ---- handshake retry (REQ-18) -------------------------------------------
+
+
+class FlakyHandshakeHID(FakeHID):
+    """FakeHID whose 0xFA51 handshake fails a given number of times first."""
+
+    def __init__(self, failures, registers=None, commands=None):
+        super().__init__(registers=registers, commands=commands)
+        self.failures = failures
+        self.calls = 0
+
+    def send_command(self, data, timeout_ms=250):
+        if tuple(data) == (0xFA, 0x51):
+            self.calls += 1
+            if self.calls <= self.failures:
+                return None
+            return b'MPG Ai1600TS\x00'
+        return super().send_command(data, timeout_ms)
+
+
+def test_the_init_handshake_retries_three_times_with_exponential_backoff(monkeypatch):
+    import msi_psu_monitor.protocol as protocol
+
+    sleeps = []
+    monkeypatch.setattr(protocol.time, 'sleep', lambda seconds: sleeps.append(seconds))
+    hid = FlakyHandshakeHID(failures=2)
+    psu = MSIPSU(hid)
+    psu.init()
+    assert psu.product == 'MPG Ai1600TS'
+    assert hid.calls == 3
+    assert sleeps == [0.5, 1.0]
+
+
+def test_the_init_handshake_stops_after_three_failed_attempts(monkeypatch):
+    import msi_psu_monitor.protocol as protocol
+
+    sleeps = []
+    monkeypatch.setattr(protocol.time, 'sleep', lambda seconds: sleeps.append(seconds))
+    hid = FlakyHandshakeHID(failures=99)
+    psu = MSIPSU(hid)
+    psu.init()
+    assert psu.product == ''
+    assert hid.calls == 3
+    assert sleeps == [0.5, 1.0]

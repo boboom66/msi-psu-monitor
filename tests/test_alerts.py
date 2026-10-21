@@ -143,3 +143,114 @@ def test_a_model_swap_is_not_a_recovery():
     engine.update({'ocp_pin1': True})
     engine.retain(set())
     assert engine.take_cleared() == []
+
+
+# ---- local early-warning thresholds (REQ-13/14) -------------------------
+
+LIMITS = {
+    'power_w': 1200.0,
+    'temp_c': 70.0,
+    'pin_max_a': 12.0,
+    'pin_imbalance_a': 5.0,
+    'connector_a': 50.0,
+    'rail_12v_a': 108.0,
+    'rail_5v_a': 22.0,
+    'rail_3v3_a': 22.0,
+}
+
+
+def _threshold_sensors(**extra):
+    sensors = {
+        'power_total': (600.0, 'W'),
+        'temp': (56.0, 'C'),
+        'iout_12v_total': (50.0, 'A'),
+        'iout_5v': (2.0, 'A'),
+        'iout_3v3': (1.0, 'A'),
+    }
+    sensors.update(extra)
+    return sensors
+
+
+def test_threshold_alerts_trip_at_the_configured_limits():
+    from msi_psu_monitor.alerts import evaluate_threshold_alerts
+
+    active = evaluate_threshold_alerts(
+        _threshold_sensors(
+            power_total=(1200.0, 'W'),  # inclusive: the configured point trips
+            temp=(70.1, 'C'),
+            iout_12v_total=(108.0, 'A'),
+            iout_5v=(21.9, 'A'),
+            iout_3v3=(22.1, 'A'),
+        ),
+        LIMITS,
+    )
+    assert active['power_high'] is True
+    assert active['temp_high'] is True
+    assert active['rail_12v_high'] is True
+    assert active['rail_5v_high'] is False
+    assert active['rail_3v3_high'] is True
+
+
+def test_a_zero_limit_disables_that_threshold():
+    from msi_psu_monitor.alerts import evaluate_threshold_alerts
+
+    limits = dict(LIMITS, power_w=0.0, temp_c=0.0, rail_12v_a=0.0)
+    active = evaluate_threshold_alerts(
+        _threshold_sensors(
+            power_total=(9999.0, 'W'), temp=(99.0, 'C'), iout_12v_total=(999.0, 'A')
+        ),
+        limits,
+    )
+    assert 'power_high' not in active
+    assert 'temp_high' not in active
+    assert 'rail_12v_high' not in active
+    assert active['rail_5v_high'] is False
+
+
+def test_a_missing_reading_is_left_out_not_reported_as_ok():
+    from msi_psu_monitor.alerts import evaluate_threshold_alerts
+
+    active = evaluate_threshold_alerts({'power_total': (600.0, 'W')}, LIMITS)
+    assert active == {'power_high': False}, 'no temperature/rail reading must not mean Normal'
+
+
+def test_connector_limits_are_per_12v2x6_connector():
+    from msi_psu_monitor.alerts import evaluate_threshold_alerts
+
+    pins = [8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0]
+    active = evaluate_threshold_alerts({'iout_pins': (pins, 'A')}, dict(LIMITS, connector_a=40.0))
+    assert active['connector1_high'] is True  # 48 A
+    assert active['connector2_high'] is False  # 30 A
+
+
+def test_configured_threshold_names_requires_pins_for_connectors():
+    from msi_psu_monitor.alerts import configured_threshold_names
+
+    names = configured_threshold_names(LIMITS, has_per_pin_data=False)
+    assert 'power_high' in names and 'rail_12v_high' in names
+    assert 'connector1_high' not in names
+
+    names = configured_threshold_names(LIMITS, has_per_pin_data=True)
+    assert {'connector1_high', 'connector2_high'} <= names
+
+    disabled = configured_threshold_names(dict(LIMITS, connector_a=0.0), has_per_pin_data=True)
+    assert 'connector1_high' not in disabled
+
+
+def test_pin_thresholds_and_imbalance_are_configurable():
+    pins = [11.0] * 12
+    assert not any(evaluate_pin_alerts(pins).values())
+    assert evaluate_pin_alerts(pins, pin_max_a=10.0)['ocp_pin1'] is True
+    assert not any(name.startswith('ocp_pin') for name in evaluate_pin_alerts(pins, pin_max_a=0.0))
+
+    spread = [10.0, 4.0, 4.0, 4.0, 4.0, 4.0] * 2
+    assert evaluate_pin_alerts(spread)['pin_imbalance'] is True
+    assert 'pin_imbalance' not in evaluate_pin_alerts(spread, imbalance_a=0.0)
+
+
+def test_threshold_alert_names_are_distinct_from_the_e1h_bits():
+    from msi_psu_monitor.alerts import THRESHOLD_ALERT_NAMES
+
+    assert 'power_high' in THRESHOLD_ALERT_NAMES
+    assert 'ocp_12v' not in THRESHOLD_ALERT_NAMES
+    assert 'fan' not in THRESHOLD_ALERT_NAMES

@@ -48,6 +48,11 @@ credit.
   signing is not implemented yet; verify the checksums before installing.
 - No auto-update: install a newer release explicitly, and keep the last known
   good offline artifact if a rollback is needed.
+- The hardware OCP threshold write is a local, root-only CLI operation
+  (`--ocp-set`/`--load-thresholds`); there is no network path to it, the daemon
+  never calls it automatically, and values are range-checked and read-back-verified.
+  Treat it as a physical-access operation: it changes real over-current protection
+  points and must be bench-validated on a unit before production use.
 
 ## Supply chain
 

@@ -1,0 +1,59 @@
+# Prometheus alerting rules for msi-psu-monitor's node_exporter textfile.
+#
+# Usage:
+#   prometheus.yml:
+#     rule_files:
+#       - /etc/prometheus/rules/msi-psu-monitor.yml
+#
+# Requires node_exporter's textfile collector. MsiPsuStale uses
+# node_textfile_mtime_seconds; drop that one rule if your node_exporter build
+# does not export it. The daemon writes the textfile with msi_psu_up 0 and
+# msi_psu_error_info{reason=...} on a failed read, so "down" and "stale" are
+# distinguishable. Local thresholds are exported as msi_psu_threshold_alert.
+groups:
+  - name: msi-psu-monitor
+    rules:
+      - alert: MsiPsuDown
+        expr: msi_psu_up == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MSI PSU monitor cannot read the PSU"
+          description: "msi_psu_up has been 0 for 2 minutes (reason: {{ $labels.reason }})."
+
+      - alert: MsiPsuStale
+        expr: time() - node_textfile_mtime_seconds{file=~".*msi-psu\\.prom"} > 90
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MSI PSU textfile is stale"
+          description: "node_exporter has not rewritten the msi-psu textfile for over 90 seconds."
+
+      - alert: MsiPsuScrapeError
+        expr: node_textfile_scrape_error{file=~".*msi-psu\\.prom"} == 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "node_exporter cannot parse the MSI PSU textfile"
+          description: "Fix the textfile format/permissions; the last good values are not being refreshed."
+
+      - alert: MsiPsuHardwareAlert
+        expr: msi_psu_alert > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MSI PSU hardware alert: {{ $labels.alert }}"
+          description: "The PSU's E1h bitmap or the per-pin mirror reports {{ $labels.alert }}."
+
+      - alert: MsiPsuThresholdAlert
+        expr: msi_psu_threshold_alert > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MSI PSU local threshold reached: {{ $labels.alert }}"
+          description: "A configured [alerts] limit for {{ $labels.alert }} has been reached for 2 minutes; check the load and the threshold value."

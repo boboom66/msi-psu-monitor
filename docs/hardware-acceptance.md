@@ -55,7 +55,9 @@ sudo ./acceptance.sh
 6. daemon 两次采样 → state/history/prom/latest；
 7. Dashboard 的 `/`、`/api/state`、`/api/live`、`/api/export`；
 8. CSV 导出；
-9. 报告中列出 MANUAL 项（需要你对照 MSI Center / 实际负载确认）。
+9. 本地阈值告警：临时 `[alerts] power_w = 1` 触发 `exit 2` + `power_high` +
+   `Thresholds` 行；`--dump-config` 打印 `[alerts]` 生效值；
+10. 报告中列出 MANUAL 项（需要你对照 MSI Center / 实际负载确认）。
 
 报告与证据在 `/var/log/msi-psu-acceptance/<时间>/`，并自动打包为同前缀 `.tar.gz`。
 把 tar.gz 发回即可。
@@ -81,7 +83,10 @@ sudo ./acceptance.sh --writes
 
 - 蜂鸣器 C2h 没有回读，无法从脚本确认状态；
 - 多轨切换需要真机确认断电保持/OCP 行为；
-- Zero Fan 只在 12+4 TS 机型可读回。
+- Zero Fan 只在 12+4 TS 机型可读回；
+- 12V-2x6 OCP 阈值写（MPG TS）**不自动执行**：先 `--dump-thresholds -f json` 留底，
+  手写一组合法值并读回/断电保持验证，然后 `--load-thresholds` 恢复；详见
+  [verify.md](verify.md) §2.2 与 §8 第 13b 项。
 
 手动写入前请阅读 [verify.md](verify.md) §8，并确认当前没有重要负载。
 

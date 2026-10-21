@@ -12,7 +12,7 @@ from msi_psu_monitor.config import DEFAULTS
 from msi_psu_monitor.daemon import EXIT_ERROR, RESCAN_AFTER_FAILURES, MonitorDaemon
 from msi_psu_monitor.daemon import build_parser
 from msi_psu_monitor.daemon import main as daemon_main
-from msi_psu_monitor.protocol import DeviceBusyError
+from msi_psu_monitor.protocol import ALERT_NAMES, DeviceBusyError
 
 
 class Clock:
@@ -202,7 +202,7 @@ def test_tick_cadence_prom_30s_history_60s(tmp_path):
     )
     assert daemon.tick()
     prom = tmp_path / 'psu.prom'
-    assert 'msi_psu_power_total {} 600.0' in prom.read_text()
+    assert 'msi_psu_power_total{} 600.0' in prom.read_text()
     assert not prom.with_name('psu.prom.tmp').exists()
     assert len(list(tmp_path.glob('daily-*.log'))) == 1
 
@@ -338,7 +338,7 @@ def test_prometheus_is_replaced_not_appended(tmp_path):
     clock.advance(1)
     daemon.sample()
     daemon.write_prometheus(daemon.sample())
-    assert target.read_text().count('msi_psu_power_total {}') == 1
+    assert target.read_text().count('msi_psu_power_total{}') == 1
 
 
 def test_a_failed_prometheus_replace_keeps_the_previous_textfile(tmp_path, monkeypatch):
@@ -696,8 +696,10 @@ def test_a_swapped_model_does_not_inherit_the_old_latched_alert(tmp_path, caplog
     daemon.tick()
     prom = (tmp_path / 'psu.prom').read_text()
     assert 'msi_psu_alert{alert="otp"} 1' in prom
-    assert 'ocp_pin1' not in prom
-    assert 'pin_imbalance' not in prom
+    assert 'msi_psu_alert{alert="ocp_pin1"}' not in prom
+    # pin_imbalance also names a configured threshold limit, so match the alert
+    # metric exactly instead of the bare substring.
+    assert 'msi_psu_alert{alert="pin_imbalance"}' not in prom
 
 
 def test_an_unanswered_e1h_read_never_prunes_the_latch(tmp_path):
@@ -717,6 +719,26 @@ def test_an_unanswered_e1h_read_never_prunes_the_latch(tmp_path):
     assert daemon.sample()['status'] == 'Normal'
 
 
+def test_a_failed_payload_read_does_not_clear_a_mirror_alert(tmp_path):
+    """A missing 0xE0 frame is not a recovery the per-pin mirror measured.
+
+    The E1h bitmap still answers, but its False bits only say that the PSU's own
+    protection did not trip -- not that the software mirror's earlier per-pin
+    threshold recovered. Treating them as a recovery logged a RECOVERED line and
+    dropped a live alert for a condition nothing had re-measured.
+    """
+    sensors = clean_sensors()
+    sensors['iout_pins'] = ([20.0] + [8.0] * 11, 'A')
+    stub = StubPSU(sensors, alerts={name: False for name in ALERT_NAMES['mpg_ai1600ts']})
+    daemon = make_daemon(tmp_path, stub)
+    assert daemon.sample()['status'] == 'ocp_pin1, pin_imbalance'
+
+    del stub._sensors['iout_pins']  # the 0xE0 payload read now fails
+    sample = daemon.sample()
+    assert sample['status'] == 'ocp_pin1, pin_imbalance'
+    assert daemon.engine.take_cleared() == [], 'a failed payload read logged a recovery'
+
+
 def test_a_bad_config_is_one_line_not_a_traceback(tmp_path, capsys):
     """`--config` pointing at nothing used to escape as an interpreter dump.
 
@@ -731,6 +753,35 @@ def test_a_bad_config_is_one_line_not_a_traceback(tmp_path, capsys):
     assert captured.err.startswith('Error: ')
     assert 'Traceback' not in captured.err
     assert str(missing) in captured.err
+
+
+def test_a_failing_prune_does_not_kill_the_daemon(tmp_path, monkeypatch, caplog):
+    """Hourly housekeeping ran unguarded inside tick(); an OSError crashed it.
+
+    A state directory whose permissions changed under the daemon (or a filesystem
+    that refuses readdir) raised straight out of tick() into systemd, which
+    restarted the unit into the same wall every hour.
+    """
+    clock = Clock()
+    daemon = make_daemon(tmp_path, StubPSU(clean_sensors()), clock=clock)
+    assert daemon.tick() is True
+    clock.advance(3601)
+
+    def broken(*_args, **_kwargs):
+        raise PermissionError(13, 'Permission denied', str(tmp_path))
+
+    monkeypatch.setattr(stats, 'prune_history', broken)
+    with caplog.at_level(logging.WARNING, logger='msi_psu.daemon'):
+        assert daemon.tick() is True
+    assert 'Cannot prune old files' in caplog.text
+
+
+@pytest.mark.parametrize('argv', [['--state-dir', ''], ['--prom-path', ''], ['--config', '']])
+def test_empty_path_arguments_are_usage_errors(argv):
+    """An unset $DIR must not silently fall back to the packaged default."""
+    with pytest.raises(SystemExit) as excinfo:
+        daemon_main(argv)
+    assert excinfo.value.code == 2
 
 
 def test_no_alerts_from_the_config_switches_the_poll_off(tmp_path):
@@ -940,3 +991,53 @@ def test_a_zero_watt_sample_still_counts_in_the_average(tmp_path):
     assert daemon.state.count == 1
     assert sample['power_avg'] == (0.0, 'W')
     assert sample['efficiency_avg'] == (0.0, '%')
+
+
+# ---- local early-warning thresholds -------------------------------------
+
+
+def test_a_threshold_alert_is_logged_exported_and_file_logged(tmp_path, caplog):
+    sensors = clean_sensors()
+    sensors['power_total'] = (1500.0, 'W')
+    stub = StubPSU(sensors, alerts={'ocp_12v': False})
+    daemon = make_daemon(tmp_path, stub, prom_path=str(tmp_path / 'psu.prom'))
+    with caplog.at_level(logging.WARNING, logger='msi_psu'):
+        sample = daemon.sample()
+    assert sample['threshold_alerts'] == ['power_high']
+    assert sample['threshold_limits']['power_w'] == 1200.0
+    assert any('ALERT [warning] power_high' in record.message for record in caplog.records)
+
+    assert daemon.tick() is True
+    prom = (tmp_path / 'psu.prom').read_text(encoding='utf-8')
+    assert 'msi_psu_threshold_alert{alert="power_high"} 1' in prom
+    assert 'msi_psu_threshold_limit{name="power_w"} 1200.0' in prom
+
+    alert_files = list(tmp_path.glob('alerts-*.log'))
+    assert len(alert_files) == 1
+    assert 'power_high' in alert_files[0].read_text(encoding='utf-8')
+
+
+def test_a_failed_payload_read_does_not_clear_a_threshold_alert(tmp_path):
+    sensors = clean_sensors()
+    sensors['power_total'] = (1500.0, 'W')
+    stub = StubPSU(sensors, alerts={'ocp_12v': False})
+    daemon = make_daemon(tmp_path, stub)
+    assert 'power_high' in daemon.sample()['threshold_alerts']
+
+    # 0xE0 unreadable but E1h still answers: no measurement, no recovery.
+    monitor.attach_alerts(stub, daemon.engine, {'product': 'MPG Ai1600TS'}, daemon.cfg)
+    assert 'power_high' in daemon.engine.active_alerts
+    assert daemon.engine.take_cleared() == []
+
+    # A healthy sample below the limit is a real recovery.
+    monitor.attach_alerts(stub, daemon.engine, clean_sensors(), daemon.cfg)
+    assert 'power_high' in [alert.name for alert in daemon.engine.take_cleared()]
+
+
+def test_no_alerts_also_skips_the_local_thresholds(tmp_path):
+    sensors = clean_sensors()
+    sensors['power_total'] = (1500.0, 'W')
+    daemon = make_daemon(tmp_path, StubPSU(sensors), no_alerts=True)
+    sample = daemon.sample()
+    assert 'threshold_alerts' not in sample
+    assert 'threshold_limits' not in sample

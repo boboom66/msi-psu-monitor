@@ -482,3 +482,85 @@ def test_demo_ocp_inspection_runs_end_to_end(monkeypatch, capsys):
     psu = demo.DemoPSU()
     assert monitor.run_ocp(psu, _args()) == EXIT_OK
     assert 'Pin OCP point   : 12.0 A' in capsys.readouterr().out
+
+
+# ---- threshold write (C0h 8 bytes + F1h save) ---------------------------
+
+
+class WriteHID(FakeHID):
+    """FakeHID that also records write_command() calls."""
+
+    def __init__(self, registers=None, commands=None, results=None):
+        super().__init__(registers=registers, commands=commands)
+        self.writes = []
+        self.results = list(results or [])
+
+    def write_command(self, data, timeout_ms=250):
+        self.writes.append(tuple(data))
+        if self.results:
+            return self.results.pop(0)
+        return True
+
+
+def _write_psu(results=None):
+    psu = _psu()
+    psu.hid = WriteHID(results=results)
+    return psu
+
+
+CONFIG = {
+    'enabled': True,
+    'point_a': 13,
+    'diff_a': 6,
+    'trigger_s': 10,
+    'diff_trigger_s': 12,
+    'warning_s': 60,
+}
+
+
+def test_set_ocp_thresholds_writes_msi_bytes_then_saves():
+    psu = _write_psu()
+    assert psu.set_ocp_thresholds(CONFIG) is True
+    assert psu.hid.writes == [
+        (0xC0, 1, 0xD0, 0xE0, 0x60, 0xE0, 10, 12, 60),
+        (0xF1,),
+    ]
+
+
+def test_set_ocp_thresholds_refuses_out_of_range_and_unknown_models():
+    psu = _write_psu()
+    assert psu.set_ocp_thresholds(dict(CONFIG, point_a=15)) is False
+    assert psu.set_ocp_thresholds(dict(CONFIG, diff_a=3)) is False
+    assert psu.set_ocp_thresholds(dict(CONFIG, trigger_s=4)) is False
+    assert psu.set_ocp_thresholds(dict(CONFIG, warning_s=241)) is False
+    assert psu.set_ocp_thresholds({'enabled': True}) is False
+    assert psu.hid.writes == []
+
+    meg = _psu(product='MEG Ai1300P')
+    meg.hid = WriteHID()
+    assert meg.set_ocp_thresholds(CONFIG) is False
+    assert meg.hid.writes == []
+
+
+def test_set_ocp_thresholds_needs_both_the_write_and_the_save():
+    psu = _write_psu(results=[True, False])
+    assert psu.set_ocp_thresholds(CONFIG) is False
+    assert psu.hid.writes == [
+        (0xC0, 1, 0xD0, 0xE0, 0x60, 0xE0, 10, 12, 60),
+        (0xF1,),
+    ]
+
+
+def test_demo_ocp_thresholds_round_trip():
+    psu = demo.DemoPSU()
+    assert psu.read_ocp_thresholds()['point_a'] == 12.0
+    assert psu.set_ocp_thresholds(CONFIG) is True
+    config = psu.read_ocp_thresholds()
+    assert config['point_a'] == 13.0
+    assert config['warning_s'] == 60
+    assert config['trigger_s'] == 10
+
+
+def test_demo_ocp_thresholds_are_refused_on_a_meg_model():
+    psu = demo.DemoPSU(variant='ai1300p')
+    assert psu.set_ocp_thresholds(CONFIG) is False

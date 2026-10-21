@@ -45,8 +45,8 @@ Writes to a single register. The response echoes the written data on success; a
 reply whose first payload byte is `0xFC` (ACK) means accepted, `0xFE` (NAK) means
 the device refused the value.
 
-Implemented writes (fan/Zero Fan/buzzer and the MEG P multirail switch; the 8-byte
-12V-2x6 threshold write remains a separately approved batch):
+Implemented writes (fan/Zero Fan/buzzer, the MEG P multirail switch and the MPG TS
+12V-2x6 threshold configuration):
 
 | What | Command | Notes |
 |------|---------|-------|
@@ -54,11 +54,12 @@ Implemented writes (fan/Zero Fan/buzzer and the MEG P multirail switch; the 8-by
 | Zero Fan | `[0x50, 0x43, <0/1>]` | MPG TS models; state read back via 42h byte 6 |
 | Buzzer switch | `[0x50, 0xC2]` | MPG TS models; no payload, no read-back, no F1h. MSI calls the method a *switch*, so a second invocation may re-arm the buzzer (hardware check pending) |
 | Multirail OCP | `[0x50, 0xC0, <2/1>]` | MEG Ai1000P/Ai1300P only; 2 = per-rail, 1 = combined; followed by F1h |
+| 12V-2x6 OCP thresholds | `[0x50, 0xC0, <enable>, <point low>, <point high>, <diff low>, <diff high>, <trigger s>, <diff trigger s>, <warning s>]` | MPG TS only; amp fields LINEAR11 exp -4 (`value << 4`, `0xE0`), times are whole seconds; followed by F1h. CLI validates 10-14 A / 4-8 A / 5-30 s / 5-30 s / 30-240 s and verifies by read-back |
 | Persist settings | `[0x50, 0xF1]` | Write with **0 data bytes** (REV6); sent right after the fan/Zero Fan/multirail write, without it the setting is lost on power-off |
 
-`msi-psu-monitor --fan-mode/--fan-duty/--zero-fan/--set-rail` does write → read-back
-verify (up to 3 attempts) → report `EXIT_ERROR` on a mismatch. The buzzer has no
-read-back, so its success means only that the PSU acknowledged the write.
+`msi-psu-monitor --fan-mode/--fan-duty/--zero-fan/--set-rail/--ocp-set/--load-thresholds`
+does write → read-back verify (up to 3 attempts) → report `EXIT_ERROR` on a mismatch.
+The buzzer has no read-back, so its success means only that the PSU acknowledged the write.
 
 ### NAK (0xFE)
 
@@ -83,7 +84,7 @@ frame of real measurements.
 | VENDOR_STRING | 0x10 | 16 bytes | Vendor name (ASCII) |
 | PRODUCT_STRING | 0x11 | 16 bytes | Product name (ASCII) |
 | REVISION | 0x12 | 2 bytes | Firmware revision（冻结：设备只发 **2 个 ASCII 数字** `b"10"`，小数点由读取方插入 → `1.0`，对齐 `CPSU.cs:497-507` `GetString(...,2).Insert(1,".")`；非「两位数字」的载荷才原样透传；旧 `<I` 十进制拼法废弃） |
-| SERIAL | 0x13 | 16 bytes | Serial number（冻结：TS 按首字节长度切片，后面才是号码，别把长度当号码） |
+| SERIAL | 0x13 | TS: 1-byte length + data; MEG: 24 bytes | Serial number（TS 按首字节长度切片，后面才是号码；MEG 按 MSI Center 固定读 24 字节，第 24 字节之后的报告内容不属于序列号） |
 | IN_VOLTS | 0x20 | 2 bytes | AC input voltage (LINEAR11, **volts**; MSI-compatible extra: `GET_VIN` refuses the MPG TS models and decodes `ValueCalc` directly, `CPSU.cs:540-549`). REV6 removed VIN from its command table. |
 | VOUT_12V | 0x24 | 2 bytes | 12V rail voltage (LINEAR11, mV) |
 | IOUT_12V | 0x25 | 2 bytes | 12V rail current (LINEAR11, mA) |
@@ -238,9 +239,13 @@ neither and prints why, still exiting 0).
   pin currents as 5-second averages. InfoID `1..10` on the same register is the
   black-box log used by `--show-log`, so the two readers must never be swapped.
 
-The threshold write path (`0xC0` 8 bytes + `0xF1` save, with clamping to
-10-14 A / 4-8 A / 5-30 s / 5-30 s / 30-240 s) stays frozen for a later, separately
-approved batch.
+The threshold write path (`0xC0` 8 bytes + `0xF1` save) is implemented as
+`--ocp-set` / `--load-thresholds`, with `--dump-thresholds` for the machine-readable
+read. Values are validated against 10-14 A / 4-8 A / 5-30 s / 5-30 s / 30-240 s
+(no silent clamp), written plus saved, then read back; a mismatch retries up to
+3 times and reports `EXIT_ERROR`. Re-applying the values the PSU already holds is
+a no-op (no flash save). This is a real protection write: it is exercised against
+the demo/mocks in CI and still needs bench acceptance on real hardware.
 
 ## Debugfs Interface (kernel module)
 

@@ -50,7 +50,8 @@ install -m 644 "$ROOT/systemd/99-msi-psu.rules" "$STAGE/lib/udev/rules.d/"
 install -m 644 "$ROOT/README.md" "$ROOT/LICENSE" "$ROOT/SECURITY.md" \
    "$ROOT/docs/protocol.md" "$ROOT/docs/verify.md" "$ROOT/docs/requirements-traceability.md" \
    "$ROOT/docs/support.md" "$ROOT/docs/incident-response.md" \
-   "$ROOT/docs/msi-psu-monitor.conf.example" \
+   "$ROOT/docs/msi-psu-monitor.conf.example" "$ROOT/docs/prometheus-rules.yml" \
+   "$ROOT/CHANGELOG.md" \
    "$STAGE/usr/share/doc/$PKG/"
 # Debian policy 12.5: the machine-readable copyright goes next to LICENSE.
 install -m 644 "$ROOT/docs/copyright" "$STAGE/usr/share/doc/$PKG/copyright"

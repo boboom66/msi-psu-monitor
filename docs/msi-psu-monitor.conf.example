@@ -27,6 +27,24 @@ no_alerts = no
 # 2 keeps a single flaky 5-second average from paging; 1 makes it edge-only.
 consecutive_required = 2
 
+# Local early-warning limits (software, separate from the PSU's own E1h
+# protection trip). A sample at or above a limit raises the matching alert,
+# logs it like a hardware alert and makes --once exit 2. Set a limit to 0 to
+# disable it. Initial values are REQ-14; tune after real-hardware acceptance.
+# Unit of power_w: W; temp_c: degrees C; all currents: A.
+power_w = 1200
+temp_c = 70
+# One 12V-2x6 pin (the PSU's own C0h factory point is 12 A).
+pin_max_a = 12
+# Spread between the six pins of one connector (C0h factory: 5 A).
+pin_imbalance_a = 5
+# Sum of the six pins of one 12V-2x6 connector (600 W / 12 V = 50 A).
+connector_a = 50
+# Combined rail currents (product-spec maximums).
+rail_12v_a = 108.33
+rail_5v_a = 22
+rail_3v3_a = 22
+
 [daemon]
 # Directory for state.json and daily-YYYYMMDD.log.
 # Default: /var/lib/msi-psu-monitor (systemd StateDirectory), otherwise

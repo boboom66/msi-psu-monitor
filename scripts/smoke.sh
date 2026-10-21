@@ -17,6 +17,26 @@ PY=python3
 MONITOR="$PY -m msi_psu_monitor"
 DAEMON="$PY -m msi_psu_monitor.daemon"
 
+# The version has exactly one home: pyproject.toml. A hardcoded artifact name
+# here kept inspecting the previous release's .deb after a version bump, so the
+# deb-permission check could pass while the freshly built package was never read.
+VERSION=$("$PY" - "$ROOT/pyproject.toml" <<'EOF'
+import pathlib
+import re
+import sys
+
+text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+match = re.search(r'^version\s*=\s*"([^"]+)"', text, re.MULTILINE)
+if not match:
+    sys.exit('no [project] version in pyproject.toml')
+print(match.group(1))
+EOF
+)
+if [ -z "$VERSION" ]; then
+    printf '[ERROR] cannot read the project version from pyproject.toml\n' >&2
+    exit 1
+fi
+
 WORK=$(mktemp -d)
 PORT=${PORT:-8907}
 DASH_PID=""
@@ -146,7 +166,7 @@ assert_contains "风扇写 + 读回校验" "Fan mode: customized   Duty: 55%" "$
 OUT=$($MONITOR --zero-fan off 2>/dev/null)
 assert_contains "Zero Fan 写 + 读回校验" "Zero Fan: off" "$OUT"
 OUT=$($MONITOR --buzzer-off 2>/dev/null)
-assert_contains "蜂鸣器静音命令" "Buzzer: silenced" "$OUT"
+assert_contains "蜂鸣器开关命令" "Buzzer: switch toggled" "$OUT"
 
 printf '\n\033[1m[5] 参数互斥（应为 2 = 用法错误）\033[0m\n'
 $MONITOR --ocp --watch 1 >/dev/null 2>&1
@@ -286,7 +306,7 @@ fi
 # root-only modules, which breaks the non-root uaccess use case the udev rule
 # exists for, and nothing inspected the archive's contents before. Two checks in
 # every branch, so the total stays deterministic.
-DEB="$ROOT/dist/msi-psu-monitor_1.0.0_all.deb"
+DEB="$ROOT/dist/msi-psu-monitor_${VERSION}_all.deb"
 if command -v dpkg-deb >/dev/null 2>&1; then
     listing='(build_deb.sh failed)'
     if (umask 077; bash "$ROOT/scripts/build_deb.sh" >/dev/null 2>&1); then

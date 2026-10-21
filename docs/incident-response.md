@@ -10,6 +10,9 @@ suspicious alert flood.
 - A vulnerability report against the CLI, daemon, dashboard or release scripts.
 - Evidence that untrusted device data reached a file, log or label unescaped.
 - A dashboard reachable from something other than loopback.
+- A PSU whose protection points look wrong after a manual `--ocp-set` /
+  `--load-thresholds` run (wrong trip point, OCP no longer trips, or the model
+  refuses to save).
 
 ## Immediate containment
 
@@ -38,6 +41,12 @@ the key and publish the new fingerprint.
 
 Install the patched release, verify `SHA256SUMS`, restart the daemon, and watch
 `journalctl -u msi-psu-monitor -f` for one full sampling cycle.
+
+For a wrong OCP threshold write, restore the values captured before the change
+(`--load-thresholds before.json`) or the factory set (12 A / 5 A / 20 s / 20 s /
+180 s) with `--ocp-set`, verify the read-back, then power-cycle the host and
+watch `--ocp` on the next boot. Record the write-audit line
+(`write ocp_thresholds ...`) from the journal.
 
 ## After the incident
 

@@ -19,6 +19,10 @@ SYSFS_HIDRAW_GLOB = "/sys/class/hidraw/hidraw*/device/uevent"
 
 CMD_TIMEOUT_MS = 250
 CMD_BUFFER_SIZE = 64
+#: REQ-18: a 0xFA51 handshake gets 3 attempts, with exponential backoff between
+#: them, before the device is declared unresponsive. Only the handshake retries;
+#: the daemon's 5-failure rescan covers failures during normal sampling.
+HANDSHAKE_RETRY_DELAYS = (0.5, 1.0)
 
 # Protocol commands
 PSU_INIT = 0xFA
@@ -425,10 +429,20 @@ class MSIPSU:
     def close(self):
         self.hid.close()
 
+    def _handshake(self):
+        """Send [0xFA, 0x51] up to 3 times with 0.5/1.0 s backoff (REQ-18)."""
+        for attempt in range(len(HANDSHAKE_RETRY_DELAYS) + 1):
+            resp = self.hid.send_command([PSU_INIT, 0x51])
+            if resp:
+                return resp
+            if attempt < len(HANDSHAKE_RETRY_DELAYS):
+                time.sleep(HANDSHAKE_RETRY_DELAYS[attempt])
+        return None
+
     def init(self):
         """Initialize the PSU and read identification strings."""
         # Init handshake: [0xFA, 0x51] returns product name
-        resp = self.hid.send_command([PSU_INIT, 0x51])
+        resp = self._handshake()
         if resp:
             self.product = _clean_identity(
                 bytes(resp).rstrip(b"\x00").decode("ascii", errors="replace").strip()
@@ -459,11 +473,30 @@ class MSIPSU:
                     revision.decode("ascii", errors="replace").strip()
                 )
 
-        # Read serial number (REV6 MFR_SERIAL: Byte1 = length prefix)
+        # Read serial number. The two families frame it differently:
+        #   MPG TS  : Byte1 is a length prefix, the value starts at Byte2
+        #              (CPSU.cs:525-528: GetString(RxData, 4, RxData[3]))
+        #   MEG     : exactly 24 bytes from Byte1 (CPSU.cs:515-523)
+        # Taking "the rest of the report" for a MEG relied on the report being
+        # zero-padded after byte 24; the reference implementation deliberately
+        # reads a fixed length instead, so a non-zero tail must not leak into the
+        # serial.
         resp = self.hid.read_register(REG_SERIAL)
         if resp and len(resp) >= 2:
             body = bytes(resp)
-            if body[0] < 0x20 and 1 + body[0] <= len(body):
+            product = (self.product or '').upper()
+            if 'MPG' in product and ('AI1300' in product or 'AI1600' in product):
+                # MPG TS: Byte1 is the length, even when the hostile/odd value is
+                # above the printable range (CPSU.cs:525-528).
+                length = body[0]
+                if 1 + length <= len(body):
+                    body = body[1 : 1 + length]
+            elif self.product:
+                # MEG family: exactly 24 bytes (CPSU.cs:515-523). The rest of
+                # the 0x13 reply is not part of the serial.
+                body = body[:24]
+            elif body[0] < 0x20 and 1 + body[0] <= len(body):
+                # Unknown model: keep the old heuristic until identification works.
                 body = body[1 : 1 + body[0]]
             self.serial = _clean_identity(
                 body.rstrip(b"\x00").decode("ascii", errors="replace").strip()
@@ -960,11 +993,12 @@ class MSIPSU:
         return None if duty is None else duty[3]
 
     def silence_buzzer(self):
-        """Silence the 12+4 OCP buzzer (C2h, write-only, no payload).
+        """Toggle the 12+4 OCP buzzer switch (C2h, write-only, no payload).
 
-        REV6 gates BUZZER_OFF to the 12+4 models; ``CPSU.cs:1152`` returns false
-        for every MEG PID. There is no read-back, so True only means the device
-        acknowledged the write.
+        REV6 gates BUZZER_OFF to the 12+4 models; CPSU.cs:1148-1159 calls the
+        same command BUZZER_SWITCH and sends no value. There is no read-back and
+        the hardware toggles, so a second call re-arms the buzzer: True only
+        means the device acknowledged this write, never "the buzzer is off".
         """
         if self.variant not in MSIPSU.SEVEN_ZPU_VARIANTS:
             return False
@@ -1015,6 +1049,52 @@ class MSIPSU:
             "diff_trigger_s": body[6],
             "warning_s": body[7],
         }
+
+    def set_ocp_thresholds(self, config):
+        """Write OCP12V2x6_CONFIG (C0h, 8 bytes) and save it (F1h).
+
+        Encoding follows CPSU.cs:175-238: the amp limits are LINEAR11 with
+        exponent -4, written as two bytes (value << 4, 0xE0); the three time
+        values are whole seconds. The PSU clamps out-of-range values, but a
+        silent clamp is not something a protection write should rely on, so the
+        caller validates the ranges first and this method rejects them again.
+
+        Only the MPG TS models answer this form of 0xC0 (CPSU.cs:843); the MEG P
+        models use the same address for the multirail flag and the Ai1600T
+        answers neither. Returns True only when both the 8-byte write and the
+        F1h save were acknowledged -- there is no read-back here, the caller must
+        verify that separately.
+        """
+        if not self.supports_ocp_config:
+            return False
+        try:
+            enabled = 1 if config['enabled'] else 0
+            point = int(config['point_a'])
+            diff = int(config['diff_a'])
+            trigger = int(config['trigger_s'])
+            diff_trigger = int(config['diff_trigger_s'])
+            warning = int(config['warning_s'])
+        except (KeyError, TypeError, ValueError):
+            return False
+        if not (10 <= point <= 14 and 4 <= diff <= 8):
+            return False
+        if not (5 <= trigger <= 30 and 5 <= diff_trigger <= 30):
+            return False
+        if not 30 <= warning <= 240:
+            return False
+        payload = [
+            enabled,
+            (point << 4) & 0xFF,
+            0xE0,
+            (diff << 4) & 0xFF,
+            0xE0,
+            trigger,
+            diff_trigger,
+            warning,
+        ]
+        if not self.hid.write_command([REG_OCP_CONFIG, *payload]):
+            return False
+        return self.hid.write_command([REG_SAVE_SETTING])
 
     def read_multirail_ocp(self):
         """Read the multirail OCP flag (C0h, 1 byte, MEG P models only).
