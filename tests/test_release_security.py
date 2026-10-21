@@ -52,7 +52,7 @@ def test_the_release_workflow_generates_and_publishes_an_sbom():
 def test_the_sbom_generator_emits_cyclonedx_with_artifact_hashes(tmp_path):
     dist = tmp_path / 'dist'
     dist.mkdir()
-    artifact = dist / 'msi-psu-monitor_1.0.0_linux_x86_64.tar.gz'
+    artifact = dist / f'msi-psu-monitor_{_version()}_linux_x86_64.tar.gz'
     artifact.write_bytes(b'payload')
     output = tmp_path / 'SBOM.json'
     subprocess.run(

@@ -481,8 +481,7 @@ The protocol details were cross-checked against the CWT REV6 USB command
 specification that ships with the PSU and against MSI Center's own reading
 behaviour; no vendor code was copied.
 
-See [CHANGELOG.md](CHANGELOG.md) for the unreleased changes and the
-1.0.0 release notes.
+See [CHANGELOG.md](CHANGELOG.md) for the 1.0.1 release notes.
 
 ## License
 
