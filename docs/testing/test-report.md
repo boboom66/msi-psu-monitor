@@ -163,7 +163,7 @@ daemon + alert 注入                              alerts-YYYYMMDD.log 写入，
 
 ## 9. Phase 2 增量（2026-10-19）
 
-- 当前提交：Phase 3 修复（见 git log），测试 **645 passed**（3.10.21 / 3.12.3 裸环境与 3.12.3 venv）。
+- 当时提交：Phase 3 修复（见 git log），测试 **645 passed**（3.10.21 / 3.12.3 裸环境与 3.12.3 venv）。
 - 覆盖率：源语句 **92%**（`coverage report` 8 个模块；`__main__.py` 未覆盖）；CI 的门限为 90%。
 - 新增测试：真实 console 子进程 E2E、Host/CSP、JS 语法、HID 短/垃圾帧、daemon fd 泄漏、
   `--iterations` 边界、AlertLog `-O`、release/CI 门禁静态检查；
@@ -176,7 +176,7 @@ daemon + alert 注入                              alerts-YYYYMMDD.log 写入，
 - 仍 BLOCKED/NOT RUN：真实 hidraw/PSU、root/systemd/udev、安装卸载、22.04/arm64、真实浏览器、
   24h/72h 长稳、真实 tag 发布。
 
-> Phase 1 段落中的 569 是当时基线，保留作历史记录；当前以本节 645 为准。
+> Phase 1 段落中的 569 是当时基线，保留作历史记录；当时以本节 645 为准。
 
 ## 10. Phase 3 全量审计增量（2026-10-19）
 

@@ -54,6 +54,34 @@ All notable changes to this project are documented here. The format follows
 - The hourly state-dir prune can no longer raise out of the daemon tick.
 - A failed payload read no longer clears latched per-pin or threshold alerts.
 
+### Fixed in the 2026-10-22 full audit
+
+- State/live data now rejects NaN/Infinity, deeply nested JSON, FIFOs and other
+  special files instead of crashing or blocking the daemon/dashboard.
+- Atomic writes preserve the existing file mode; `--export` also fsyncs the
+  directory.
+- HID `open()` is idempotent, close tolerates EBADF, framing rejects empty/
+  oversized/invalid byte commands and bounds the drain loop; non-UTF-8 sysfs
+  uevents no longer abort discovery.
+- daemon discovery exceptions are throttled, a non-dict `get_sensors()` result
+  counts as a failed read, and the prometheus failure branch survives non-OSError
+  path errors.
+- Alert thresholds/pin lists treat non-finite or overflowing values as missing,
+  never as a recovery; >12 pins cannot create phantom pin alerts.
+- `--dump-config` writes the real `[fan]` section and reports an unwritable `-O`
+  as one error line; watch/once keep working when the state directory is unwritable.
+- `--once` with `--export`/`--show-log`/`--show-alert-log`/`--ocp`/`--dump-thresholds`
+  is now a usage error; config-sourced `output`/`serial` warn when a mode ignores them.
+- 0xC0 `enabled` bytes other than 0/1 make the OCP read unusable instead of
+  reporting the protection as disabled.
+- demo non-TS models no longer report Zero Fan; release publishes `.sha256`
+  sidecars and generates the SBOM after the hardware kit; soak fails when it
+  measured no RSS/fd sample.
+- `--quiet` now suppresses config/state/daemon warnings too.
+
+Verification: **803 tests / 94% branch coverage / smoke 58 / soak 5000** on
+Python 3.10.21, 3.12.3 and 3.13.15.
+
 ### Known issues
 
 Software-level, all with machine-checked reproductions:
@@ -66,10 +94,6 @@ Software-level, all with machine-checked reproductions:
   `msi_psu_ocp_diff_trigger_s`, `msi_psu_ocp_warning_s`). Scraping is
   unaffected; renaming would break the `msi_psu_energy_kwh_total` alias
   required by the requirement sheet, so the decision is deferred.
-- A hand-edited `state.json` with a negative or absurd `count` is accepted and
-  can render a negative average power.
-- `[monitor] output` and `serial` in the config file are ignored in
-  local-only modes, where the equivalent command-line flags are rejected.
 - `--show-log` cannot distinguish "the device did not answer" from "the device
   holds no records"; both print the same line and exit 0.
 

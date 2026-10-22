@@ -70,7 +70,7 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12/3.13.
 - **HID framing**: always 64B reports, 250ms timeout, drain-before-write, strip 2-byte
   echo header, NAK (`0xFE`) → `None`. `0xFE` is a *payload* byte, never byte 0: a read
   NAK is `[0x51, 0xFE]`, a refused write is `[0x50, <reg>, 0xFE]`, and a data reply whose
-  first payload byte happens to be `0xFE` (11.984 V = `0xCEFE`, or an uptime that lands on
+  first payload byte happens to be `0xFE` (11.984 V = `0xCDFE`, or an uptime that lands on
   it) is ordinary data — it must not be discarded as a refusal (`docs/protocol.md` §NAK).
 - **Init handshake retries 3x**: `MSIPSU._handshake()` sends FA51 up to 3 times
   with 0.5/1.0 s backoff (`HANDSHAKE_RETRY_DELAYS`, REQ-18) before declaring the

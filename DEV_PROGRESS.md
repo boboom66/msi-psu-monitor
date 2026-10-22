@@ -450,7 +450,7 @@ daemon 拔掉 TS 换上 MEG 之后（`_drop_psu()` 会清 OCP 缓存，但从不
 ### 读回包首字节是 0xFE 时不再被当成 NAK（本轮，P0 级数据丢失）
 
 `HIDDevice.send_command()` 里判「写被拒」的那个 `resp[2] == PSU_NAK` 被同时用在了**读**上，
-而读回包的 byte 2 是**载荷第一个字节**：12 V 轨的 LINEAR11 字（11.984 V = `0xCEFE`，MEG
+而读回包的 byte 2 是**载荷第一个字节**：12 V 轨的 LINEAR11 字（11.984 V = `0xCDFE`，MEG
 Ai1600T 的 20 字节布局里正好是 `data[0:2]`）和 uptime 计数器（每 256 秒出现一次 0xFE）
 都能取到这个值。后果：**整帧 0xE0 被丢掉**——`get_sensors()` 只回 ident、`--once` 报
 `Error: no sensor payload in this sample` 并 exit 1，daemon 把健康电源记成读失败并改写

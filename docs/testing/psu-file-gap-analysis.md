@@ -103,13 +103,13 @@
 | kernel 模块路径 | 需求分析、REQ-1 | `kernel/msi-psu-ai1600ts.patch` 是草稿且不可构建，用户态为唯一支持路径 |
 | PVE7 / Python 3.9 | REQ-3 | 放弃 |
 
-## 5. 未冻结但未实现 / 需要产品决策
+## 5. 需求决策/外部验证项（原“未冻结但未实现”）
 
 | ID | 项 | 来源 | 现状 / 建议 |
 |---|---|---|---|
 | U-02 | `--dump-thresholds` / `--load-thresholds` | 草案 REQ-12 | ✅ 已实现：`--dump-thresholds`（text/JSON）、`--ocp-set`、`--load-thresholds`（接受 dump JSON 的 `ocp_config` 或扁平对象）；读回验证与范围硬校验 |
 | U-03 | `--notify desktop`（notify-send opt-in） | 技术评估 F-10 | **用户确认不需要（2026-10-19）**：告警只保留 stderr + exit 2 / Prometheus，不做桌面通知 |
-| U-04 | `promtool check metrics` 自检 + Prometheus 告警规则文件 | 草案 REQ-16 | ✅ 规则文件已交付并随包；✅ 新增 `tests/test_prometheus_exposition.py` 严格解析我们的 exposition（HELP/TYPE、label 转义、数值、重复序列、规范 `metric{} value`），作为 promtool 的本机替代。⚠ 真正的 `promtool check metrics/rules` 仍未跑：本机无 promtool/无网络 |
+| U-04 | `promtool check metrics` 自检 + Prometheus 告警规则文件 | 草案 REQ-16 | ✅ 规则文件已交付并随包；✅ `tests/test_prometheus_exposition.py` 严格解析我们的 exposition（HELP/TYPE、label 转义、数值、重复序列、规范 `metric{} value`）。promtool 2.45.3 的结果记录在 `psu-file/msi-psu-monitor-项目信息汇总.md`（2026-10-21，外部证据，本轮未重跑）：语法通过，9 条命名规范告警待决策 |
 | U-05 | 命令级 3 次重试 + 0.5/1/2s 退避；udev 按序列号固定软链 | 草案 REQ-18 | 🟡 初始化握手已补 3 次 + 0.5/1.0s 退避；采样读不做逐命令 3 次重试（会拖慢 1s 循环，daemon 已有 5 次失败重扫）；按序列号的 udev 软链仍不做——多电源会冲突，且 sysfs 发现不依赖 hidraw 号 |
 | U-06 | 电量 counter 名 | 草案 REQ-8 用 `msi_psu_energy_kwh_total`；实现用 `msi_psu_total_energy_kwh`（TYPE counter） | ✅ 已同时导出两个名字（同一 counter 值），按草案或按描述名写的 recording rule 都能用 |
 | U-07 | F-19：CLI `--help` 注明针序与 12V3/12V5 对应关系 | 技术评估 T-19 | ✅ 5s 平均、EFF 源（0xE0 offset 32）、Conn1/Conn2 针 1-6 已写进 `--help` epilog；针到 12V3/12V5 的具体映射仍缺权威证据，需真机/原厂确认后补 |
