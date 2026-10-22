@@ -16,7 +16,7 @@
 | MSI Center 源码 | `04_MSI-Center源码/Msi-Center/Power Supply Unit/.../CPSU.cs`、`C_PSU.cs` | 真实行为基准（E2） |
 | 实屏 | `05_截图/images/01..10` | 总览/曲线/导出/风扇：UI 语义 |
 
-当前实现：本仓库 HEAD `2076d3f`（工作树 clean；803 tests，覆盖率 94%，smoke 58/58），详见
+当前实现：本仓库 HEAD `124de81`（工作树 clean；803 tests，覆盖率 94%，smoke 58/58），详见
 [bug-audit/TEST_REPORT.md](../../bug-audit/TEST_REPORT.md)。
 
 ## 1. 结论摘要
@@ -160,5 +160,5 @@ stderr+exit 2/`alerts-*.log`，但名字独立（`power_high`/`temp_high`/`rail_
 2. 真机 bench：OCP 阈值写必须先在样机上导出原值、写入、断电保持验证，再恢复；
    默认值/阈值/保护点都按真实负载校准。U-07 只剩 TS 针到 12V3/12V5 的映射。
    U-04 的 promtool 自检需有工具的环境补跑；U-05 的 udev 序列号软链经评估不做。
-3. 发布：本轮修复已提交（`cf57e8d`/`e57bd44`/`2076d3f`）但未打 tag/发布；确认后 bump 版本、走新 CI release，并补 arm64 运行、
+3. 发布：本轮修复已提交（`cf57e8d`/`e57bd44`/`2076d3f`/`124de81`）但未打 tag/发布；确认后 bump 版本、走新 CI release，并补 arm64 运行、
    真实 systemd/udev、桌面浏览器、24h/72h。
