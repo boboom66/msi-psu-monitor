@@ -28,7 +28,7 @@
 2. **草案条目分两种情况**：
    - 本地阈值/告警（power/temp/pin/imbalance/connector/rails）已在本轮补齐（FEAT-01），
      不再是缺口；
-   - 桌面通知（用户 2026-10-19 明确不做）、`promtool` 自检（无工具）、udev 固定
+   - 桌面通知（用户 2026-10-19 明确不做）、`promtool` 自检（已跑，8 条命名告警待决策）、udev 固定
      软链与完整命令级重试仍未做（见 §5）；OCP 阈值写/dump/load 与初始化握手退避已按
      用户要求补齐（FEAT-03），但保护写仍需真机 bench 验收后才能放行。
 3. **本轮对比发现 4 个真实缺陷并已修复**（DEF-032..035）：蜂鸣器把"开关 toggle"
@@ -83,11 +83,11 @@
 | REQ-9 | `--export` 9 列 | ✅ | 见 F-08；CPU/GPU 语义按 MSI P 系（12V2 / 12V3+4+5），TS=N/A |
 | REQ-10 | 风扇显示 + 写控制 | ✅ | 41h/42h/43h/F1h；钳制由电源执行；读回验证 |
 | REQ-11 | 单多轨切换（二期） | ✅（提前） | `--set-rail` 已实现；本轮补"先读回、同值不写"（DEF-033） |
-| REQ-12 | OCP 阈值只读展示；写/备份恢复 | 🟡 | `--ocp` 只读完整；8B 写与 `--dump/--load-thresholds` 未做（写已冻结，dump/load 未冻结待定） |
+| REQ-12 | OCP 阈值只读展示；写/备份恢复 | ✅（真机 bench 待验） | `--ocp` 只读完整；8B 写、`--dump-thresholds`、`--ocp-set`、`--load-thresholds` 均已实现，含范围校验/同值不写/读回；保护写真机 bench 仍 BLOCKED |
 | REQ-13 | 单 daemon 快路（1s 判定、syslog、exit 2 语义） | ✅ | 单 daemon、1s 判警、journald(stderr)、Prometheus；本地阈值已实现（`[alerts]`，见 FEAT-01），告警边沿/恢复写 `alerts-*.log`；桌面通知按用户确认不做 |
 | REQ-14 | 阈值初值（12V 总量/单口/温度/单针/风扇） | ✅ | 12V/5V/3.3V 轨电流、单针 12A、针差 5A、连接器 50A、功率 1200W、温度 70℃ 全部可配（默认即初值）；风扇/OPP/OTP 由 E1h 硬件位覆盖，不再做软件 fan 阈值（Zero Fan 下 0 RPM 为正常态） |
 | REQ-15 | EPS 数量外部确认 | N/A | 代码不建模 EPS 数量，回函前无写死值 |
-| REQ-16 | textfile 运维 + 告警规则 + promtool 自检 | 🟡 | 原子写/644/3 条交付已做；`docs/prometheus-rules.yml` 已随包；以 `tests/test_prometheus_exposition.py` 严格解析替代 promtool（本机无 promtool/网络）；`--exporter` 二期未做 |
+| REQ-16 | textfile 运维 + 告警规则 + promtool 自检 | ✅（命名债待决） | 原子写/644/3 条交付已做；`docs/prometheus-rules.yml` 已随包；`tests/test_prometheus_exposition.py` 严格解析；官方 promtool 2.45.3 对当前 1.0.1 输出语法通过、rules 5 条成功，8 条命名告警待决策；`--exporter` 二期未做 |
 | REQ-17 | 多电源 `--serial` | ✅ | 见 F-20 |
 | REQ-18 | 睡眠/断线重握手与抢占 | 🟡 | `flock LOCK_NB`、失败重扫+重 INIT 已做；250ms×3 重试+指数退避、udev 按序列号固定软链未做（现有 sysfs 扫描不受 hidraw 号漂移影响） |
 | REQ-19 | 真机 72h 验收 | ⏸ BLOCKED | 无样机；kit 已就绪 |
@@ -109,7 +109,7 @@
 |---|---|---|---|
 | U-02 | `--dump-thresholds` / `--load-thresholds` | 草案 REQ-12 | ✅ 已实现：`--dump-thresholds`（text/JSON）、`--ocp-set`、`--load-thresholds`（接受 dump JSON 的 `ocp_config` 或扁平对象）；读回验证与范围硬校验 |
 | U-03 | `--notify desktop`（notify-send opt-in） | 技术评估 F-10 | **用户确认不需要（2026-10-19）**：告警只保留 stderr + exit 2 / Prometheus，不做桌面通知 |
-| U-04 | `promtool check metrics` 自检 + Prometheus 告警规则文件 | 草案 REQ-16 | ✅ 规则文件已交付并随包；✅ `tests/test_prometheus_exposition.py` 严格解析我们的 exposition（HELP/TYPE、label 转义、数值、重复序列、规范 `metric{} value`）。promtool 2.45.3 的结果记录在 `psu-file/msi-psu-monitor-项目信息汇总.md`（2026-10-21，外部证据，本轮未重跑）：语法通过，9 条命名规范告警待决策 |
+| U-04 | `promtool check metrics` 自检 + Prometheus 告警规则文件 | 草案 REQ-16 | ✅ 规则文件已交付并随包；✅ 严格 exposition 测试；✅ 官方 promtool 2.45.3 已于 2026-10-22 对当前 1.0.1 daemon 输出重跑：metrics 无语法错误、退出码 3（8 条命名规范告警），`check rules` → SUCCESS（5 rules）。命名是否兼容性改名仍待决策 |
 | U-05 | 命令级 3 次重试 + 0.5/1/2s 退避；udev 按序列号固定软链 | 草案 REQ-18 | 🟡 初始化握手已补 3 次 + 0.5/1.0s 退避；采样读不做逐命令 3 次重试（会拖慢 1s 循环，daemon 已有 5 次失败重扫）；按序列号的 udev 软链仍不做——多电源会冲突，且 sysfs 发现不依赖 hidraw 号 |
 | U-06 | 电量 counter 名 | 草案 REQ-8 用 `msi_psu_energy_kwh_total`；实现用 `msi_psu_total_energy_kwh`（TYPE counter） | ✅ 已同时导出两个名字（同一 counter 值），按草案或按描述名写的 recording rule 都能用 |
 | U-07 | F-19：CLI `--help` 注明针序与 12V3/12V5 对应关系 | 技术评估 T-19 | ✅ 5s 平均、EFF 源（0xE0 offset 32）、Conn1/Conn2 针 1-6 已写进 `--help` epilog；针到 12V3/12V5 的具体映射仍缺权威证据，需真机/原厂确认后补 |
@@ -138,7 +138,7 @@ stderr+exit 2/`alerts-*.log`，但名字独立（`power_high`/`temp_high`/`rail_
 | DEF-035 | P3 | MEG 机型序列号取 0x13 整包，依赖 24 字节后的报告全为 0；参考实现固定读 24 字节 | `CPSU.cs:515-523`（MEG 固定 24）；`CPSU.cs:525-528`（TS 长度前缀） | `init()` 按机型分支：MPG TS 长度前缀、MEG 固定 24 字节、未知机型保留旧启发式 | `test_a_meg_serial_is_cut_to_the_msi_fixed_length`；TS 长度前缀/legacy/64 字节上限用例保持 |
 | FEAT-01 | — | 本地阈值/告警补齐（原 U-01、REQ-13/14 草案） | REQ-13/14、J-01..J-03 | `[alerts]` 8 个可配极限；统一 AlertEngine（去抖/exit 2/审计日志）；文本 Thresholds 行、JSON `threshold_alerts/limits`、Prometheus `msi_psu_threshold_*`；payload 失败不清 latched | `test_alerts.py` 6 例、`test_config.py` 4 例、`test_cli_features.py` 5 例、`test_daemon.py` 3 例 |
 | FEAT-04 | — | 可靠性/发布收口：soak 门禁、fuzz、多轨 formatter、CHANGELOG、裸 3.13 复核 | QUAL-01..03 | `scripts/soak.sh` 进 CI（5k）、确定性 fuzz、多轨 formatter 测试、CHANGELOG 随所有包、Python 3.13.15/3.10.21 裸跑 803 passed | `test_soak.py` 3 例、`test_robustness.py` 3 例、`test_monitor_format.py` 3 例、`test_packaging.py` |
-| FEAT-03 | — | 硬件 OCP 阈值写/导出/导入 + 握手退避 + promtool 替代 | REQ-12/16/18、F-16/F-17 | `--dump-thresholds`/JSON、`--ocp-set`、`--load-thresholds`（8B + F1h + 读回 3 次；范围硬校验；同值不写；机型门）；初始化握手 3 次退避；严格 exposition 测试替代 promtool | `test_ocp.py` 5 例、`test_cli_features.py` 14 例、`test_psu_sensors.py` 2 例、`test_prometheus_exposition.py` 4 例；保护写仍待真机 bench |
+| FEAT-03 | — | 硬件 OCP 阈值写/导出/导入 + 握手退避 + promtool 替代 | REQ-12/16/18、F-16/F-17 | `--dump-thresholds`/JSON、`--ocp-set`、`--load-thresholds`（8B + F1h + 读回 3 次；范围硬校验；同值不写；机型门）；初始化握手 3 次退避；严格 exposition 测试 + 官方 promtool 语法校验（8 条命名告警待决策） | `test_ocp.py` 5 例、`test_cli_features.py` 14 例、`test_psu_sensors.py` 2 例、`test_prometheus_exposition.py` 4 例；保护写仍待真机 bench |
 | FEAT-02 | — | 运维/CLI 打磨（U-04、U-06、U-07、F-19） | REQ-8/16、F-19 | Prometheus 规范 exposition（`metric{} value`，无空格）、电量 counter 双名、`docs/prometheus-rules.yml` 随包、`--dump-config`（text/json，无 PSU 也可打印生效阈值）、`--help` 注明 5s 平均/EFF 源/针序、阈值告警带 measured/limit 明细 | `test_cli_features.py`（dump-config/alias/描述）、`test_packaging.py`（规则随包）、`test_monitor_format.py` |
 
 修复后：**803 passed**、ruff/format/mypy clean、coverage **94%**、smoke **58/58**。
@@ -159,6 +159,6 @@ stderr+exit 2/`alerts-*.log`，但名字独立（`power_high`/`temp_high`/`rail_
    §12-13 set-rail 幂等与 OCP 行为。
 2. 真机 bench：OCP 阈值写必须先在样机上导出原值、写入、断电保持验证，再恢复；
    默认值/阈值/保护点都按真实负载校准。U-07 只剩 TS 针到 12V3/12V5 的映射。
-   U-04 的 promtool 自检需有工具的环境补跑；U-05 的 udev 序列号软链经评估不做。
+   U-04 的官方 promtool 自检已补跑（语法通过，8 条命名告警待决策）；U-05 的 udev 序列号软链经评估不做。
 3. 发布：本轮修复已提交（`cf57e8d`/`e57bd44`/`2076d3f`/`124de81`/后续文档收口提交）但未打 tag/发布；确认后 bump 版本、走新 CI release，并补 arm64 运行、
    真实 systemd/udev、桌面浏览器、24h/72h。

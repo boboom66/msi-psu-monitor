@@ -37,6 +37,12 @@ The CI release job therefore runs on `ubuntu-22.04` (x86_64) and
 `ubuntu-22.04-arm` (arm64). If the arm label is unavailable in your repository,
 drop that matrix entry and build arm64 on a native 22.04 arm64 machine.
 
+> **Local audit note (2026-10-22):** the current x86_64 tar/deb/kit were built on
+> glibc 2.39 with `ALLOW_NEWER_GLIBC=1` for smoke testing only. They pass
+> `env -i --once`, `SHA256SUMS`, extracted-`.deb` and `acceptance.sh --demo`, but
+> they are **not** the official 22.04/arm64 release artifacts. Rebuild through CI
+> before publishing.
+
 ## Build
 
 ```bash
@@ -81,6 +87,9 @@ cd msi-psu-monitor_<version>_linux_x86_64
 sha256sum -c SHA256SUMS
 ldd ./msi-psu-monitor                      # libc/zlib only, no libpython
 env -i PATH=/usr/bin:/bin HOME=/tmp MSI_PSU_DEMO=1 ./msi-psu-monitor --once
+# optional, when promtool is available:
+promtool check rules docs/prometheus-rules.yml
+promtool check metrics < /var/lib/node_exporter/msi-psu.prom
 ```
 
 The `env -i` check is deliberate: it proves the binary does not pick up a
