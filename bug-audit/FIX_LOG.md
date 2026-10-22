@@ -140,7 +140,7 @@ Regression: 680 passed, ruff/format/mypy clean, coverage 92%, smoke 58/58.
   “非空非 NAK”判定，只拒绝 2 字节空回包。0xFC 语义需 bench 复核（`--writes` 验收）。
 - **真实硬件**：5 机型读数、OCP 阈值写/断电保持、风扇/Zero Fan/蜂鸣器/多轨、黑盒顺序均
   **NOT RUN**；无 PSU，所有结论仅来自 demo/mock。
-- **环境**：本机只有 x86_64 Python 3.12/3.13；3.10/arm64 由 CI 矩阵与静态 3.10 语法检查覆盖。
+- **环境**：x86_64 上 Python 3.10.21 / 3.12.3 / 3.13.15 均已实跑 803；arm64 仅 CI 构建，未在 arm64 执行。
 - **覆盖率余量**：94% 中未覆盖的主要是 `pragma: no cover` 防御分支、`__main__.py` 入口、
   以及 daemon/dashboard 的传输层错误分支；未发现新的可复现逻辑缺陷。
 

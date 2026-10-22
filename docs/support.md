@@ -22,7 +22,7 @@ artifact can be kept offline for rollback.
 - Linux x86_64 and arm64, glibc 2.35 or newer (Ubuntu 22.04 / Debian 12).
 - MSI PSUs: MPG Ai1300TS / Ai1600TS (REV6), MEG Ai1000P / Ai1300P / Ai1600T.
 - Hardware-specific behaviour that still needs a real unit is listed in
-  [docs/verify.md](docs/verify.md); the demo mode exercises the rest.
+  [verify.md](verify.md); the demo mode exercises the rest.
 - The hardware OCP threshold write (`--ocp-set` / `--load-thresholds`) exists only
   on the MPG TS models and changes real protection points. Keep a
   `--dump-thresholds -f json` copy before writing, bench-validate it, and restore
@@ -31,7 +31,7 @@ artifact can be kept offline for rollback.
 ## Getting help
 
 Open a GitHub issue for a reproducible bug or a feature request. Report a
-security problem through the private channel described in [SECURITY.md](SECURITY.md).
+security problem through the private channel described in [SECURITY.md](../SECURITY.md).
 
 When reporting a field problem, attach: the artifact version (`--version`), OS/arch,
 PSU product + firmware from `--once`, `--dump-config`, the relevant
