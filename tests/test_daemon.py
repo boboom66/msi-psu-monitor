@@ -446,8 +446,12 @@ def test_alert_is_logged_only_after_the_debounce(tmp_path, caplog):
 
 def test_five_read_failures_trigger_a_rescan(tmp_path):
     daemon = make_daemon(tmp_path, StubPSU(clean_sensors(), error='short read'))
-    for _ in range(RESCAN_AFTER_FAILURES):
+    assert RESCAN_AFTER_FAILURES == 5
+    for _ in range(4):
         assert daemon.sample() is None
+    assert daemon.psu is not None
+    # The fifth consecutive failure, not the configured loop bound, triggers it.
+    assert daemon.sample() is None
     assert daemon.psu is None
     assert daemon.device_path is None
     assert daemon.created == ['/dev/hidraw9']

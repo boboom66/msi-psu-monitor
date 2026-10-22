@@ -6,7 +6,7 @@ cd "$ROOT"
 ARCH=${1:-x86_64}
 case "$ARCH" in x86_64|aarch64) ;; *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; esac
 VERSION=$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)
-GLIBC=$(ldd --version | head -1 | awk '{print $NF}')
+GLIBC=$(ldd --version | awk 'NR==1{print $NF}')
 BIN_DIR=dist/bin/linux-$ARCH
 [ -x "$BIN_DIR/msi-psu-monitor" ] || { echo "missing $BIN_DIR; run scripts/build_binary.sh first" >&2; exit 1; }
 STAGE=dist/hardware-kit/msi-psu-monitor-hardware-kit-$VERSION-linux-$ARCH
