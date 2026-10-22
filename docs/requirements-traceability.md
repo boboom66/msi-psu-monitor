@@ -9,7 +9,7 @@
 | 🧪 待真机 | 代码完成、单测覆盖，但结论必须样机复核（见 [`verify.md`](verify.md) §8） |
 | ⏸ 冻结 | 明确留待后续批准批次，本轮不做 |
 
-> 回归命令：`uv run --group dev pytest -q` → **736 passed**（28 个测试模块）。
+> 回归命令：`uv run --group dev pytest -q` → **803 passed**（29 个测试模块）。
 > 无硬件全链路自检见 [`verify.md`](verify.md)。
 
 ---
@@ -84,7 +84,7 @@
 | 阈值告警与 12V-2x6 状态行分离，JSON/Prometheus 单独暴露 | `monitor.format_text()`（Thresholds 行）、JSON `threshold_alerts/threshold_limits`、Prometheus `msi_psu_threshold_alert/limit` | `test_cli_features.py`、`test_daemon.py` | ✅ 已实现 |
 | 0xE0 读失败不清除已 latched 的阈值告警 | `evaluate_threshold_alerts()` 缺读数时省略名字 + `retain()` 的 `configured_threshold_names()` | `test_a_failed_payload_read_does_not_clear_a_threshold_alert` | ✅ 已实现 |
 | 运维交付：生效配置查询、Prometheus 告警规则、电量 counter 双名、规范 exposition、严格 exposition 校验 | `monitor._dump_effective_config()`（`--dump-config`）、`docs/prometheus-rules.yml`、`format_prometheus()` 的 `msi_psu_energy_kwh_total` 别名、`tests/test_prometheus_exposition.py`（promtool 替代） | `test_cli_features.py`（dump-config/alias）、`test_packaging.py`（规则随包）、`test_prometheus_exposition.py` | ✅ 已实现 |
-| 可靠性/发布收口：5k soak 门禁、确定性 fuzz、多轨 formatter、CHANGELOG/发布文档、Python 3.13 裸跑 | `scripts/soak.sh`（CI 接线）、`tests/test_soak.py`、`tests/test_robustness.py`、`CHANGELOG.md` | `test_soak.py`、`test_robustness.py`、`test_packaging.py`；裸 3.13.15 736 passed | ✅ 已实现 |
+| 可靠性/发布收口：5k soak 门禁、确定性 fuzz、多轨 formatter、CHANGELOG/发布文档、Python 3.13 裸跑 | `scripts/soak.sh`（CI 接线）、`tests/test_soak.py`、`tests/test_robustness.py`、`CHANGELOG.md` | `test_soak.py`、`test_robustness.py`、`test_packaging.py`；裸 3.13.15 803 passed | ✅ 已实现 |
 | 恢复/重连：初始化握手 3 次指数退避（0.5/1.0 s）+ daemon 连续 5 次失败后重扫 | `protocol._handshake()`、`daemon._ensure_psu()` | `test_psu_sensors.py`（握手重试/退避）、`test_daemon.py`（rescan） | ✅ 已实现 |
 
 ## 4. P0 數據正確性（已凍結）
@@ -126,7 +126,7 @@
 ## 7. 无硬件可覆盖的验证方式
 
 所有 🧪 项在无样机时的最大覆盖：`bash scripts/smoke.sh` 一条命令跑完全链路（CI 也跑），`MSI_PSU_DEMO=1` 合成电源（`MSI_PSU_DEMO_MODEL` 可切
-全部 5 机型、`MSI_PSU_DEMO_ALERT` 可卡任意告警位），配合 736 个单测覆盖解析、告警、
+全部 5 机型、`MSI_PSU_DEMO_ALERT` 可卡任意告警位），配合 803 个单测覆盖解析、告警、
 落盘、导出的全部分支。**每一条待真机项的判定标准与命令见 [`verify.md`](verify.md) §8（共 19 项）。**
 
 ## 非需求交付物（如实标注）

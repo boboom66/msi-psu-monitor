@@ -142,6 +142,23 @@ runtime imports.
   GPU = 12V3+12V4+12V5, `UC_Dashboard_Page.xaml.cs:203`); do not re-derive it in the
   formatters.
 
+## Audit invariants (2026-10-22)
+
+- **`--once` is a mode, not a harmless extra**: it is rejected with
+  `--export/--show-log/--show-alert-log/--ocp/--dump-thresholds` (exit 2), because those
+  modes would ignore it. Control/threshold writes may still carry `--once`.
+- **Config-derived defaults warn when a mode ignores them**: `[monitor] output/serial`
+  on `--dashboard`, and `serial` on `--export`/`--show-alert-log`, log a warning; explicit
+  CLI equivalents remain usage errors.
+- **0xC0 `enabled` accepts only 0/1**: any other byte makes the whole C0h read unusable
+  (`None`), never "disabled". CLI exits 1; daemon clears the OCP block.
+- **State/live reads reject special files**: FIFO/device `latest.json`, history and alert
+  logs must not block a daemon/dashboard thread. Non-finite readings are omitted, not
+  written as NaN; deeply nested JSON is damaged state, not a crash.
+- **Atomic writes preserve the existing mode**; export also fsyncs the directory.
+- **Logging is configured on the `msi_psu` package logger**, so `--quiet` suppresses
+  config/state/daemon warnings too.
+
 ## Anti-patterns
 
 - Do NOT add pip runtime dependencies, and never make the official download depend on
@@ -185,7 +202,7 @@ runtime imports.
 ## Verification (no hardware required)
 
 ```bash
-uv run --group dev pytest -q              # 736 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
+uv run --group dev pytest -q              # 803 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
 uv run --group dev ruff check .           # must be clean
 uv run --group dev mypy msi_psu_monitor/  # must be clean
 uv run --group dev coverage run --branch -m pytest -q

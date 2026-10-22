@@ -2,9 +2,8 @@
 
 > 没有真机也能验证 CLI、告警、daemon、历史落盘、prometheus 与 dashboard 全链路。
 > 下面每条命令都已在 `.venv`（Python 3.12.3）实跑通过；完整测试套件另在裸
-> Python 3.13.15（uv 缓存解释器，只装 pytest、不装本包）复核 **736 通过**；
-> `smoke.sh` → 58 项（Python 3.12 环境跑过）。本机没有 python3.10，3.10 兼容性
-> 由静态门禁兜底——ruff `target-version = "py310"`、mypy
+> Python 3.13.15 与 Python 3.10.21（uv 下载）各复核 **803 通过**；
+> `smoke.sh` → 58 项（Python 3.12 环境跑过）。3.10 已实跑，同时保留静态门禁——ruff `target-version = "py310"`、mypy
 > `python_version = "3.10"`（按 3.10 typeshed 分析）、smoke 里对每个 `.py` 的
 > `ast.parse(feature_version=(3, 10))`；CI 矩阵另在 3.10 / 3.12 / 3.13 上执行。
 > 需要真机的部分集中在最后一节，交付样机后再做。
@@ -94,6 +93,7 @@ uv run --group dev ruff format --check .
 | `tests/test_prometheus_exposition.py` | 严格 exposition 语法（`test_format_prometheus_passes_a_strict_exposition_parser`）：HELP/TYPE、label 转义、数值、重复序列，旧式 `metric {} value` 必须被拒；promtool 的本机替代 |
 | `tests/test_robustness.py` | 确定性 fuzz：随机 0xE0 payload ×5 机型、随机配置文本、随机 `--ocp-set`（`test_random_bulk_payloads_never_crash_a_variant_or_a_formatter`）；不崩、不泄漏 NaN/inf |
 | `tests/test_soak.py` | `scripts/soak.sh` 的坏参数拒绝、短线长跑与 CI 门禁（`test_the_soak_script_passes_a_short_run`） |
+| `tests/test_audit_regression.py` | 全项目审计回归：非 UTF-8 uevent、HID 帧边界、EBADF/重复 open、daemon 异常、NaN/FIFO/深层 JSON、原子写权限、黑盒兜底、OCP 非有限值/未定义 enable、BOM、坏阈值、`--once` 契约、release/soak（`test_detect_devices_skips_non_utf8_uevent`、`test_state_update_ignores_non_finite`、`test_once_is_rejected_with_a_mode_that_would_ignore_it`、`test_demo_non_ts_models_do_not_report_zero_fan`） |
 
 `tests/test_docs_consistency.py` 是「文档防伪」：文档里写下的数字与文件名，都由测试去核对一遍。
 
@@ -118,8 +118,8 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。当前基线：**736 passed**、`ruff check` 全过、`mypy` 10 个文件无问题；
-源包语句覆盖率 **92%**（CI 门限 90%）。
+三条全绿即通过。当前基线：**803 passed**、`ruff check` 全过、`mypy` 10 个文件无问题；
+分支覆盖率 **94%**（CI 门限 90%）。
 
 > `ruff format --check .` **可以全仓跑**（CI 也跑）：`protocol.py`/`__init__.py`/`__main__.py`/
 > `tests/test_monitor.py` 这四个历史文件混用引号风格，已由 `[tool.ruff.format] exclude` +
@@ -429,7 +429,7 @@ MSI_PSU_DEMO=1 timeout 3 .venv/bin/msi-psu-monitor --watch 1 -O /tmp/frames.log
 
 ```bash
 bash scripts/build_deb.sh
-dpkg-deb -c dist/msi-psu-monitor_1.0.0_all.deb | awk '{print $6}'
+dpkg-deb -c dist/msi-psu-monitor_*_all.deb | awk '{print $6}'
 ```
 
 应包含 `usr/bin/msi-psu-monitor`、`usr/bin/msi-psu-monitor-daemon`、
@@ -440,12 +440,12 @@ dpkg-deb -c dist/msi-psu-monitor_1.0.0_all.deb | awk '{print $6}'
 同时确认包根目录不是 0700（`mktemp` 会给 0700 而 `dpkg-deb` 原样收录，脚本已 `chmod 755` 修掉）：
 
 ```bash
-dpkg-deb -c dist/msi-psu-monitor_1.0.0_all.deb | head -1   # 期望 drwxr-xr-x ... ./
+dpkg-deb -c dist/msi-psu-monitor_*_all.deb | head -1   # 期望 drwxr-xr-x ... ./
 ```
 
 ```bash
 rm -rf /tmp/debroot && mkdir -p /tmp/debroot
-dpkg-deb -x dist/msi-psu-monitor_1.0.0_all.deb /tmp/debroot
+dpkg-deb -x dist/msi-psu-monitor_*_all.deb /tmp/debroot
 PYTHONPATH=/tmp/debroot/usr/lib/python3/dist-packages /tmp/debroot/usr/bin/msi-psu-monitor --version
 ```
 
@@ -465,8 +465,8 @@ udevadm verify systemd/99-msi-psu.rules                  # Success: 1  Fail: 0�
 
 ```bash
 (umask 077; bash scripts/build_deb.sh)
-dpkg-deb -c dist/msi-psu-monitor_1.0.0_all.deb | grep -E 'protocol|\.service'   # 期望 -rw-r--r--
-dpkg-deb -c dist/msi-psu-monitor_1.0.0_all.deb | grep etc/msi-psu-monitor.conf  # 全注释的 conffile
+dpkg-deb -c dist/msi-psu-monitor_*_all.deb | grep -E 'protocol|\.service'   # 期望 -rw-r--r--
+dpkg-deb -c dist/msi-psu-monitor_*_all.deb | grep etc/msi-psu-monitor.conf  # 全注释的 conffile
 ```
 
 `/etc/msi-psu-monitor.conf` 里的每一个值都是注释掉的，所以装上它不改变任何行为；
@@ -489,11 +489,11 @@ Ubuntu 22.04 rootfs/chroot 构建并在 22.04 内运行通过（见 `docs/testin
 uv sync --group dev --group build
 bash scripts/build_binary.sh
 bash scripts/build_deb_binary.sh
-tar tzf dist/msi-psu-monitor_1.0.0_linux_x86_64.tar.gz | head
-sha256sum -c dist/msi-psu-monitor_1.0.0_linux_x86_64.tar.gz.sha256
+tar tzf dist/msi-psu-monitor_*_linux_x86_64.tar.gz | head
+sha256sum -c dist/msi-psu-monitor_*_linux_x86_64.tar.gz.sha256
 env -i PATH=/usr/bin:/bin HOME=/tmp MSI_PSU_DEMO=1 \
   ./dist/bin/linux-x86_64/msi-psu-monitor --once
-dpkg-deb -f dist/msi-psu-monitor_1.0.0_amd64.deb Depends
+dpkg-deb -f dist/msi-psu-monitor_*_amd64.deb Depends
 # 期望：libc6 (>= 2.35), zlib1g —— 没有 python3
 ldd ./dist/bin/linux-x86_64/msi-psu-monitor   # 不应出现 libpython
 ```
@@ -532,7 +532,7 @@ journalctl -u msi-psu-monitor -f
 7. 72h 烤机：`state.json` 的 `energy_wh` 与插座功率计积分值偏差可接受；
 8. `--ocp` 读出的 4 个阈值与 MSI Center 界面 / 出厂规格一致（12A/5A/20s/180s），
    且 `ConnN` 状态与 `--once` 的 `12V-2x6 Status` 行不矛盾；
-9. `--ocp` 在 MEG P 系（`0x56D4`/`0xE749`）上输出 1 字节单多轨标志（`per-rail protection`
+9. `--ocp` 在 MEG P 系（`0x56D4`/`0xE760`）上输出 1 字节单多轨标志（`per-rail protection`
    或 `single combined-rail`），与 MSI Center 的对应开关一致，不产生 NAK 重试或超时；
 10. `--ocp` 在 MEG Ai1600T（`0xC9EB`）上打印「not available」并 exit 0（两个 `0xC0` 视图
    都不支持），不产生 NAK 重试或超时；
@@ -540,7 +540,7 @@ journalctl -u msi-psu-monitor -f
     `--buzzer-off` 在 12+4 OCP 蜂鸣触发时能让蜂鸣停止（C2h 无回读，只看 ACK 与听感）；
     再执行一次，确认它是「静音」还是 MSI 命名的「switch」（第二次是否会重新响）；
 12. `--set-rail multi` / `--set-rail single` 在 MEG Ai1300P（`0x56D4`）上读回一致，
-    断电重启后模式保持；Ai1000P（`0xE749`）同样验证；MPG TS 和 Ai1600T 应拒绝并
+    断电重启后模式保持；Ai1000P（`0xE760`）同样验证；MPG TS 和 Ai1600T 应拒绝并
     exit 1（机型门），且不产生错误寄存器写入；
 13. `--set-rail` 切换前后 `--ocp` 的 multirail 标志与读回一致；切换后的 OCP 行为
     （单轨总电流 vs 各轨独立限流）与 MSI Center 的 Multi Rail/Single Rail 一致；

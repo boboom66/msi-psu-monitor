@@ -1,5 +1,7 @@
 # msi-psu-monitor 基线测试报告（第一阶段）
 
+> **历史快照（2026-10-19/21）**。当前门禁为 **803 tests / 94% 分支覆盖率 / smoke 58 / soak 5000**；当前事实见 `docs/verify.md`、`bug-audit/FIX_LOG.md` 与 `bug-audit/RELEASE_READINESS.md`。
+
 - 执行时间：2026-10-19 10:01–10:05（Asia/Shanghai）
 - 提交：`650076a263d9f6126c58508c60963102116ec4f2`
 - 工作树：干净（`git status --porcelain` 空）
@@ -387,5 +389,5 @@ systemd-analyze verify                 exit 0
   只装 pytest）**736 passed**；3.10 由 ruff/mypy/ast 静态兜底（本机无 3.10）。
 - 冻结二进制本地重建（ALLOW_NEWER_GLIBC=1，仅验证打包链路）：CLI/daemon 7.8 MB，
   binary .deb Depends 仍仅 libc6/zlib1g，hardware-kit demo **30 PASS**。
-- 当前门禁：736 passed、ruff/format/mypy clean、coverage **93%**、smoke 58/58、
+- 当时门禁（2026-10-19）：736 passed、ruff/format/mypy clean、coverage **93%**、smoke 58/58、
   soak 5k PASS、acceptance demo 30 PASS。

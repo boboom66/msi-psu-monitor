@@ -19,7 +19,7 @@
 | **dashboard** | `--dashboard` 起 stdlib `ThreadingHTTPServer`，仅绑 `127.0.0.1:8899`；7 条实时曲线 + 每周能量柱状 + 每图 PNG/CSV 导出；端点 `/`、`/api/history`、`/api/state`、`/api/export` |
 | **demo 模式** | `MSI_PSU_DEMO=1` 合成 PSU（5 分钟 idle→满载→idle 循环、零风扇随负载、per-pin 轻不平衡、黑盒预置 2 条）；`MSI_PSU_DEMO_ALERT=<name>` 卡告警位；`MSI_PSU_DEMO_MODEL=<variant>` 可切全部 5 机型（多轨/单轨路径无硬件可达） |
 | **OCP 检视（只读）** | `--ocp`：MPG TS 出 0xC0 阈值（单针/针差/触发/针差触发/警告 + 可设范围）与 0xC1 实时状态（每连接器状态码 + 运行/总计时 + 6 针 5 秒均值）；MEG P 系出 1 字节 0xC0 单多轨模式（二期只读项）；MEG Ai1600T 打印说明并 exit 0；三格式均支持 |
-| **打包** | `scripts/build_deb.sh` → `dist/msi-psu-monitor_1.0.0_all.deb`（2 个 console script、systemd unit、udev 规则、文档；postinst 自动 reload + enable） |
+| **打包** | `scripts/build_deb.sh` → `dist/msi-psu-monitor_<version>_all.deb`（2 个 console script、systemd unit、udev 规则、文档；postinst 自动 reload + enable） |
 | **systemd** | `msi-psu-monitor.service`（`Type=simple` + `Restart=always` + `StateDirectory`，**不加 `PrivateDevices`**）；旧 timer 方案已废弃并删除文件 |
 | **文档** | `README.md`、`AGENTS.md`、`msi_psu_monitor/AGENTS.md`、`docs/protocol.md`、`docs/verify.md`、`docs/msi-psu-monitor.conf.example` |
 
@@ -272,11 +272,11 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 736 passed
+uv run --group dev pytest -q                     → 803 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 34 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
-bash scripts/build_deb.sh                        → dist/msi-psu-monitor_1.0.0_all.deb
+bash scripts/build_deb.sh                        → dist/msi-psu-monitor_<version>_all.deb
 bash scripts/smoke.sh                            → 58 项全过（三种格式/告警按机型/黑盒/OCP/风扇/Zero Fan/蜂鸣器/daemon/dashboard/.deb 内容与权限）
 ```
 
@@ -287,11 +287,9 @@ bash scripts/smoke.sh                            → 58 项全过（三种格式
 - `tests/test_pid_consistency.py`：五处 USB PID 列表 + README 载荷大小必须与解析器一致。
 - `tests/test_stdlib_only.py`：`python -I` 子进程导入全部模块，第三方依赖混入即失败。
 - `ast.parse(feature_version=(3, 10))`：全部 `.py` 通过 3.10 语法校验（静态兜底）。
-- **Python 矩阵**：本轮在 `.venv`（3.12.3）跑完整套件 **736 通过**，另用 uv 缓存的裸
-  Python 3.13.15（只装 pytest、不装本包）复跑 **736 通过**；本机没有 python3.10，3.10
-  兼容性由 ruff `target-version` / mypy `python_version` / `ast.parse(feature_version=(3,10))`
-  静态兜底，不宣称 3.10 已复跑。`bash scripts/smoke.sh`（**58 项全过**）在 3.12 环境跑过；
-  CI 矩阵仍按 3.10 / 3.12 / 3.13 执行。
+- **Python 矩阵**：`.venv`（3.12.3）、裸 Python 3.13.15、uv 下载的 Python 3.10.21
+  各跑完整套件 **803 通过**；3.10 不再是“仅静态兜底”。`bash scripts/smoke.sh`
+  （**58 项全过**）在 3.12 环境跑过；CI 矩阵仍按 3.10 / 3.12 / 3.13 执行。
 - CI 含 3.10 / 3.12 / 3.13 三矩阵 + `ruff check` + `ruff format --check` + `mypy` + `pytest`
   + **构建 `.deb`**。
 
@@ -340,7 +338,7 @@ turn7 留下的 11 条已逐条修完；每条都补了「改回旧行为就会�
    测试文件都有行。顺带修正文件名正则不收数字的问题：`test_protocol_lin11.py` 之前根本不在
    两条文档校验的覆盖范围内。测试：`test_the_coverage_table_names_real_test_functions`。
 8. **[P2] turn7 留下的裸计数不在护栏里**：`TEST_COUNT_RE` 补 `通过|通過`。那个未受护栏保护的旧通过数已按裸环境实跑对齐：
-   当前 3.12.3 venv 与裸 Python 3.13.15 各 **736 通过**；3.10 由静态门禁兜底（本机无 3.10）。
+   当前 3.12.3、裸 3.13.15、uv 3.10.21 各 **803 通过**；3.10 已实跑。
 9. **[P2] 零依赖探针漏了 `__main__.py`**：`SHIPPED_MODULES` 元组补 `__main__`，并新增
    `test_the_probe_covers_every_shipped_module`，把元组与 `msi_psu_monitor/*.py` 精确对齐。
 10. **[P2] `test_pid_consistency.py` 比的是 `bulk_size` 而不是真正的门限 `payload_size`**：README
@@ -675,7 +673,7 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
 - 新增 daemon 300 次迭代 fd 泄漏检查；修复 shellcheck DEF-001 的误判（命令字符串不能加引号）。
 - 覆盖率进入 dev 依赖与 CI（`coverage report --fail-under=90`）；release workflow 补 ruff/format/mypy/smoke 门禁。
 - 冻结二进制 smoke 增加 performance/多轨/AlertLog/VIN 检查。
-- 当前 **736 passed**，smoke **58**，源语句覆盖率 **92%**；本地重建二进制通过。
+- 当前 **803 passed**，smoke **58**，分支覆盖率 **94%**；本地重建二进制通过。
 - 仍 BLOCKED：真实 PSU、root/systemd/udev、22.04/arm64、浏览器、长稳、真实发版。
 
 ## Phase 3（2026-10-19）：全量生产级审计增量
@@ -684,7 +682,7 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
   非正 interval、performance duty、`--columns all` 拼写、AlertLog limit=0、daemon init fd 泄漏、
   Dashboard CSV 错列。
 - 新增回归：输出路径/`/dev/full` 三类入口、配置边界、解析边界、daemon 资源、Dashboard CSV。
-- 全量 736 tests、ruff/format/mypy、smoke 58、shellcheck、systemd-analyze；覆盖率 92%。
+- 全量 803 tests、ruff/format/mypy、smoke 58、shellcheck、systemd-analyze；覆盖率 94%。
 - 仍未改变 P1：真实 PSU、CI 22.04/arm64、真实 systemd/udev、真实桌面浏览器、24h/72h、正式发版。
 - Playwright headless Chromium：range 切换、7 CSV/7 PNG、8 canvas、无 console/page error、无外部请求；
   320px 视口发现并修复图表网格横向溢出（DEF-012）。
@@ -715,11 +713,11 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
   --ocp-set）；多轨 formatter；严格 exposition 解析替代 promtool。
 - **发布文档**：新增 `CHANGELOG.md` 并随源码 deb/二进制 deb/tar/kit 发布；
   RELEASE_READINESS、support/incident/SECURITY、README/verify/protocol 同步。
-- **环境复核**：venv Python 3.12.3 **736 passed**；裸 Python 3.13.15（uv 缓存解释器，
-  只装 pytest）**736 passed**；3.10 由 ruff/mypy/ast 静态兜底（本机无 3.10）。
+- **环境复核**：venv Python 3.12.3 **803 passed**；裸 Python 3.13.15 **803 passed**；
+  uv 下载的 Python 3.10.21 **803 passed**（3.10 已实跑，不再只是静态兜底）。
   本地重建 frozen binary + binary .deb + hardware kit，kit demo 30 PASS（glibc 2.39
   本地 smoke build，非 release artifact）。
-- **当前门禁**：736 passed、ruff/format/mypy clean、coverage **93%**、smoke 58/58、
+- **当前门禁**：803 passed、ruff/format/mypy clean、coverage **94%**、smoke 58/58、
   soak 5k PASS、acceptance demo 30 PASS。
 - **仍 BLOCKED/NOT RUN**：真机 OCP 写与断电保持、arm64、真实 root/systemd/udev、
   桌面浏览器、24h/72h、官方 promtool。不得把这些写成 PASS。

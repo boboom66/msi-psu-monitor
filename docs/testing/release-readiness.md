@@ -2,7 +2,7 @@
 
 > **历史记录，不是当前结论。** 当前发布判断见
 > [bug-audit/RELEASE_READINESS.md](../../bug-audit/RELEASE_READINESS.md)；当前测试数为
-> 736、覆盖率为 93%，且本文提到的「真实浏览器 PASS」在本环境为 NOT RUN（无 headless
+> 803、覆盖率为 94%，且本文提到的「真实浏览器 PASS」在本环境为 NOT RUN（无 headless
 > 浏览器系统库），以当前文档为准。
 
 - 日期：2026-10-19

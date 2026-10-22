@@ -41,9 +41,8 @@ by the register data. Most registers return 2 bytes (uint16, little-endian).
 Send: `[0x50, <register>, <data_bytes...>, 0x00, ...]`
 Response: `[0x50, <register>, <data_bytes...>, 0x00, ...]`
 
-Writes to a single register. The response echoes the written data on success; a
-reply whose first payload byte is `0xFC` (ACK) means accepted, `0xFE` (NAK) means
-the device refused the value.
+Writes to a single register. The response echoes the command and register; the
+status byte that follows is `0xFC` (ACK, accepted) or `0xFE` (NAK, refused).
 
 Implemented writes (fan/Zero Fan/buzzer, the MEG P multirail switch and the MPG TS
 12V-2x6 threshold configuration):
@@ -51,7 +50,7 @@ Implemented writes (fan/Zero Fan/buzzer, the MEG P multirail switch and the MPG 
 | What | Command | Notes |
 |------|---------|-------|
 | Fan setting | `[0x50, 0x41, <mode>, 0x00, <duty>]` | `mode` 1 = auto (duty ignored), 3 = manual; `duty` 0-100, the PSU clamps out-of-range values |
-| Zero Fan | `[0x50, 0x43, <0/1>]` | MPG TS models; state read back via 42h byte 6 |
+| Zero Fan | `[0x50, 0x43, <0/1>]` | MPG TS models; state read back via 42h byte 4 |
 | Buzzer switch | `[0x50, 0xC2]` | MPG TS models; no payload, no read-back, no F1h. MSI calls the method a *switch*, so a second invocation may re-arm the buzzer (hardware check pending) |
 | Multirail OCP | `[0x50, 0xC0, <2/1>]` | MEG Ai1000P/Ai1300P only; 2 = per-rail, 1 = combined; followed by F1h |
 | 12V-2x6 OCP thresholds | `[0x50, 0xC0, <enable>, <point low>, <point high>, <diff low>, <diff high>, <trigger s>, <diff trigger s>, <warning s>]` | MPG TS only; amp fields LINEAR11 exp -4 (`value << 4`, `0xE0`), times are whole seconds; followed by F1h. CLI validates 10-14 A / 4-8 A / 5-30 s / 5-30 s / 30-240 s and verifies by read-back |
@@ -73,7 +72,7 @@ what went wrong (`msi-psu.c:186-198`):
 
 A read reply that carries data is never a NAK, even when the data itself starts
 with `0xFE`: in the 62-byte `0xE0` layout byte 2 is the first payload byte, and a
-12 V LINEAR11 word such as `0xCEFE` (11.984 V) or an uptime counter that happens
+12 V LINEAR11 word such as `0xCDFE` (11.984 V) or an uptime counter that happens
 to land on `0xFE` is ordinary data. Treating it as a refusal throws away a whole
 frame of real measurements.
 
@@ -97,8 +96,8 @@ frame of real measurements.
 | TEMP0 | 0x30 | 2 bytes | Internal temperature (LINEAR11, mC) |
 | FAN_RPM | 0x40 | 2 bytes | Fan speed (LINEAR11, unsigned) |
 | FAN_MODE | 0x41 | 3 bytes | Fan control mode + 自订占空比 `[mode, x, duty]`（1=auto，3=customized；一期读写，写走 `--fan-mode/--fan-duty` + F1h 保存） |
-| FAN_DUTY | 0x42 | 2 or 4 bytes | 前两字节全机型有效：`[实际占空比, MCU 算出的占空比]`。后两字节（`[软件设定值, ZeroFan==1]`）**只有 MPG TS 系有定义**——MSI Center 在 MEG 机型上读到第 2 个字节就返回（`CPSU.cs:810`），因此本实现对 MEG 报 `None`，不去解释参考实现拒绝解释的字节（一期读；TS 的 ZeroFan 进 text 显示） |
-| MULTIRAIL / OCP12V2x6_CONFIG | 0xC0 | 1 or 8 bytes | **重载寄存器**，同一地址两条命令、机型门互补：MEG Ai1000P/Ai1300P 读 1 字节多轨开关（`==2` 为多轨，`CPSU.cs:823-832`）；MPG Ai1300TS/Ai1600TS 读 8 字节 12V-2x6 OCP 阈值（`CPSU.cs:840-856`）；MEG Ai1600T 两条都不支持。12V-2x6 载荷 `[enable, 单针A, 针差A, 触发s, 针差触发s, 警告s]`，前两个 A 值为 LINEAR11（exp -4，即 `value<<4` 低字节 + `0xE0` 高字节，12A→`0xE0C0`、5A→`0xE050`）；出厂 12A/5A/20s/20s/180s。一期只读展示走 `--ocp`，写（8B + F1h）三期专批 |
+| FAN_DUTY | 0x42 | 2 or 4 bytes | 前两字节全机型有效：`[实际占空比, MCU 算出的占空比]`。后两字节（`[软件设定值, ZeroFan==1]`）**只有 MPG TS 系有定义**——MSI Center 在 MEG 机型上读到第 2 个字节就返回（`CPSU.cs:810`），因此本实现对 MEG 报 `None`，不去解释参考实现拒绝解释的字节（只读；TS 的 ZeroFan 进 text 显示） |
+| MULTIRAIL / OCP12V2x6_CONFIG | 0xC0 | 1 or 8 bytes | **重载寄存器**，同一地址两条命令、机型门互补：MEG Ai1000P/Ai1300P 读 1 字节多轨开关（`==2` 为多轨，`CPSU.cs:823-832`）；MPG Ai1300TS/Ai1600TS 读 8 字节 12V-2x6 OCP 阈值（`CPSU.cs:840-856`）；MEG Ai1600T 两条都不支持。12V-2x6 载荷 `[enable, 单针A, 针差A, 触发s, 针差触发s, 警告s]`，前两个 A 值为 LINEAR11（exp -4，即 `value<<4` 低字节 + `0xE0` 高字节，12A→`0xE0C0`、5A→`0xE050`）；出厂 12A/5A/20s/20s/180s。读走 `--ocp`；写走 `--ocp-set`/`--load-thresholds`（8B + F1h + 读回校验，仅 MPG TS）。enable 仅定义 0/1；其他值视为读取失败，不猜成 disabled |
 | ALERT_STATUS | 0xE1 | 18 / 18 / 13 bytes | GPU Safeguard+ 状态。**字节序按机型查表**（MSI Center 三张索引数组，`CPSU.cs:1046-1057`）：MPG TS `{6,7,8,18..29,14,15,16}`（18B）、MEG P `{0..17}`（18B）、MEG Ai1600T `{0..8,14,15,16,17}`（13B）。同一个字节在 MEG 是 `OVP_12V`、在 TS 是 `OCP_12V`，**绝不共用一张表**；未知机型拒答（返回 None）而非猜。Status 行 + exit 2 来源；待真机复核 |
 | ALERT_LOG | 0xC1 | 26B×10 | InfoID `1..10`：GPU Safeguard+ 黑盒（`--show-log` 来源）。**InfoID `1` 是最新一条，`10` 最旧**（REV6 p.13 原文），本实现按 InfoID 升序展示。REV6 p.13 的 26 字节表：`[0]=哪一组 12+4 触发, [1]=状态码, [2:6]=运行计时, [6:10]=总计时, [10:22]=被触发那一组的 6 针平均电流, [22:26]=累计触发次数`。字段语义与 42B 实时表同源 |
 | OCP12V2x6_STATE | 0xC1 | 42 bytes | InfoID `0x00`：12V-2x6 实时状态（`--ocp` 第二段来源）。`[0]=Conn1 状态, 1-4=运行计时, 5-8=总计时, 9-20=6 针电流, 21=Conn2 状态, 22-25=运行计时, 26-29=总计时, 30-41=6 针电流`（REV6 p.12 的 Byte1-42 表，已逐字节核对）；状态码 `0` 正常 / `1` 单针 OCP / `2` 针差 / `3` 瞬时 OC(>18A)。注意 MSI Center 此处有个 bug：`I_Out_2_6 = ValueCalc(RxData[43], RxData[43])`（应为 44/45），本实现按正确偏移取 12 针 |

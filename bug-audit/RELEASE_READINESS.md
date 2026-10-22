@@ -1,7 +1,7 @@
 # Release readiness — current assessment
 
 **Verdict: NOT READY for a production release.** The software and packaging gates
-are green (735 tests, 93% branch coverage, smoke, soak, static security checks), but
+are green (803 tests, 94% branch coverage, smoke, soak, static security checks), but
 the release-critical hardware/platform evidence is still missing, the OCP
 threshold write has never touched a real PSU, and the published artifacts predate
 this work.
@@ -10,11 +10,11 @@ this work.
 
 | Gate | Evidence |
 |---|---|
-| Full test suite | **735 passed** (`pytest -q`) |
+| Full test suite | **803 passed** (`pytest -q`) |
 | Lint / format / types | ruff check + format clean, mypy clean (10 files) |
-| Coverage | **93%** branch coverage (2957 stmts / 195 missed / 1084 branches, floor 90%) |
+| Coverage | **94%** branch coverage (3166 stmts / 183 missed / 1174 branches, floor 90%) |
 | Smoke (demo PSU, no hardware) | **58/58** passed, including daemon→prometheus→history→dashboard |
-| Accelerated soak | `scripts/soak.sh 5000`: exit 0, peak RSS 16.4 MB, fd=3, state files fresh |
+| Accelerated soak | `scripts/soak.sh 5000`: exit 0, peak RSS 18 436 KB, fd=3, state files fresh |
 | Strict exposition | `tests/test_prometheus_exposition.py` parses HELP/TYPE, labels, finite values, duplicate series and the canonical `metric{} value` form |
 | Hardware-kit self-test | `acceptance.sh --demo`: 30 PASS / 0 FAIL / 3 MANUAL / 2 SKIP |
 | Static infra checks | shellcheck, systemd-analyze verify, udevadm verify, offline security analysis (exposure 3.3 OK) |
@@ -31,7 +31,7 @@ this work.
 | Root/systemd/udev install + daemon start/stop on a real host | **BLOCKED** — no passwordless root |
 | Desktop browser verification of the dashboard | **BLOCKED** — headless shell missing system libs; Node harness used instead |
 | 24 h / 72 h soak | **NOT RUN** (accelerated 5k-sample gate and 50k local soak pass) |
-| Published artifacts contain the latest fixes | **NO** — `v1.0.0` was built before this work; the tree is uncommitted |
+| Published artifacts contain the latest fixes | **NO** — `v1.0.0` was built before this work; HEAD `5d5716b` is 75 commits ahead and the tree is uncommitted |
 | Official `promtool check metrics/rules` | **NOT RUN** — no promtool/network; replaced by the strict exposition test, not claimed as promtool |
 
 ## 3. What a release would require

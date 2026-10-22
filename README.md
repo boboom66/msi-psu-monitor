@@ -149,7 +149,8 @@ msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
   -w, --watch      Watch mode; optional refresh seconds (default: [monitor]
                    interval, 2.0)
   -i, --interval   Polling interval in seconds (only valid with --watch)
-  -o, --once       Read sensors once and exit (also the default)
+  -o, --once       Read sensors once and exit (also the default; not with
+                   --export/--show-log/--show-alert-log/--ocp/--dump-thresholds)
   -O, --output     Write output to a file instead of stdout (with --watch the
                    frames are appended to that file; --dashboard has no output)
       --serial     Select one of several PSUs by serial number

@@ -16,7 +16,7 @@
 | MSI Center 源码 | `04_MSI-Center源码/Msi-Center/Power Supply Unit/.../CPSU.cs`、`C_PSU.cs` | 真实行为基准（E2） |
 | 实屏 | `05_截图/images/01..10` | 总览/曲线/导出/风扇：UI 语义 |
 
-当前实现：本仓库工作树（680 tests，覆盖率 92%，smoke 58/58），详见
+当前实现：本仓库工作树（803 tests，覆盖率 94%，smoke 58/58），详见
 [bug-audit/TEST_REPORT.md](../../bug-audit/TEST_REPORT.md)。
 
 ## 1. 结论摘要
@@ -141,7 +141,7 @@ stderr+exit 2/`alerts-*.log`，但名字独立（`power_high`/`temp_high`/`rail_
 | FEAT-03 | — | 硬件 OCP 阈值写/导出/导入 + 握手退避 + promtool 替代 | REQ-12/16/18、F-16/F-17 | `--dump-thresholds`/JSON、`--ocp-set`、`--load-thresholds`（8B + F1h + 读回 3 次；范围硬校验；同值不写；机型门）；初始化握手 3 次退避；严格 exposition 测试替代 promtool | `test_ocp.py` 5 例、`test_cli_features.py` 14 例、`test_psu_sensors.py` 2 例、`test_prometheus_exposition.py` 4 例；保护写仍待真机 bench |
 | FEAT-02 | — | 运维/CLI 打磨（U-04、U-06、U-07、F-19） | REQ-8/16、F-19 | Prometheus 规范 exposition（`metric{} value`，无空格）、电量 counter 双名、`docs/prometheus-rules.yml` 随包、`--dump-config`（text/json，无 PSU 也可打印生效阈值）、`--help` 注明 5s 平均/EFF 源/针序、阈值告警带 measured/limit 明细 | `test_cli_features.py`（dump-config/alias/描述）、`test_packaging.py`（规则随包）、`test_monitor_format.py` |
 
-修复后：**735 passed**、ruff/format/mypy clean、coverage **93%**、smoke **58/58**。
+修复后：**803 passed**、ruff/format/mypy clean、coverage **94%**、smoke **58/58**。
 
 ## 7. 与上游参考实现的差异
 
