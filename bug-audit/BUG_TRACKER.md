@@ -2,7 +2,7 @@
 
 - Repository: `msi-psu-monitor` (`/home/timzhang/projects/project/msi-psu-monitor`)
 - Audit date: 2026-10-19; **updated 2026-10-22 after the second full audit**
-- Audit baseline: `fdfc97d`; current HEAD is the 2026-10-22 audit/doc commit (clean tree, 80 commits ahead at update time); current gate **803 tests / 94% branch coverage**
+- Audit baseline: `fdfc97d`; current HEAD is the 2026-10-22 audit/doc commit (clean tree, ahead of `origin/master` at update time); current gate **803 tests / 94% branch coverage**
 - Earlier ledger: [docs/testing/bug-report.md](../docs/testing/bug-report.md) DEF-001..DEF-021.
   This file is the continuing global ledger; DEF-001..DEF-021 keep their status there.
 
@@ -46,7 +46,7 @@ VERIFIED on static reasoning alone.
 
 | ID | Sev | Status | What | Why it is not fixed / next step |
 |---|---|---|---|---|
-| NR-001 | P3 | **RESOLVED (external evidence)** | Per `psu-file/msi-psu-monitor-项目信息汇总.md` (2026-10-21), `promtool 2.45.3` accepted `metric{} value` (no space); it reported 9 naming-policy warnings (`_total`/`_s` suffixes), not parse errors. Not re-run in this session. |
+| NR-001 | P3 | **RESOLVED (re-run 2026-10-22)** | `promtool 2.45.3` on the current 1.0.1 daemon textfile accepts `metric{} value` (no space) with **no syntax errors**; it reports 8 naming-policy warnings (`_total`/`_s` suffixes), not parse errors. `promtool check rules docs/prometheus-rules.yml` → SUCCESS (5 rules). The naming decision remains open, not a parser bug. |
 | NR-002 | P3 | **FIXED / VERIFIED** | Negative count/energy/daily values are clamped/dropped at load with a warning; `test_negative_state_counters_do_not_produce_negative_totals`, `test_negative_daily_energy_buckets_are_dropped`. |
 | NR-003 | P3 | **FIXED / VERIFIED** | Config-sourced `output`/`serial` now print an explicit warning when the selected mode does not use them (`--dashboard`, `--export`, `--show-alert-log`); explicit CLI combinations still exit 2. Tests: `test_config_*_not_silently_ignored_by_*`. |
 | NR-004 | P3 | OPEN | `--show-log` cannot distinguish a NAK/timeout on C1h from "device holds no records"; both print "No black-box alert records stored." and exit 0 | The protocol returns `None` both for "slot absent" and "no answer", and the documented contract treats an empty black box as success. Needs a device capture to distinguish. |

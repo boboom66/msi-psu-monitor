@@ -68,6 +68,12 @@ All notable changes to this project are documented here. The format follows
   path errors.
 - Alert thresholds/pin lists treat non-finite or overflowing values as missing,
   never as a recovery; >12 pins cannot create phantom pin alerts.
+- `build_binary.sh` / `build_hardware_kit.sh` read the glibc version with `awk`
+  instead of `head -1 | awk`, so `set -o pipefail` cannot turn the harmless
+  SIGPIPE into a failed build.
+- Regression tests now prove the rescan happens on the fifth consecutive failure
+  (not merely on the configured constant) and that `--dump-thresholds` rejects a
+  model without the 8-byte 0xC0 layout with the unsupported reason.
 - `--dump-config` writes the real `[fan]` section and reports an unwritable `-O`
   as one error line; watch/once keep working when the state directory is unwritable.
 - `--once` with `--export`/`--show-log`/`--show-alert-log`/`--ocp`/`--dump-thresholds`

@@ -142,7 +142,7 @@
 | TEST-094 | OCP 阈值写编码 | `MSIPSU.set_ocp_thresholds()`：13 A/6 A/10 s/12 s/60 s | 写 `(0xC0, 1, 0xD0, 0xE0, 0x60, 0xE0, 10, 12, 60)` 再 `(0xF1,)`；越界/缺字段/非 TS 返回 False 且不写 | 通过 | PASS |
 | TEST-095 | OCP 阈值写 CLI | `--ocp-set` / `--load-thresholds` / `--dump-thresholds`（text+JSON） | 写后读回一致、同值 no-op、读回不符重试 3 次后 exit 1、不支援机型 exit 1、范围错误 exit 2 | 通过 | PASS（保护写仅 demo/mock，真机 bench 仍待做） |
 | TEST-096 | 初始化握手退避 | 前两次 FA51 失败、第三次成功 / 全失败 | 3 次后成功；sleep 序列 0.5/1.0；全失败仍不抛异常 | 通过 | PASS |
-| TEST-097 | 严格 exposition 解析 | `test_prometheus_exposition.py` 解析三种 formatter 输出 | HELP/TYPE、label 转义、数值、重复序列均校验；旧 `metric {} value` 写法被拒 | 通过 | PASS（promtool 本机替代） |
+| TEST-097 | 严格 exposition 解析 | `test_prometheus_exposition.py` 解析三种 formatter 输出 | HELP/TYPE、label 转义、数值、重复序列均校验；旧 `metric {} value` 写法被拒 | 通过 | PASS（严格解析；2026-10-22 官方 promtool 语法通过，8 条命名告警待决策） |
 
 | TEST-098 | 可重复 soak | `bash scripts/soak.sh 5000`；坏参数 abc/10/0 | 5000 采样 exit 0、SOAK PASS、state/latest/prom/日志齐全；坏参数 exit 2 | 通过 | PASS（5k 5.5s；50k 本地长跑 RSS 16.4 MB/fd=3） |
 | TEST-099 | 确定性 fuzz | 400 随机 0xE0 payload×5 机型 / 120 随机配置 / 120 随机 `--ocp-set` | 无 traceback、NaN/inf 不外泄、越界被拒 | 通过 | PASS |

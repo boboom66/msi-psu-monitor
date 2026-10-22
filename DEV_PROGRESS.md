@@ -274,7 +274,7 @@
 ```
 uv run --group dev pytest -q                     → 803 passed
 uv run --group dev ruff check .                  → All checks passed
-uv run --group dev ruff format --check .         → 34 files already formatted
+uv run --group dev ruff format --check .         → 67 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
 bash scripts/build_deb.sh                        → dist/msi-psu-monitor_<version>_all.deb
 bash scripts/smoke.sh                            → 58 项全过（三种格式/告警按机型/黑盒/OCP/风扇/Zero Fan/蜂鸣器/daemon/dashboard/.deb 内容与权限）
@@ -287,7 +287,7 @@ bash scripts/smoke.sh                            → 58 项全过（三种格式
 - `tests/test_pid_consistency.py`：五处 USB PID 列表 + README 载荷大小必须与解析器一致。
 - `tests/test_stdlib_only.py`：`python -I` 子进程导入全部模块，第三方依赖混入即失败。
 - `ast.parse(feature_version=(3, 10))`：全部 `.py` 通过 3.10 语法校验（静态兜底）。
-- **Python 矩阵**：`.venv`（3.12.3）、裸 Python 3.13.15、uv 下载的 Python 3.10.21
+- **Python 矩阵**：当前 `.venv`（3.10.21）、Python 3.12.3、裸 Python 3.13.15
   各跑完整套件 **803 通过**；3.10 不再是“仅静态兜底”。`bash scripts/smoke.sh`
   （**58 项全过**）在 3.12 环境跑过；CI 矩阵仍按 3.10 / 3.12 / 3.13 执行。
 - CI 含 3.10 / 3.12 / 3.13 三矩阵 + `ruff check` + `ruff format --check` + `mypy` + `pytest`
@@ -718,6 +718,9 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
   本地重建 frozen binary + binary .deb + hardware kit，kit demo 30 PASS（glibc 2.39
   本地 smoke build，非 release artifact）。
 - **当前门禁**：803 passed、ruff/format/mypy clean、coverage **94%**、smoke 58/58、
-  soak 5k PASS、acceptance demo 30 PASS。
+  soak 5k PASS、180 s 真实节奏 PASS、acceptance demo 30 PASS。
+- **本地 1.0.1 产物**：x86_64 tar/deb/kit（glibc 2.39 smoke，非官方 22.04/arm64）已生成；
+  `env -i --once`、extracted deb、kit demo 均通过。
+- **官方 promtool**：2.45.3 已跑当前 1.0.1 输出，语法通过、rules 5 条成功；8 条命名告警待决策。
 - **仍 BLOCKED/NOT RUN**：真机 OCP 写与断电保持、arm64、真实 root/systemd/udev、
-  桌面浏览器、24h/72h、官方 promtool。不得把这些写成 PASS。
+  桌面浏览器、24h/72h。不得把这些写成 PASS。

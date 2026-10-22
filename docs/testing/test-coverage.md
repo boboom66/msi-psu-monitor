@@ -2,14 +2,17 @@
 
 > 本文件只写**本轮实际跑过**的结论；没有真机/浏览器环境的项目明确标 NOT RUN / BLOCKED。
 
-- 自动化测试：**803 passed**（2026-10-22 全项目审计后）。实际执行环境：venv
-  Python 3.12.3、裸 Python 3.13.15、uv 下载的 Python 3.10.21 各 **803 passed**。
-  3.10 已实跑；CI 矩阵仍配置 3.10 / 3.12 / 3.13。
+- 自动化测试：**803 passed**（2026-10-22 全项目审计后）。实际执行环境：当前 venv
+  Python 3.10.21、Python 3.12.3、裸 Python 3.13.15 各 **803 passed**；CI 矩阵仍配置
+  3.10 / 3.12 / 3.13。
 - 覆盖率：**94%**（branch；3166 stmts / 183 missed / 1174 branches，floor 90%）。
 - smoke：**58 passed / 0 failed**（demo，无硬件）。
-- 加速 soak：`scripts/soak.sh 5000` → SOAK PASS（峰值 RSS 16.4 MB，fd=3）；
+- 加速 soak：`scripts/soak.sh 5000` → SOAK PASS（峰值 RSS 18 436 KB，fd=3）；
   本地 50k 采样长跑 exit 0。
+- 真实节奏 demo：180 samples at 1 s → exit 0，峰值 RSS 18 000 KB，fd=3，state 16 KiB。
 - 硬件 kit demo acceptance：**30 PASS / 0 FAIL / 3 MANUAL / 2 SKIP**；MANUAL 项不算 PASS。
+- 官方 promtool 2.45.3（当前 1.0.1 daemon textfile）：metrics **exit 3**，8 条命名规范
+  告警、**无语法错误**；`check rules docs/prometheus-rules.yml` → SUCCESS（5 rules）。
 - 浏览器：真实桌面浏览器/Playwright **NOT RUN**（headless Chromium 缺系统库，本机无法启动）；
   dashboard 的 JS 用 Node DOM-stub 验证页面/图表叠加，不能替代真实浏览器验收。
 
@@ -36,14 +39,14 @@
 | OCP 阈值真实写入与断电保持 | BLOCKED（仅 demo/mock；不得标 PASS） |
 | root/systemd/udev 实际启停 | PARTIAL/BLOCKED |
 | arm64 运行 | BLOCKED（CI build 配置存在，未在 arm64 执行） |
-| 24h/72h 长稳 | NOT RUN（5k CI soak + 50k 本地加速长跑 PASS） |
+| 24h/72h 长稳 | NOT RUN（5k CI soak + 50k 加速长跑 + 180 s 真实节奏 PASS） |
 | 真实桌面浏览器 | NOT RUN（Node DOM-stub 替代） |
-| 官方 promtool 校验 | NOT RUN（无工具/网络；严格 exposition 解析作为本机替代） |
+| 官方 promtool 校验 | RUN（metrics 语法通过、8 条命名告警；rules 5 条成功） |
 
 ## 已知限制
 
 - 覆盖率百分比不等于无 Bug；未覆盖行主要是防御性/错误分支和硬件异常路径。
 - 所有 mock/stub 测试不能证明真实 HID 设备行为。
 - 真实 OCP/OTP/OVP 故障注入、OCP 保护点写入需要安全条件和样机，未执行。
-- CI 已发布 v1.0.0；当前修复已提交（2026-10-22 审计提交）但尚未打 v1.0.1 tag/发布，arm64 产物也未在
-  arm64 上运行。
+- CI 已发布 v1.0.0；当前修复已提交，并已生成 x86_64/glibc 2.39 的本地 1.0.1
+  tar/deb/kit（仅 smoke），但尚未打 v1.0.1 tag/发布；arm64 产物也未在 arm64 上运行。

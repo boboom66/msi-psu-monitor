@@ -90,7 +90,7 @@ uv run --group dev ruff format --check .
 | `tests/test_release_security.py` | SBOM/CycloneDX 与产物哈希、SECURITY/support/incident 文档、release workflow 发布 SBOM（`test_the_sbom_generator_emits_cyclonedx_with_artifact_hashes`、`test_the_release_workflow_generates_and_publishes_an_sbom`） |
 | `tests/test_e2e_cli.py` | 真实 console 入口子进程：`--version`/`--help`/demo text+json/告警 exit 2/`-O`/`--show-alert-log`/无设备错误（`test_demo_alert_exit_code_and_stderr_via_subprocess`、`test_no_demo_no_hardware_is_a_clean_error`） |
 | `tests/test_ai1300ts.py` | Ai1300TS 全功能回归（`test_ai1300ts_cli_covers_every_feature`）：读数/JSON/Prom、OCP 读写、风扇/Zero Fan/蜂鸣器、告警和本地阈值、`--set-rail` 拒绝 |
-| `tests/test_prometheus_exposition.py` | 严格 exposition 语法（`test_format_prometheus_passes_a_strict_exposition_parser`）：HELP/TYPE、label 转义、数值、重复序列，旧式 `metric {} value` 必须被拒；promtool 的本机替代 |
+| `tests/test_prometheus_exposition.py` | 严格 exposition 语法（`test_format_prometheus_passes_a_strict_exposition_parser`）：HELP/TYPE、label 转义、数值、重复序列，旧式 `metric {} value` 必须被拒；promtool 的本机替代（2026-10-22 官方 promtool 2.45.3 已补跑：语法通过，8 条命名告警待决策） |
 | `tests/test_robustness.py` | 确定性 fuzz：随机 0xE0 payload ×5 机型、随机配置文本、随机 `--ocp-set`（`test_random_bulk_payloads_never_crash_a_variant_or_a_formatter`）；不崩、不泄漏 NaN/inf |
 | `tests/test_soak.py` | `scripts/soak.sh` 的坏参数拒绝、短线长跑与 CI 门禁（`test_the_soak_script_passes_a_short_run`） |
 | `tests/test_audit_regression.py` | 全项目审计回归：非 UTF-8 uevent、HID 帧边界、EBADF/重复 open、daemon 异常、NaN/FIFO/深层 JSON、原子写权限、黑盒兜底、OCP 非有限值/未定义 enable、BOM、坏阈值、`--once` 契约、release/soak（`test_detect_devices_skips_non_utf8_uevent`、`test_state_update_ignores_non_finite`、`test_once_is_rejected_with_a_mode_that_would_ignore_it`、`test_demo_non_ts_models_do_not_report_zero_fan`） |
