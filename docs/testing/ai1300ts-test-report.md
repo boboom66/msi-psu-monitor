@@ -1,5 +1,7 @@
 # Ai1300TS 严格测试报告
 
+> **历史快照（2026-10-19/21）**。当前门禁为 **803 tests / 94% 分支覆盖率 / smoke 58 / soak 5000**；当前事实见 `docs/verify.md`、`bug-audit/FIX_LOG.md` 与 `bug-audit/RELEASE_READINESS.md`。
+
 - 日期：2026-10-21
 - 对象：MSI MPG Ai1300TS，USB PID 0xAA6F，内部 variant mpg_ai1300ts
 - 环境：Ubuntu 24.04 WSL2，Python 3.12.3，demo 模式（无真实 PSU）
@@ -22,10 +24,10 @@
 
 | 测试 | 结果 |
 |---|---|
-| 全量 pytest | **736 passed** |
+| 全量 pytest | **803 passed** |
 | Ai1300TS 专项测试 | **5 passed** |
 | Ai1300TS 相关模块（sensors/ocp/demo/PID/专项） | **216 passed** |
-| 全量分支覆盖率 | **93%**（2957 stmts / 195 missed / 1084 branches） |
+| 全量分支覆盖率 | **94%**（3166 stmts / 183 missed / 1174 branches） |
 | 端到端检查矩阵 | **58 项通过，0 失败** |
 | Ai1300TS 5k 采样 soak | **SOAK PASS**，峰值 RSS 16384 KB，fd=3，state dir 32K |
 | dashboard API（Ai1300TS 数据） | /api/state 与 /api/live 返回正常 |

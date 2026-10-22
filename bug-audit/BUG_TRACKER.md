@@ -1,8 +1,8 @@
 # Bug tracker — full-project deep audit (Phase 5)
 
 - Repository: `msi-psu-monitor` (`/home/timzhang/projects/project/msi-psu-monitor`)
-- Audit date: 2026-10-19
-- Audit baseline: `fdfc97d` (clean tree) — changes in this phase are uncommitted until the owner says otherwise
+- Audit date: 2026-10-19; **updated 2026-10-22 after the second full audit**
+- Audit baseline: `fdfc97d`; current HEAD `5d5716b` + uncommitted work tree; current gate **803 tests / 94% branch coverage**
 - Earlier ledger: [docs/testing/bug-report.md](../docs/testing/bug-report.md) DEF-001..DEF-021.
   This file is the continuing global ledger; DEF-001..DEF-021 keep their status there.
 
@@ -46,9 +46,9 @@ VERIFIED on static reasoning alone.
 
 | ID | Sev | Status | What | Why it is not fixed / next step |
 |---|---|---|---|---|
-| NR-001 | P3 | OPEN | Prometheus exposition writes some samples as `metric {} value` (space between name and braces) | No `promtool`/Prometheus parser available offline to decide whether the parser rejects the space; changing every formatter line on suspicion is riskier than the (likely valid) status quo. Verify with `promtool check metrics` before release. |
-| NR-002 | P3 | OPEN | `MonitorState.from_dict()` accepts a negative or absurd `count` from a hand-edited `state.json`; `power_avg` can then render negative | No crash and the file is user-owned; clamping would silently "repair" data an operator may be investigating. Needs a policy decision (clamp vs surface a warning). |
-| NR-003 | P3 | OPEN | Config `[monitor] output` / `serial` are silently ignored by `--dashboard` / local-only modes (the CLI-level equivalents are rejected with exit 2) | Config keys are defaults, not explicit flags; adding warnings for every non-applicable config key needs a broader precedence decision. |
+| NR-001 | P3 | **RESOLVED (external evidence)** | Per `psu-file/msi-psu-monitor-项目信息汇总.md` (2026-10-21), `promtool 2.45.3` accepted `metric{} value` (no space); it reported 9 naming-policy warnings (`_total`/`_s` suffixes), not parse errors. Not re-run in this session. |
+| NR-002 | P3 | **FIXED / VERIFIED** | Negative count/energy/daily values are clamped/dropped at load with a warning; `test_negative_state_counters_do_not_produce_negative_totals`, `test_negative_daily_energy_buckets_are_dropped`. |
+| NR-003 | P3 | **FIXED / VERIFIED** | Config-sourced `output`/`serial` now print an explicit warning when the selected mode does not use them (`--dashboard`, `--export`, `--show-alert-log`); explicit CLI combinations still exit 2. Tests: `test_config_*_not_silently_ignored_by_*`. |
 | NR-004 | P3 | OPEN | `--show-log` cannot distinguish a NAK/timeout on C1h from "device holds no records"; both print "No black-box alert records stored." and exit 0 | The protocol returns `None` both for "slot absent" and "no answer", and the documented contract treats an empty black box as success. Needs a device capture to distinguish. |
 | NR-005 | P2 | BLOCKED | Real PSU reads/writes, per-model E1h, VIN, black box, OCP, multirail, fan/Zero Fan/buzzer, unplug/reconnect | No MSI PSU attached in this environment. Kit ready: [docs/hardware-acceptance.md](../docs/hardware-acceptance.md). |
 | NR-006 | P2 | BLOCKED | arm64 binary execution; real root/systemd/udev install; real desktop browsers; 24 h/72 h soak | Environment limits (x86_64 WSL, no passwordless root, headless Chromium shell now missing `libnspr4`). CI builds arm64 but only executes x86_64. |
@@ -57,3 +57,12 @@ VERIFIED on static reasoning alone.
 
 - DEF-002 (P3, metadata: Beta classifier, example e-mail, upstream URLs) — unchanged from
   [docs/testing/bug-report.md](../docs/testing/bug-report.md). Release decision pending.
+## Second full audit (2026-10-22)
+
+AUD-01..AUD-14 (NaN/FIFO/Recursion/permissions/contracts/release/docs/soak) are
+recorded with their regression tests in
+[FIX_LOG.md §全项目审计第二轮](FIX_LOG.md). The contract changes from that round are:
+
+- `--once` + `--export/--show-log/--show-alert-log/--ocp/--dump-thresholds` → usage error (exit 2).
+- Config `output`/`serial` ignored by a mode → explicit warning; explicit CLI flags still exit 2.
+- 0xC0 `enabled` bytes other than 0/1 → C0h read unusable (not “disabled”).

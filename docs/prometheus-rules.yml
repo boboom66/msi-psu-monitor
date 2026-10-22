@@ -20,7 +20,7 @@ groups:
           severity: warning
         annotations:
           summary: "MSI PSU monitor cannot read the PSU"
-          description: "msi_psu_up has been 0 for 2 minutes (reason: {{ $labels.reason }})."
+          description: "msi_psu_up has been 0 for 2 minutes; msi_psu_error_info carries the specific reason."
 
       - alert: MsiPsuStale
         expr: time() - node_textfile_mtime_seconds{file=~".*msi-psu\\.prom"} > 90

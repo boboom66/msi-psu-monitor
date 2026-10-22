@@ -8,7 +8,7 @@ Protocol rules live in `msi_psu_monitor/AGENTS.md` (auto-loaded via `opencode.js
 
 ```bash
 uv sync --group dev                                  # py>=3.10, dev toolchain (pytest/ruff/mypy), zero runtime deps
-uv run --group dev pytest -q                         # 736 tests, no hardware needed
+uv run --group dev pytest -q                         # 803 tests, no hardware needed
 uv run --group dev pytest -q tests/test_state.py     # single file
 uv run --group dev ruff check .                      # must be clean
 uv run --group dev mypy msi_psu_monitor/             # must be clean
@@ -34,6 +34,11 @@ sudo ./scripts/install.sh                            # package + systemd daemon 
 CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12/3.13.
 
 ## Gotchas (agent would miss these)
+
+- **契约收口 (2026-10-22)**: `--once` + `--export/--show-log/--show-alert-log/--ocp/--dump-thresholds`
+  is a usage error; config-sourced `output`/`serial` warn when a mode ignores them; C0h
+  `enabled` other than 0/1 is a failed read. See `msi_psu_monitor/AGENTS.md` invariants.
+
 
 - **Stdlib only**: never add a runtime dependency (`pyproject.toml` has zero
   `dependencies`), including for the dashboard and the demo mode.

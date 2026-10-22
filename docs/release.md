@@ -14,7 +14,7 @@ example, docs) ship next to them in a tarball.
 | `msi-psu-monitor_<version>_amd64.deb` | x86_64 | the same executables under `/usr/bin`, `Depends: libc6 (>= 2.35), zlib1g` |
 | `msi-psu-monitor_<version>_arm64.deb` | arm64 | same |
 | `SBOM-x86_64.json` / `SBOM-aarch64.json` | per arch | CycloneDX 1.5 SBOM: project, CPython, PyInstaller, OpenSSL, zlib, bzip2, xz and the SHA-256 of every artifact |
-| `msi-psu-monitor-hardware-kit_<version>_linux_<arch>.tar.gz` | per arch | test-machine kit: binaries, source fallback, `setup.sh`, `acceptance.sh`, `uninstall.sh`, udev/unit/config, docs, `SHA256SUMS`; not the end-user install package |
+| `msi-psu-monitor-hardware-kit-<version>-linux-<arch>.tar.gz` | per arch | test-machine kit: binaries, source fallback, `setup.sh`, `acceptance.sh`, `uninstall.sh`, udev/unit/config, docs, `SHA256SUMS`; not the end-user install package |
 
 The tarball is the recommended download. The `.deb` exists for Debian/Ubuntu
 users who prefer `apt`; it is built from the same binaries and does **not**

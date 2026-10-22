@@ -2,7 +2,7 @@
 
 - 项目：msi-psu-monitor
 - 更新时间：2026-10-19
-- 当前测试：736 passed；源语句覆盖率 92%；smoke 58
+- 当前测试：803 passed；分支覆盖率 94%；smoke 58/58
 - 约定：只有真实执行并通过的回归测试才记为“已验证”。
 
 ## 已修复缺陷
@@ -100,3 +100,19 @@ udevadm verify 均通过；详细命令与未执行项见 [bug-audit/TEST_REPORT
 | QUAL-02 | `tests/test_robustness.py`（随机 0xE0/配置/--ocp-set fuzz）、`tests/test_monitor_format.py`（多轨 formatter） | 随机 400 payload ×5 机型、120 配置、120 set spec；多轨 12V1-5/CPU/GPU |
 | QUAL-03 | OCP 写诊断：不支援机型的 dump、读失败、未知 JSON 键、可选 on/off；`protocol/demo` | `test_ocp.py`/`test_cli_features.py` 新增边界 |
 | DOC-01 | `CHANGELOG.md`（随源码/二进制 deb、tar、kit 发布）、RELEASE_READINESS/support/incident/SECURITY/protocol/README/verify 同步 | `test_packaging.py` 锁定 CHANGELOG/soak/CI 接线 |
+
+## 全项目审计第二轮（2026-10-22）
+
+基线 736 → 803 passed，分支覆盖率 94%，smoke 58/58，soak 5000 PASS；详细缺陷表与回归测试名见
+[`bug-audit/FIX_LOG.md§全项目审计第二轮`](../../bug-audit/FIX_LOG.md)。本轮覆盖 live JSON 非有限值、
+深层 JSON RecursionError、FIFO 阻塞、原子写权限、告警 NaN、HID fd/帧边界、daemon 非 dict 返回、
+dashboard Host/503、`--dump-config` fan 段与输出错误、demo 非 TS Zero Fan、release sidecar/SBOM
+顺序、soak 零轮询假通过、`--quiet` 配置 warning 泄漏等。真机写 ACK 语义与全部硬件验收仍为 BLOCKED。
+
+### 契约收口（2026-10-22 追加）
+
+- `--once` 与 `--export/--show-log/--show-alert-log/--ocp/--dump-thresholds` 组合改为 usage error，
+  不再静默忽略。
+- 配置文件来源的 `output`/`serial` 在 dashboard/export/show-alert-log 等不使用它的模式下打印
+  warning；显式 CLI 组合仍按原规则拒绝。
+- 0xC0 `enabled` 仅接受 0/1；未定义字节视为读取失败，避免把未知保护状态报成 disabled。
