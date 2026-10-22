@@ -238,7 +238,7 @@ Dashboard 链:
 | FUNC-157 | HEAD/404/400/503 语义 | `_route` | `test_dashboard.py` | C |
 | FUNC-158 | 图表/PNG/CSV/Weekly | 内嵌 JS | 只能静态/HTTP 测；浏览器 N | P |
 | FUNC-159 | 真实浏览器 1s 刷新 | 内嵌 JS | 无浏览器自动化 | N |
-| FUNC-160 | Host 头/DNS rebinding/CSP | `_route` | 未实现 Host 校验 | N |
+| FUNC-160 | Host 头/DNS rebinding/CSP | `_route` | `test_dashboard.py`、`test_audit_regression.py` | C |
 
 ### 4.9 配置、demo、打包、安全、文档
 
