@@ -210,7 +210,10 @@ def detect_devices():
         try:
             with open(uevent, encoding="utf-8") as f:
                 content = f.read()
-        except OSError:
+        except (OSError, UnicodeDecodeError):
+            # A single sysfs file with a non-UTF-8 byte (or an unreadable
+            # node) must not abort the whole scan: skip it like any other
+            # unreadable uevent, so an unrelated device cannot hide the PSU.
             continue
         for line in content.splitlines():
             if line.startswith("HID_ID="):
@@ -261,6 +264,10 @@ class HIDDevice:
             DeviceBusyError: when another process (CLI or daemon) holds the lock.
             FileNotFoundError: when no PSU was found and no path was given.
         """
+        if self.fd is not None:
+            # open() is idempotent: opening a second fd and overwriting self.fd
+            # would leak the first one (and its flock) for the process lifetime.
+            return self
         if self.path is None:
             # os.open(None) would raise TypeError, which no caller expects:
             # "no device" is an OSError-shaped failure everywhere else here.
@@ -279,8 +286,14 @@ class HIDDevice:
 
     def close(self):
         if self.fd is not None:
-            os.close(self.fd)
-            self.fd = None
+            try:
+                os.close(self.fd)
+            except OSError:
+                # The fd may already be closed externally (EBADF): closing is
+                # idempotent, so swallow the error and clear the handle.
+                pass
+            finally:
+                self.fd = None
 
     def send_command(self, data, timeout_ms=CMD_TIMEOUT_MS):
         """Send a command and return the response data (excluding echo header).
@@ -299,17 +312,32 @@ class HIDDevice:
         """
         if self.fd is None:
             return None
+        if not data or len(data) > CMD_BUFFER_SIZE:
+            # An empty command would index data[0] below (IndexError, uncaught),
+            # and an oversized one would grow the 64-byte buffer via slice
+            # assignment and write more than hidraw expects. Reject both as a
+            # device failure instead of sending a malformed report.
+            return None
 
         # Drain any pending data (BlockingIOError is an OSError subclass).
+        # Bounded: a faulty device that always has bytes ready would otherwise
+        # spin here forever and never reach the write below (the daemon tick
+        # would hang instead of timing out and rescanning).
         try:
-            while os.read(self.fd, CMD_BUFFER_SIZE):
-                pass
+            for _ in range(16):
+                if not os.read(self.fd, CMD_BUFFER_SIZE):
+                    break
         except OSError:
             pass
 
         # Send command
         buf = bytearray(CMD_BUFFER_SIZE)
-        buf[: len(data)] = data
+        try:
+            buf[: len(data)] = data
+        except (TypeError, ValueError):
+            # A caller-supplied value outside 0..255 is a malformed report; like
+            # every other framing error it must be a failure, not a traceback.
+            return None
         try:
             os.write(self.fd, bytes(buf))
         except OSError:
@@ -336,7 +364,7 @@ class HIDDevice:
                 # The byte-2 test is for writes only. On a read, byte 2 is the
                 # first byte of the payload, and 0xFE is an ordinary data value
                 # there: the low byte of a 12 V LINEAR11 word (11.984 V is
-                # 0xCEFE) or of the uptime counter is 0xFE once every 256
+                # 0xCDFE) or of the uptime counter is 0xFE once every 256
                 # seconds -- testing it on reads threw away measured data and
                 # reported a healthy 0xE0 read as a failure.
                 refused_write = (
@@ -364,18 +392,26 @@ class HIDDevice:
         """Send a write command (0x50) and check the reply.
 
         Replies to writes echo command and register, then ACK (0xFC) or
-        NAK (0xFE) as the first payload byte. send_command() maps NAK
-        to None, so a non-None reply means the write was accepted.
+        NAK (0xFE) as the first payload byte. send_command() maps NAK to None;
+        a truncated 2-byte non-NAK reply is still rejected here because it must
+        not be reported as a successful protection write.
 
         Args:
             data: List of bytes to send (command, register, payload...)
             timeout_ms: Maximum time to wait for the reply
 
         Returns:
-            True when the PSU acknowledged the write, False otherwise.
+            True when the PSU returned a non-NAK, non-empty reply, False
+            otherwise (NAK, timeout, or the truncated 2-byte frame).
         """
         reply = self.send_command([PSU_WRITE] + list(data), timeout_ms)
-        return reply is not None
+        # The documented ACK is the status byte 0xFC (docs/protocol.md), but the
+        # same document also describes the reply as echoing the written data, and
+        # there is no bench capture to settle it. Keep the original permissive
+        # rule -- any non-NAK payload means accepted -- while rejecting the
+        # 2-byte non-NAK frame that comes back as b"" (a truncated reply, not an
+        # acknowledgement). Hardware acceptance must confirm the 0xFC byte.
+        return reply is not None and len(reply) > 0
 
 
 class MSIPSU:
@@ -1041,6 +1077,11 @@ class MSIPSU:
         if data is None or len(data) < 8:
             return None
         body = bytes(data)
+        if body[0] not in (0, 1):
+            # 0/1 are the only defined values. Anything else is an unknown
+            # protection state; reporting it as "disabled" would be a guess
+            # about the PSU's protection, so treat the read as unusable.
+            return None
         return {
             "enabled": body[0] == 1,
             "point_a": self._lin11_float(struct.unpack("<H", body[1:3])[0]),
@@ -1074,7 +1115,7 @@ class MSIPSU:
             trigger = int(config['trigger_s'])
             diff_trigger = int(config['diff_trigger_s'])
             warning = int(config['warning_s'])
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError, OverflowError):
             return False
         if not (10 <= point <= 14 and 4 <= diff <= 8):
             return False

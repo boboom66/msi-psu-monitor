@@ -59,9 +59,11 @@ done
 
 # udev: let a logged-in session use the PSU without root (uaccess)
 info "Installing the udev rule..."
-install -m 644 "$ROOT/systemd/99-msi-psu.rules" /etc/udev/rules.d/
-udevadm control --reload-rules
-udevadm trigger --subsystem-match=hidraw
+install -D -m 644 "$ROOT/systemd/99-msi-psu.rules" /etc/udev/rules.d/99-msi-psu.rules
+if command -v udevadm >/dev/null; then
+    udevadm control --reload-rules || true
+    udevadm trigger --subsystem-match=hidraw || true
+fi
 
 # config: the example is entirely comments, so installing it changes no behaviour;
 # never overwrite one the user already edited.
@@ -73,11 +75,13 @@ fi
 
 # systemd: one resident daemon (there is no timer any more)
 info "Installing the systemd unit..."
-install -m 644 "$ROOT/systemd/msi-psu-monitor.service" /etc/systemd/system/
+install -D -m 644 "$ROOT/systemd/msi-psu-monitor.service" /etc/systemd/system/msi-psu-monitor.service
 rm -f /etc/systemd/system/msi-psu-monitor.timer   # legacy timer installs
 mkdir -p /var/lib/node_exporter
-systemctl daemon-reload
-systemctl enable --now msi-psu-monitor.service
+if [ -d /run/systemd/system ] && command -v systemctl >/dev/null; then
+    systemctl daemon-reload || true
+    systemctl enable --now msi-psu-monitor.service || true
+fi
 
 info "Installation complete!"
 echo ""

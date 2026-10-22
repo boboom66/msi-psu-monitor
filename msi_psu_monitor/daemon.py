@@ -113,7 +113,16 @@ class MonitorDaemon:
             if now < self._next_discovery:
                 return None
             self._next_discovery = now + DISCOVERY_RETRY_S
-            self.device_path = self.select_device()
+            try:
+                self.device_path = self.select_device()
+            except Exception as exc:
+                # Discovery touches sysfs/glob/open: a single bad uevent
+                # (non-UTF-8 bytes, a vanishing hidraw node) must throttle like
+                # any other discovery miss, never kill the resident daemon.
+                logger.warning(f'Device discovery failed: {exc}')
+                self.device_path = None
+                self._next_discovery = self.clock() + DISCOVERY_RETRY_S
+                return None
             if self.device_path is None:
                 logger.debug('No MSI PSU found yet; retrying shortly.')
                 return None
@@ -239,6 +248,10 @@ class MonitorDaemon:
             # count it as a failed read so the rescan/restart path can recover.
             logger.warning(f'Unexpected error while reading the PSU: {exc}')
             return self._read_failed(f'unexpected read error: {exc}')
+        if not isinstance(sensors, dict):
+            # The contract is a dict; None/list would turn the membership tests
+            # below into a TypeError and kill the loop before the rescan.
+            return self._read_failed(f'get_sensors returned {type(sensors).__name__}, not a dict')
         if 'error' in sensors:
             return self._read_failed(str(sensors['error']))
         if not monitor.has_readings(sensors):
@@ -339,7 +352,9 @@ class MonitorDaemon:
         self.ocp_config = config
         self.ocp_state = None
         if config is None:
-            logger.warning('The PSU did not answer the 0xC0 OCP configuration read.')
+            logger.warning(
+                'The PSU did not answer the 0xC0 OCP configuration read (or returned an invalid enable byte).'
+            )
             return
         reader = getattr(psu, 'read_ocp_state', None)
         if reader is None:
@@ -439,6 +454,10 @@ class MonitorDaemon:
                 self.write_prometheus_failure(self.last_failure or 'no reading')
             except OSError as exc:
                 logger.error(f'Cannot write {self.prom_path}: {exc}')
+            except Exception as exc:  # pragma: no cover - defensive against odd paths
+                # e.g. an embedded NUL in the configured path raises ValueError,
+                # not OSError; the sample loop must still survive it.
+                logger.error(f'Unexpected error while writing {self.prom_path}: {exc}')
             return not self.stopping
 
         if now >= self._next_prom:
@@ -553,6 +572,9 @@ def main(argv=None):
     if args.prom_path is not None and not args.prom_path:
         parser.error('--prom-path requires a path')
     try:
+        # Provisional level so load_config()'s own warnings honour --quiet;
+        # reconfigured below after the file's verbose/quiet are merged.
+        monitor.setup_logging(verbose=args.verbose, quiet=args.quiet)
         cfg = load_config(args.config)
     except ConfigError as exc:
         # A traceback here reaches the journal as 400 lines of stack and systemd

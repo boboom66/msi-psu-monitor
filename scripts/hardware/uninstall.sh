@@ -12,7 +12,11 @@ die() { printf "[ERROR] %s\n" "$*" >&2; exit 1; }
 if [ -d /run/systemd/system ]; then
     systemctl stop msi-psu-monitor.service 2>/dev/null || true
     systemctl disable msi-psu-monitor.service 2>/dev/null || true
-    rm -f "$UNIT"
+fi
+# Remove the unit even when systemd is not running: setup.sh installs it on
+# non-systemd hosts too, and leaving it behind made uninstall incomplete.
+rm -f "$UNIT"
+if [ -d /run/systemd/system ]; then
     systemctl daemon-reload 2>/dev/null || true
 fi
 rm -f "$UDEV"

@@ -1318,3 +1318,113 @@ def test_a_config_json_format_is_ignored_for_threshold_modes(monkeypatch, capsys
     assert 'fixed output format' not in captured.err
     payload = json.loads(captured.out)
     assert payload['ocp_config']['point_a'] == 13.0
+
+
+def test_watch_survives_an_unwritable_state_directory(monkeypatch, capsys):
+    """A read-only state dir must not end the sample stream or Ctrl-C with exit 1."""
+    stub = StubPSU(sensors())
+    read = stub.get_sensors
+    frames = []
+
+    def counting():
+        frames.append(1)
+        if len(frames) > 1:
+            raise KeyboardInterrupt
+        return read()
+
+    stub.get_sensors = counting
+
+    def refuse(_self, _path):
+        raise OSError(13, 'Permission denied')
+
+    monkeypatch.setattr(stats.MonitorState, 'save', refuse)
+    code, captured = run_main(monkeypatch, capsys, stub, ['--watch', '1', '-i', '0.01', '-q'])
+    assert code == EXIT_OK
+    assert 'Cannot persist state' in captured.err
+    assert 'MSI PSU:' in captured.out
+
+
+def test_once_still_prints_the_frame_when_state_cannot_be_saved(monkeypatch, capsys):
+    """The reading is the output; an unwritable state dir must not hide it."""
+    stub = StubPSU(sensors())
+
+    def refuse(_self, _path):
+        raise OSError(13, 'Permission denied')
+
+    monkeypatch.setattr(stats.MonitorState, 'save', refuse)
+    code, captured = run_main(monkeypatch, capsys, stub, ['--once'])
+    assert code == EXIT_OK
+    assert 'MSI PSU:' in captured.out
+    assert 'Cannot persist state' in captured.err
+
+
+def test_show_alert_log_reports_a_read_error_instead_of_no_records(monkeypatch, capsys):
+    def boom(*_args, **_kwargs):
+        raise OSError(5, 'Input/output error')
+
+    monkeypatch.setattr(stats, 'iter_alert_log', boom)
+    code, captured = run_main(monkeypatch, capsys, StubPSU(), ['--show-alert-log'])
+    assert code == EXIT_ERROR
+    assert 'cannot read the alert log' in captured.err
+    assert 'No alert log records stored' not in captured.out
+
+
+def test_export_reports_a_history_read_error(monkeypatch, capsys):
+    def boom(*_args, **_kwargs):
+        raise OSError(5, 'Input/output error')
+
+    monkeypatch.setattr(stats, 'build_export', boom)
+    code, captured = run_main(monkeypatch, capsys, StubPSU(), ['--export', '--from', '2h'])
+    assert code == EXIT_ERROR
+    assert 'cannot read the history' in captured.err
+
+
+def test_export_keeps_the_existing_output_mode(monkeypatch, capsys, tmp_path):
+    """Replacing a 0600 CSV must not widen it to the umask default."""
+    import os
+    import stat
+
+    target = tmp_path / 'out.csv'
+    target.write_text('old\n', encoding='utf-8')
+    os.chmod(target, 0o600)
+    code, _ = run_main(
+        monkeypatch, capsys, StubPSU(sensors()), ['--export', '--from', '2h', '-O', str(target)]
+    )
+    assert code == EXIT_OK
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+
+def test_config_serial_is_not_silently_ignored_by_export(monkeypatch, capsys, tmp_path):
+    conf = tmp_path / 'serial.conf'
+    conf.write_text('[monitor]\nserial = ABC\n', encoding='utf-8')
+    code, captured = run_main(
+        monkeypatch, capsys, StubPSU(sensors()), ['--export', '--from', '2h', '--config', str(conf)]
+    )
+    assert code == EXIT_OK
+    assert 'ignoring [monitor] serial' in captured.err
+
+
+def test_config_serial_is_not_silently_ignored_by_show_alert_log(monkeypatch, capsys, tmp_path):
+    conf = tmp_path / 'serial.conf'
+    conf.write_text('[monitor]\nserial = ABC\n', encoding='utf-8')
+    code, captured = run_main(
+        monkeypatch, capsys, StubPSU(sensors()), ['--show-alert-log', '--config', str(conf)]
+    )
+    assert code == EXIT_OK
+    assert 'ignoring [monitor] serial' in captured.err
+
+
+def test_config_output_and_serial_are_not_silently_ignored_by_dashboard(
+    monkeypatch, capsys, tmp_path
+):
+    conf = tmp_path / 'dash.conf'
+    conf.write_text('[monitor]\nserial = ABC\noutput = /tmp/never-written\n', encoding='utf-8')
+    started = []
+    monkeypatch.setattr(monitor, 'run_dashboard', lambda args, cfg: started.append(True) or 0)
+    code, captured = run_main(
+        monkeypatch, capsys, StubPSU(sensors()), ['--dashboard', '--config', str(conf)]
+    )
+    assert code == EXIT_OK
+    assert started == [True]
+    assert 'ignoring [monitor] output' in captured.err
+    assert 'ignoring [monitor] serial' in captured.err

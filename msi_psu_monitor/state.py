@@ -130,12 +130,18 @@ def _daily_buckets(raw):
     buckets = {}
     for key, value in raw.items():
         amount = _finite_float(value, None) if isinstance(key, str) else None
-        if amount is not None:
-            buckets[key] = amount
+        if amount is None:
+            continue
+        if amount < 0:
+            # Energy drawn in a day cannot be negative; a hand-edited/corrupt
+            # bucket would render a negative bar/total on the dashboard.
+            logger.warning(f'Ignoring negative daily energy {amount!r} for {key}.')
+            continue
+        buckets[key] = amount
     return buckets
 
 
-def _fsync_dir(directory):
+def fsync_directory(directory):
     """Persist a rename in ``directory``; best-effort on filesystems without it."""
     try:
         fd = os.open(directory, os.O_RDONLY)
@@ -164,12 +170,23 @@ def atomic_write_text(path, text):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + '.tmp')
+    try:
+        existing_mode = os.stat(path).st_mode & 0o777
+    except OSError:
+        existing_mode = None
     with open(tmp, 'w', encoding='utf-8') as handle:
         handle.write(text)
         handle.flush()
         os.fsync(handle.fileno())
+    if existing_mode is not None:
+        try:
+            # os.replace() gives the target the scratch file's mode; without
+            # this a 0600 export/state file became 0644 after one write.
+            os.chmod(tmp, existing_mode)
+        except OSError:
+            pass
     os.replace(tmp, path)
-    _fsync_dir(path.parent)
+    fsync_directory(path.parent)
 
 
 class StateError(Exception):
@@ -233,9 +250,19 @@ class MonitorState:
         sample after load only starts the clock, gaps longer than ``max_gap_s``
         are not integrated (see MAX_SAMPLE_GAP_S), and a backwards clock step
         (NTP, a manual ``date`` change) never re-baselines the integral.
+
+        Non-finite inputs (NaN/inf from a malformed payload) are not valid
+        samples: they are ignored entirely so one bad read cannot poison the
+        running averages and the energy counter until the next restart.
         """
-        ts = time.time() if ts is None else float(ts)
-        watts = float(watts)
+        try:
+            ts = time.time() if ts is None else float(ts)
+            watts = float(watts)
+            efficiency = float(efficiency)
+        except (TypeError, ValueError, OverflowError):
+            return 0.0
+        if not (math.isfinite(ts) and math.isfinite(watts) and math.isfinite(efficiency)):
+            return 0.0
         delta_wh = 0.0
         if self.last_ts is not None:
             dt = ts - self.last_ts
@@ -282,7 +309,9 @@ class MonitorState:
         for key in list(self.daily):
             try:
                 ordinal = date.fromisoformat(key).toordinal()
-            except ValueError:
+            except (ValueError, TypeError):
+                # Non-string keys (hand-built state) have no date to compare;
+                # drop them like any other undatable bucket instead of crashing.
                 dropped.append(key)
                 continue
             if ordinal < cutoff:
@@ -310,11 +339,26 @@ class MonitorState:
     def from_dict(cls, data):
         if not isinstance(data, dict) or data.get('version') != STATE_VERSION:
             return cls()
+        count = int(_finite_float(data.get('count')))
+        watt_sum = _finite_float(data.get('watt_sum'))
+        efficiency_sum = _finite_float(data.get('efficiency_sum'))
+        energy_wh = _finite_float(data.get('energy_wh'))
+        # Counters only ever grow from zero. A negative value can only come from
+        # a hand edit or corruption, and it would make power_avg negative and the
+        # dashboard show a negative kWh total, so clamp it and say so.
+        for name, value in (
+            ('count', count),
+            ('watt_sum', watt_sum),
+            ('efficiency_sum', efficiency_sum),
+            ('energy_wh', energy_wh),
+        ):
+            if value < 0:
+                logger.warning(f'Ignoring negative {name}={value!r} in the state file; using 0.')
         return cls(
-            count=int(_finite_float(data.get('count'))),
-            watt_sum=_finite_float(data.get('watt_sum')),
-            efficiency_sum=_finite_float(data.get('efficiency_sum')),
-            energy_wh=_finite_float(data.get('energy_wh')),
+            count=max(0, count),
+            watt_sum=max(0.0, watt_sum),
+            efficiency_sum=max(0.0, efficiency_sum),
+            energy_wh=max(0.0, energy_wh),
             last_ts=_finite_float(data.get('last_ts')) or None,
             daily=_daily_buckets(data.get('daily')),
             product=data.get('product', '') or '',
@@ -367,7 +411,11 @@ class MonitorState:
             return unusable(f'cannot be read ({exc})')
         try:
             data = json.loads(raw)
-        except ValueError as exc:
+        except (ValueError, RecursionError) as exc:
+            # RecursionError: a deeply nested array (100k '[') is valid JSON
+            # input but exceeds the decoder's recursion limit. It is not a
+            # ValueError, and escaping here made a hand-edited state.json a
+            # daemon startup crash-loop.
             logger.warning(f'Ignoring the state file {path}: {exc}')
             return unusable(f'is not valid JSON ({exc})')
         if not isinstance(data, dict) or data.get('version') != STATE_VERSION:
@@ -454,6 +502,10 @@ def append_history(state_dir, sensors, ts=None):
     ts = time.time() if ts is None else float(ts)
     path = history_path(state_dir, date.fromtimestamp(ts))
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and not path.is_file():
+        # A FIFO here would block the daemon in open('a') forever. A directory
+        # is just as unappendable; fail like any other I/O error.
+        raise OSError(f'{path} is not a regular file')
     row = _history_row(sensors, ts)
     # Not "does the file exist" but "does it already carry the column header":
     # a day file left empty, or truncated mid-header, by a crash would otherwise
@@ -490,6 +542,17 @@ def rail_watts(sensors):
         return None
     if len(voltages) < REQUIRED_RAILS or len(currents) < REQUIRED_RAILS:
         return None
+    try:
+        finite = all(
+            math.isfinite(float(value))
+            for value in voltages[:REQUIRED_RAILS] + currents[:REQUIRED_RAILS]
+        )
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not finite:
+        # A non-finite rail value cannot produce a wattage; reporting the CPU/GPU
+        # split as nan infects the text, CSV and live snapshot at once.
+        return None
     cpu = voltages[CPU_RAIL_INDEX] * currents[CPU_RAIL_INDEX]
     gpu = sum(voltages[i] * currents[i] for i in GPU_RAIL_INDEXES)
     return round(cpu, 1), round(gpu, 1)
@@ -506,7 +569,15 @@ def reading(sensors, key):
 def _history_row(sensors, ts):
     def fmt(key, digits, default=''):
         value = reading(sensors, key)
-        return default if value is None else f'{float(value):.{digits}f}'
+        if value is None:
+            return default
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return default
+        # A non-finite reading is not a measurement: writing "nan" into the CSV
+        # would export a value no chart/consumer can use.
+        return default if not math.isfinite(number) else f'{number:.{digits}f}'
 
     watts = rail_watts(sensors)
     cpu_w = '' if watts is None else f'{watts[0]:.1f}'
@@ -642,6 +713,14 @@ def append_alert_log(state_dir, message, ts=None):
     path = alert_log_path(state_dir, date.fromtimestamp(ts))
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    if path.exists() and not path.is_file():
+        # Must be checked outside the rotation except: swallowing this OSError
+        # used to fall through to open('a') on the FIFO, which blocks forever.
+        logger.warning(f'Cannot write the alert log {path}: not a regular file')
+        return None
+    try:
         if path.exists() and path.stat().st_size > ALERT_LOG_MAX_BYTES:
             os.replace(path, path.with_name(path.name + '.1'))
     except OSError:
@@ -727,6 +806,17 @@ def live_path(state_dir):
     return Path(state_dir) / LIVE_FILENAME
 
 
+def _finite_json(value):
+    """True when ``value`` contains no non-finite float at any depth."""
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, list):
+        return all(_finite_json(item) for item in value)
+    if isinstance(value, dict):
+        return all(_finite_json(item) for item in value.values())
+    return True
+
+
 def write_live_snapshot(state_dir, sensors, ts=None):
     """Atomically replace latest.json with the chartable readings.
 
@@ -735,10 +825,24 @@ def write_live_snapshot(state_dir, sensors, ts=None):
     absent from a world-readable-by-uaccess cache.
     """
     ts = time.time() if ts is None else float(ts)
+    if not math.isfinite(ts):
+        # A non-finite timestamp cannot be aged against, so the reader would
+        # reject the file anyway; writing it would only make the chart drop
+        # one frame with no explanation.
+        logger.debug(f'Cannot write the live snapshot: non-finite timestamp {ts!r}')
+        return None
     payload = {'ts': ts, 'product': str(sensors.get('product', ''))}
     for key, value in sensors.items():
         if isinstance(value, tuple):
-            payload[key] = value[0]
+            value = value[0]
+        else:
+            continue
+        if not _finite_json(value):
+            # NaN/Infinity are not valid JSON: response.json() rejects the whole
+            # document, so one bad reading used to freeze every live chart (the
+            # history poll kept working, which made it look like a UI bug).
+            continue
+        payload[key] = value
     watts = rail_watts(sensors)
     if watts is not None:
         payload['cpu_w'], payload['gpu_w'] = watts
@@ -746,7 +850,8 @@ def write_live_snapshot(state_dir, sensors, ts=None):
     tmp = path.with_name(path.name + '.tmp')
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_text(json.dumps(payload, sort_keys=True) + '\n', encoding='utf-8')
+        text = json.dumps(payload, sort_keys=True, allow_nan=False) + '\n'
+        tmp.write_text(text, encoding='utf-8')
         os.replace(tmp, path)
     except (OSError, TypeError, ValueError) as exc:
         logger.debug(f'Cannot write the live snapshot {path}: {exc}')
@@ -757,15 +862,34 @@ def write_live_snapshot(state_dir, sensors, ts=None):
 def read_live_snapshot(state_dir, max_age=LIVE_MAX_AGE_S, now=None):
     """Return the latest sample when it is fresh, else None."""
     now = time.time() if now is None else float(now)
+    target = live_path(state_dir)
+    if not target.is_file():
+        # A FIFO/device named latest.json would block read_text() forever (and
+        # wedge the dashboard thread); only a regular file is a snapshot.
+        return None
     try:
-        data = json.loads(live_path(state_dir).read_text(encoding='utf-8-sig'))
-    except (OSError, UnicodeDecodeError, ValueError):
+        data = json.loads(target.read_text(encoding='utf-8-sig'))
+    except (OSError, UnicodeDecodeError, ValueError, RecursionError):
         return None
     if not isinstance(data, dict):
         return None
     stamp = data.get('ts')
     if not isinstance(stamp, (int, float)) or not math.isfinite(stamp):
         return None
+    # A snapshot with a non-finite reading cannot be serialised for the browser
+    # (response.json() rejects NaN/Infinity and the whole live frame would be
+    # lost). Treat it as stale instead: the page keeps its last good point.
+    for key, value in data.items():
+        if key == 'ts':
+            continue
+        try:
+            finite = _finite_json(value)
+        except RecursionError:
+            logger.debug('Ignoring the live snapshot: value nesting is too deep.')
+            return None
+        if not finite:
+            logger.debug(f'Ignoring the live snapshot: {key} is not finite ({value!r}).')
+            return None
     age = now - stamp
     if age < 0 or age > max_age:
         return None
@@ -782,7 +906,12 @@ def parse_from(spec):
     match = _FROM_RE.match(spec.strip())
     if not match:
         raise ValueError(f'invalid --from value {spec!r}: expected e.g. 30m, 2h, 7d')
-    return float(match.group(1)) * _UNIT_SECONDS[match.group(2).lower()]
+    seconds = float(match.group(1)) * _UNIT_SECONDS[match.group(2).lower()]
+    if not math.isfinite(seconds):
+        # A 400-digit window overflows to inf; time.time() - inf then silently
+        # exports every row instead of naming the bad value.
+        raise ValueError(f'invalid --from value {spec!r}: window is too large')
+    return seconds
 
 
 def parse_columns(spec):

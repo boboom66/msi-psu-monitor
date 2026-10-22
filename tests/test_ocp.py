@@ -564,3 +564,10 @@ def test_demo_ocp_thresholds_round_trip():
 def test_demo_ocp_thresholds_are_refused_on_a_meg_model():
     psu = demo.DemoPSU(variant='ai1300p')
     assert psu.set_ocp_thresholds(CONFIG) is False
+
+
+def test_read_ocp_thresholds_rejects_an_undefined_enable_byte():
+    """0/1 are the only defined enable values; 2/0xFF must not read as 'disabled'."""
+    for value in (2, 0xFF):
+        payload = bytes([value]) + FACTORY_C0[1:]
+        assert _psu(registers={0xC0: payload}).read_ocp_thresholds() is None, value

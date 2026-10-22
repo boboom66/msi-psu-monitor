@@ -185,11 +185,13 @@ class DemoPSU:
             'efficiency': (round(efficiency, 2), '%'),
             'temp': (round(29.0 + 32.0 * load, 1), '\u00b0C'),
             'fan_rpm': (round(fan_rpm, 0), 'RPM'),
-            'zero_fan': zero_fan,
             'uptime': uptime,
             'uptime_total': uptime + 446400,
         }
         if self.variant in MSIPSU.SEVEN_ZPU_VARIANTS:
+            # Real non-TS models do not report the Zero Fan field on 42h
+            # (CPSU.cs:810); only the 12+4 TS models do.
+            sensors['zero_fan'] = zero_fan
             sensors['iout_pins'] = (pins, 'A')
         if self.variant in MSIPSU.MULTIRAIL_VARIANTS:
             sensors['vout_12v_rails'] = ([round(volts_12v, 3)] * 5, 'V')
@@ -280,7 +282,7 @@ class DemoPSU:
                 if not low <= value <= high:
                     return False
                 updated[key] = value
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError, OverflowError):
             return False
         self._ocp_thresholds = updated
         return True
@@ -315,7 +317,8 @@ class DemoPSU:
         return (self._load()[0] if load is None else load) < 0.25
 
     def read_fan_state(self):
-        return {'mode': self.fan_mode, 'duty': self.fan_duty, 'zero_fan': self._zero_fan_state()}
+        zero_fan = self._zero_fan_state() if self.variant in MSIPSU.SEVEN_ZPU_VARIANTS else None
+        return {'mode': self.fan_mode, 'duty': self.fan_duty, 'zero_fan': zero_fan}
 
     def read_fan_setting(self):
         return (self.fan_mode, self.fan_duty)
@@ -331,6 +334,8 @@ class DemoPSU:
         return True
 
     def read_zero_fan(self):
+        if self.variant not in MSIPSU.SEVEN_ZPU_VARIANTS:
+            return None
         return self._zero_fan_state()
 
     def silence_buzzer(self):
@@ -340,6 +345,9 @@ class DemoPSU:
         return True
 
     def read_blackbox(self, max_records=10):
+        # Clamp like the real reader: a negative count must be "no records",
+        # not Python's records[:-1] (which returned the second-newest trip).
+        limit = max(0, int(max_records))
         # Slot order, newest first: REV6 p.13 defines InfoID 1 as the latest, and
         # slot 1 also carries the larger lifetime counters. The two used to
         # disagree (slot 2 held the bigger counters here), so an acceptance run
@@ -364,4 +372,4 @@ class DemoPSU:
                 'total_count': 1,
             },
         ]
-        return records[:max_records]
+        return records[:limit]

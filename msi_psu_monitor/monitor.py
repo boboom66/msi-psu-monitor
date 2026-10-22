@@ -80,13 +80,25 @@ logger = logging.getLogger('msi_psu')
 
 
 def setup_logging(verbose=False, quiet=False):
-    """Route diagnostics to stderr; stdout stays clean for machine output."""
+    """Route diagnostics to stderr; stdout stays clean for machine output.
+
+    The handler and level live on the ``msi_psu`` package logger, not on this
+    module's logger: state/config/daemon warnings otherwise bypassed both
+    ``--quiet`` and the formatter through logging's last-resort handler.
+    propagate stays True so a test/caller that attaches a root handler still
+    sees the records.
+    """
     level = logging.DEBUG if verbose else (logging.ERROR if quiet else logging.INFO)
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter('%(message)s'))
-    logger.handlers.clear()
-    logger.addHandler(handler)
-    logger.setLevel(level)
+    package_logger = logging.getLogger('msi_psu')
+    package_logger.handlers.clear()
+    package_logger.addHandler(handler)
+    package_logger.setLevel(level)
+    # A handler left on a child by an earlier call would double-print.
+    for name, candidate in logging.root.manager.loggerDict.items():
+        if name.startswith('msi_psu.') and isinstance(candidate, logging.Logger):
+            candidate.handlers.clear()
 
 
 # ---- output formatters --------------------------------------------------
@@ -189,7 +201,13 @@ def format_text(sensors):
         zero_fan = sensors.get('zero_fan')
         zero = 'unknown' if zero_fan is None else ('on' if zero_fan else 'off')
         mode = sensors.get('fan_mode') or 'unknown'
-        lines.append(f'  Zero Fan: {zero:3s}   Mode: {mode}')
+        # The customize duty is only reported by the PSU in customize mode
+        # (read_fan_fields drops a stale value in auto/performance). JSON always
+        # carried it; the text frame used to omit the one number a user who set
+        # --fan-duty wants to see again.
+        duty = sensors.get('fan_duty')
+        suffix = '' if duty is None else f'   Duty: {duty}%'
+        lines.append(f'  Zero Fan: {zero:3s}   Mode: {mode}{suffix}')
 
     for key in ['uptime', 'uptime_total']:
         if key in sensors:
@@ -407,16 +425,23 @@ def format_blackbox(records):
     ordered = sorted(records, key=lambda rec: rec.get('info_id') or 0)
     lines = ['GPU Safeguard+ alert log (black box, last 10, newest first)', '']
     for record in ordered:
+        info_id = record.get('info_id', 0)
         status = _BLACKBOX_STATUS.get(record.get('status'), f'status {record.get("status")}')
         # REV6 p.13 byte 1 is "12+4 pin ID / pin set"; MSI never reads this
         # record, so a 1/2 value is most likely the connector and 3..12 can only
         # be a pin number. Claiming "Conn3" for a pin would be worse than naming
         # the raw id, so the ambiguous 1/2 values keep the connector label and a
         # larger value is shown as the pin it must be (needs a real capture).
+        # A missing pin_set is unknown, not pin None.
         id_or_set = record.get('pin_set')
-        location = f'Conn{id_or_set}' if id_or_set in (1, 2) else f'pin {id_or_set}'
+        if id_or_set in (1, 2):
+            location = f'Conn{id_or_set}'
+        elif isinstance(id_or_set, int):
+            location = f'pin {id_or_set}'
+        else:
+            location = 'pin unknown'
         lines.append(
-            f'#{record["info_id"]}  {location}   {status}   '
+            f'#{info_id}  {location}   {status}   '
             f'uptime {_format_duration(record.get("run_time", 0))} / '
             f'total {_format_duration(record.get("total_time", 0))}   '
             f'total count: {record.get("total_count")}'
@@ -431,7 +456,7 @@ def format_blackbox(records):
     return '\n'.join(lines)
 
 
-# ---- 12V-2x6 OCP inspection (read-only, phase 1 scope) ------------------
+# ---- 12V-2x6 OCP inspection; writes live in run_ocp_thresholds ----------
 
 # C1h status codes, per CPSU.cs OCP_12V2x6_Status.
 _OCP_STATUS = {
@@ -508,15 +533,27 @@ def _normalize_ocp_thresholds(values):
         raise ValueError('threshold file must contain a JSON object')
     normalized = {}
     if 'enabled' in values:
-        if not isinstance(values['enabled'], (bool, int)):
+        raw_enabled = values['enabled']
+        # bool is an int subclass: check bool first, then restrict ints to
+        # 0/1. Accepting 2 (or -1) as "enabled" silently upgrades an invalid
+        # file into a protection write.
+        if isinstance(raw_enabled, bool):
+            normalized['enabled'] = raw_enabled
+        elif isinstance(raw_enabled, int) and raw_enabled in (0, 1):
+            normalized['enabled'] = bool(raw_enabled)
+        else:
             raise ValueError('enabled must be true/false')
-        normalized['enabled'] = bool(values['enabled'])
     for key in _OCP_ALL_KEYS:
         if key not in values:
             continue
         raw = values[key]
         if isinstance(raw, bool) or not isinstance(raw, (int, float)):
             raise ValueError(f'{key} must be a number')
+        if isinstance(raw, float) and not math.isfinite(raw):
+            # JSON accepts 1e999 as Infinity (and some writers emit NaN).
+            # int(inf) raises OverflowError, which the caller's ValueError
+            # handler does not catch; reject it as a normal field error.
+            raise ValueError(f'{key} must be a finite number, got {raw!r}')
         value = int(raw)
         if value != raw:
             raise ValueError(f'{key} must be an integer, got {raw!r}')
@@ -531,8 +568,13 @@ def _normalize_ocp_thresholds(values):
 
 def _read_ocp_thresholds_file(path):
     """Load a --ocp/--dump-thresholds JSON payload or a flat threshold object."""
-    with open(path, encoding='utf-8') as handle:
-        data = json.load(handle)
+    with open(path, encoding='utf-8-sig') as handle:
+        try:
+            data = json.load(handle)
+        except RecursionError as exc:
+            # Deeply nested JSON is not a threshold object; ValueError is what
+            # run_ocp_thresholds already turns into one clean error line.
+            raise ValueError('threshold file is nested too deeply') from exc
     if isinstance(data, dict) and isinstance(data.get('ocp_config'), dict):
         data = data['ocp_config']
     if isinstance(data, dict):
@@ -554,7 +596,7 @@ def _ocp_thresholds_equal(left, right):
         for key in _OCP_TIME_KEYS:
             if int(left[key]) != int(right[key]):
                 return False
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, TypeError, ValueError, OverflowError):
         return False
     return True
 
@@ -596,7 +638,9 @@ def run_ocp_thresholds(psu, args):
             return EXIT_ERROR
         config = psu.read_ocp_thresholds()
         if config is None:
-            logger.error('Error: the PSU did not answer the 0xC0 OCP configuration read.')
+            logger.error(
+                'Error: the PSU did not answer the 0xC0 OCP configuration read, or returned an invalid enable byte.'
+            )
             return EXIT_ERROR
         emit(OCP_FORMATTERS[args.format](config, None, product), args.output)
         return EXIT_OK
@@ -616,7 +660,9 @@ def run_ocp_thresholds(psu, args):
         if changed == 'unsupported':
             logger.error(f'Error: {OCP_UNSUPPORTED}')
         elif changed == 'read':
-            logger.error('Error: the PSU did not answer the 0xC0 OCP configuration read.')
+            logger.error(
+                'Error: the PSU did not answer the 0xC0 OCP configuration read, or returned an invalid enable byte.'
+            )
         else:
             logger.error(
                 'Error: the PSU did not accept the OCP threshold write '
@@ -839,6 +885,11 @@ def read_fan_fields(psu):
         fan = reader()
     except Exception:  # pragma: no cover - defensive against odd devices
         return {}
+    if not isinstance(fan, dict):
+        # A device object whose read_fan_state() returns None (or anything
+        # else) must not turn a successful sensor read into an AttributeError:
+        # fan enrichment is optional, the sample is not.
+        return {}
     fields = {}
     if fan.get('mode') is not None:
         fields['fan_mode'] = _FAN_BYTE_TO_MODE.get(fan['mode'], f'mode{fan["mode"]}')
@@ -867,9 +918,12 @@ def _threshold_detail(name, sensors, thresholds):
             value = value[0]
         try:
             measured = float(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return describe(name)
-        limit = float(thresholds.get(limit_key) or 0.0)
+        try:
+            limit = float(thresholds.get(limit_key) or 0.0)
+        except (TypeError, ValueError, OverflowError):
+            return describe(name)
         return f'{describe(name)}: measured {measured:g}, limit {limit:g}'
     if name in CONNECTOR_ALERTS:
         pins = sensors.get('iout_pins')
@@ -878,9 +932,12 @@ def _threshold_detail(name, sensors, thresholds):
         try:
             index = CONNECTOR_ALERTS.index(name)
             measured = sum(float(pin) for pin in pins[index * 6 : (index + 1) * 6])
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return describe(name)
-        limit = float(thresholds.get(CONNECTOR_LIMIT_KEY) or 0.0)
+        try:
+            limit = float(thresholds.get(CONNECTOR_LIMIT_KEY) or 0.0)
+        except (TypeError, ValueError, OverflowError):
+            return describe(name)
         return f'{describe(name)}: measured {measured:.3g} A, limit {limit:g} A'
     return describe(name)
 
@@ -1035,9 +1092,15 @@ def _valid_sample(sensors):
     if power is None or efficiency is None:
         return None
     try:
-        return float(power), float(efficiency)
-    except (TypeError, ValueError):
+        watts, eff = float(power), float(efficiency)
+    except (TypeError, ValueError, OverflowError):
         return None
+    # NaN/inf pass float() but would poison the energy integral and the
+    # averages (nan + x == nan). Treat them like a missing reading so the
+    # sample is skipped instead of corrupting the counters until restart.
+    if not (math.isfinite(watts) and math.isfinite(eff)):
+        return None
+    return watts, eff
 
 
 def apply_stats(sensors, monitor_state):
@@ -1138,8 +1201,9 @@ def emit(output, output_path):
             print(output, flush=True)
         except BrokenPipeError:
             raise
-        except OSError as exc:
-            # ENOSPC/EIO on stdout: one normal fault, not the interpreter's 120.
+        except (OSError, UnicodeError) as exc:
+            # ENOSPC/EIO on stdout, or a locale whose stdout encoding cannot
+            # represent "°C"/"≥": one normal fault, not the interpreter's 120.
             _redirect_stdout_to_devnull()
             raise OutputError(f'cannot write output: {exc}') from exc
         return
@@ -1151,10 +1215,11 @@ def emit(output, output_path):
                 handle.write(output + '\n')
             return
         stats.atomic_write_text(output_path, output + '\n')
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         # A failed output path used to escape as PermissionError and be reported
         # as "Run as root" (the catch for the PSU device), or as a raw traceback
-        # from --show-alert-log. Name the output path and keep it a normal fault.
+        # from --show-alert-log. A NUL/undecodable path is a ValueError from
+        # open(); both are output faults, not a traceback.
         raise OutputError(f'cannot write {output_path}: {exc}') from exc
 
 
@@ -1174,8 +1239,14 @@ def run_once(psu, args, cfg, monitor_state, engine):
     if monitor_state is not None:
         # Same retention the daemon uses: pruning with the built-in default
         # would drop buckets a user asked to keep for 60 days.
-        monitor_state.prune(days=cfg['retention_days'])
-        monitor_state.save(stats.state_path(_state_dir(cfg)))
+        try:
+            monitor_state.prune(days=cfg['retention_days'])
+            monitor_state.save(stats.state_path(_state_dir(cfg)))
+        except OSError as exc:
+            # The reading is the primary output; a read-only state directory
+            # must not turn a successful sample into exit 1 with no frame.
+            # The daemon takes the same line (log and keep monitoring).
+            logger.error(f'Cannot persist state: {exc}')
 
     emit(FORMATTERS[args.format](sensors), args.output)
     # An active alert outranks a failed payload read: the E1h bit is a separate
@@ -1237,8 +1308,13 @@ def run_watch(psu, args, cfg, monitor_state, engine):
 
             now = time.time()
             if monitor_state is not None and now - last_save >= 30.0:
-                monitor_state.prune(days=cfg['retention_days'])
-                monitor_state.save(stats.state_path(_state_dir(cfg)))
+                try:
+                    monitor_state.prune(days=cfg['retention_days'])
+                    monitor_state.save(stats.state_path(_state_dir(cfg)))
+                except OSError as exc:
+                    # Like the daemon: a read-only state directory must not end
+                    # the sample stream (the PSU read is still working).
+                    logger.error(f'Cannot persist state: {exc}')
                 last_save = now
 
             line = format_text(sensors)
@@ -1257,7 +1333,12 @@ def run_watch(psu, args, cfg, monitor_state, engine):
         if stream is not None:
             stream.close()
         if monitor_state is not None:
-            monitor_state.save(stats.state_path(_state_dir(cfg)))
+            try:
+                monitor_state.save(stats.state_path(_state_dir(cfg)))
+            except OSError as exc:
+                # Do not let an unwritable state directory turn Ctrl-C into a
+                # traceback/exit 1 after a perfectly good watch session.
+                logger.error(f'Cannot persist state: {exc}')
 
 
 def apply_fan_setting(psu, mode, duty=None):
@@ -1285,7 +1366,12 @@ def apply_fan_setting(psu, mode, duty=None):
         duty = 0
     elif duty is None:
         current = psu.read_fan_setting()
-        duty = current[1] if current else 0
+        if current is None:
+            # The current duty is unknown (NAK/unsupported model): writing
+            # (customized, 0) would invent a 0% duty and burn a flash save
+            # (plus two retries) before failing the read-back. Refuse fast.
+            return None
+        duty = current[1]
 
     target_mode = _FAN_MODE_TO_BYTE[effective]
     for _ in range(3):
@@ -1361,12 +1447,12 @@ def _write_requested(args):
 def run_write_controls(psu, args):
     """Apply every requested control write, then describe the result once.
 
-    Zero Fan goes first: that is the order MSI Center's Cooling Wizard uses
-    (zero fan, then fan mode) and both are persisted by the F1h the protocol
-    methods send. The buzzer command is a one-shot C2h switch with no read-back
-    (MSI calls it BUZZER_SWITCH and it toggles), so success only means the PSU
-    acknowledged it. One emit() at the end keeps -O from being overwritten by
-    each line.
+    Order: rail mode (MEG P only), then Zero Fan, then the fan setting, matching
+    MSI Center's Cooling Wizard for the fan pair (zero fan, then fan mode); every
+    one of them is persisted by the F1h its protocol method sends. The buzzer
+    command is a one-shot C2h switch with no read-back (MSI calls it
+    BUZZER_SWITCH and it toggles), so success only means the PSU acknowledged
+    it. One emit() at the end keeps -O from being overwritten by each line.
     """
     lines = []
     if args.set_rail is not None:
@@ -1437,9 +1523,10 @@ def run_ocp(psu, args):
     MEG P models answer a single multirail flag. The Ai1600T answers neither and
     gets an explanation instead of an error.
 
-    Read-only: phase 1 only inspects these registers, the write path stays
-    frozen (CPSU.cs ``SET_OCP12V2x6_CONFIG`` is a later, separately approved
-    batch). Returns the process exit code.
+    Read-only: this command only inspects the registers. The protection write is
+    the separate, explicitly validated ``--ocp-set`` / ``--load-thresholds``
+    path (write + F1h + read-back); this command never writes. Returns the
+    process exit code.
     """
     product = getattr(psu, 'product', '') or ''
     if not getattr(psu, 'supports_ocp_config', False):
@@ -1478,7 +1565,9 @@ def _run_ocp_12v2x6(psu, product, args):
     """Report the 8-byte 12V-2x6 OCP configuration and its realtime state."""
     config = psu.read_ocp_thresholds()
     if config is None:
-        logger.error('Error: the PSU did not answer the 0xC0 OCP configuration read.')
+        logger.error(
+            'Error: the PSU did not answer the 0xC0 OCP configuration read, or returned an invalid enable byte.'
+        )
         return EXIT_ERROR
 
     # The C1h state block is a bonus: an NAK there must not fail the report.
@@ -1496,7 +1585,13 @@ def _run_ocp_12v2x6(psu, product, args):
 
 def run_show_alert_log(args, cfg):
     """Print the local alert log (MSI Center's ViewLog equivalent, text only)."""
-    lines = stats.iter_alert_log(_state_dir(cfg), limit=200)
+    try:
+        lines = stats.iter_alert_log(_state_dir(cfg), limit=200)
+    except (OSError, ValueError) as exc:
+        # iter_alert_log skips individual unreadable files; this is the
+        # directory/glob itself failing. Reporting "no records" would hide it.
+        logger.error(f'Error: cannot read the alert log: {exc}')
+        return EXIT_ERROR
     try:
         if not lines:
             emit('No alert log records stored.', args.output)
@@ -1523,7 +1618,13 @@ def run_export(args, cfg):
         return EXIT_ERROR
 
     state_dir = _state_dir(cfg)
-    header, rows = stats.build_export(state_dir, time.time() - window, columns)
+    try:
+        header, rows = stats.build_export(state_dir, time.time() - window, columns)
+    except (OSError, ValueError) as exc:
+        # A directory that vanished/unreadable is a read fault, not "cannot
+        # write output" (the generic main() handler) and not an empty export.
+        logger.error(f'Error: cannot read the history in {state_dir}: {exc}')
+        return EXIT_ERROR
     if not rows:
         # A header-only CSV is exactly what a wrong state dir, a daemon that
         # never ran and a window wider than the retention all look like.
@@ -1545,18 +1646,31 @@ def run_export(args, cfg):
         else:
             scratch = target + '.tmp'
             try:
+                existing_mode = None
+                try:
+                    existing_mode = os.stat(target).st_mode & 0o777
+                except OSError:
+                    pass
                 with open(scratch, 'w', newline='', encoding='utf-8') as handle:
                     _write_csv(handle, header, rows)
                     handle.flush()
                     os.fsync(handle.fileno())
+                if existing_mode is not None:
+                    try:
+                        os.chmod(scratch, existing_mode)
+                    except OSError:
+                        pass
                 os.replace(scratch, target)
+                # Same durability as atomic_write_text: a rename that is not
+                # fsynced in its directory can disappear after a power cut.
+                stats.fsync_directory(os.path.dirname(target) or '.')
             except OSError:
                 try:
                     os.unlink(scratch)
                 except OSError:
                     pass
                 raise
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         logger.error(f'Error: cannot write {args.output}: {exc}')
         return EXIT_ERROR
     return EXIT_OK
@@ -1830,7 +1944,8 @@ def _validate_args(parser, args):
     threshold_dump = args.dump_thresholds
     threshold_write = args.ocp_set is not None or args.load_thresholds is not None
     if threshold_dump and (
-        args.ocp
+        args.once
+        or args.ocp
         or args.watch is not None
         or args.export
         or args.show_log
@@ -1845,7 +1960,7 @@ def _validate_args(parser, args):
     ):
         parser.error(
             '--dump-thresholds reads the hardware OCP configuration only: it cannot be '
-            'combined with --ocp, --watch, --export, --show-log, --show-alert-log, '
+            'combined with --once, --ocp, --watch, --export, --show-log, --show-alert-log, '
             '--dashboard, a control write or a threshold write'
         )
     if threshold_dump and args.format not in (None, 'text', 'json'):
@@ -1972,6 +2087,15 @@ def _validate_args(parser, args):
         parser.error('--dashboard serves the HTML page; --output does not apply')
     if args.watch is not None and args.once:
         parser.error('--watch and --once are mutually exclusive')
+    if args.once and (
+        args.export or args.show_log or args.show_alert_log or args.ocp or args.dump_thresholds
+    ):
+        # These modes have their own action/output; --once was accepted and then
+        # ignored, which is exactly the silent no-op the other flag checks reject.
+        parser.error(
+            '--once reads sensors once: it cannot be combined with --export, '
+            '--show-log, --show-alert-log, --ocp or --dump-thresholds'
+        )
     if args.watch is not None and args.format not in (None, 'text'):
         parser.error('--watch only supports the text format')
     if _write_requested(args) and (args.show_log or args.export or args.watch is not None):
@@ -2000,6 +2124,16 @@ def _ini_value(value):
     return str(value)
 
 
+#: INI option -> effective cfg key, where the two differ. ``[fan]`` is written
+#: with the documented option names (mode/duty/zero_fan) while the loaded cfg
+#: uses the fan_* keys; without this map the section dumped as an empty header.
+_INI_TO_CFG = {
+    'mode': 'fan_mode',
+    'duty': 'fan_duty',
+    'zero_fan': 'fan_zero_fan',
+}
+
+
 def _dump_effective_config(cfg, fmt):
     """Effective config as INI text or JSON, including every known section key."""
     if fmt == 'json':
@@ -2011,8 +2145,9 @@ def _dump_effective_config(cfg, fmt):
             continue
         lines.append(f'[{section}]')
         for key in sorted(options):
-            if key in cfg:
-                lines.append(f'{key} = {_ini_value(cfg[key])}')
+            source = _INI_TO_CFG.get(key, key) if section == 'fan' else key
+            if source in cfg:
+                lines.append(f'{key} = {_ini_value(cfg[source])}')
         lines.append('')
     return '\n'.join(lines).rstrip()
 
@@ -2078,10 +2213,19 @@ def _main():
     _validate_args(parser, args)
 
     try:
+        # Configure a provisional level first: load_config() itself warns about
+        # unknown sections/options, and those records went through logging's
+        # last-resort handler, ignoring --quiet. Reconfigure below once the
+        # file's own verbose/quiet values are known.
+        setup_logging(verbose=args.verbose, quiet=args.quiet)
         cfg = load_config(args.config)
     except ConfigError as exc:
         logger.error(f'Error: {exc}')
         sys.exit(EXIT_ERROR)
+    # Remember what came from the command line: only config-derived defaults are
+    # candidates for "this mode ignores it" warnings (explicit flags are already
+    # rejected by _validate_args).
+    cli_output, cli_serial = args.output, args.serial
     if args.output is None:
         args.output = cfg['output']
     if args.port is None:
@@ -2130,8 +2274,31 @@ def _main():
         )
         args.format = 'text'
 
+    if args.dashboard:
+        if cli_output is None and args.output:
+            logger.warning(
+                f'--dashboard serves the local page; ignoring [monitor] output = {args.output!r}'
+            )
+        if cli_serial is None and args.serial:
+            logger.warning(
+                f'--dashboard labels the last sampled PSU; ignoring [monitor] serial = {args.serial!r}'
+            )
+    elif args.export and cli_serial is None and args.serial:
+        logger.warning(f'--export reads local history; ignoring [monitor] serial = {args.serial!r}')
+    elif args.show_alert_log and cli_serial is None and args.serial:
+        logger.warning(
+            f'--show-alert-log reads local files; ignoring [monitor] serial = {args.serial!r}'
+        )
+
     if args.dump_config:
-        emit(_dump_effective_config(cfg, args.format), args.output)
+        # This dispatch happens before the PSU try/except below, so an
+        # unwritable -O used to escape as an OutputError traceback instead of
+        # the documented one-line error + exit 1.
+        try:
+            emit(_dump_effective_config(cfg, args.format), args.output)
+        except OutputError as exc:
+            logger.error(f'Error: {exc}')
+            sys.exit(EXIT_ERROR)
         sys.exit(EXIT_OK)
     if args.dashboard:
         sys.exit(run_dashboard(args, cfg))
