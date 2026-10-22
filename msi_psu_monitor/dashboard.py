@@ -485,12 +485,17 @@ def _host_is_loopback(header):
         if end == -1:
             return False
         name, rest = host[1:end], host[end + 1 :]
-        if rest and not rest.startswith(':'):
+        if rest and not (rest.startswith(':') and rest[1:].isdigit()):
+            # "[::1]junk" and "[::1]:80:90" are malformed authorities. The
+            # old check only required a leading ':' after the bracket, so a
+            # second colon slipped through.
             return False
     else:
         if host.count(':') > 1:  # unbracketed IPv6, or a malformed authority
             return False
-        name = host.split(':', 1)[0]
+        name, sep, port = host.partition(':')
+        if sep and not port.isdigit():
+            return False
     return name in _LOOPBACK_HOSTS
 
 
@@ -633,6 +638,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 )
         except ValueError as exc:
             return 400, f'{exc}\n', 'text/plain; charset=utf-8', ()
+        except OSError as exc:
+            # The state directory passed the access check but a read failed
+            # (a file vanished, EIO, a permission change). Answer 503 with the
+            # reason instead of dropping the connection from the handler thread.
+            return (
+                503,
+                f'cannot read the state directory: {exc}\n',
+                'text/plain; charset=utf-8',
+                (),
+            )
         return 404, 'not found\n', 'text/plain; charset=utf-8', ()
 
     def do_GET(self):

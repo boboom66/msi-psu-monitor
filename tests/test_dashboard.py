@@ -777,3 +777,20 @@ def test_export_endpoint_quotes_a_comma_in_a_value(tmp_path):
 def test_the_chart_grid_can_shrink_below_its_desktop_minimum():
     """A 320px viewport must not scroll horizontally: minmax(340px) overflowed."""
     assert 'minmax(min(340px, 100%), 1fr)' in dashboard.PAGE
+
+
+def test_a_history_read_error_is_a_503_not_a_dropped_connection(live_server, monkeypatch):
+    """The state dir passed the access check, then the read failed (EIO).
+
+    The OSError used to escape _route() into the handler thread, so the client
+    saw a closed connection and the journal a traceback instead of a 503.
+    """
+
+    def boom(*_args, **_kwargs):
+        raise OSError(5, 'Input/output error')
+
+    monkeypatch.setattr(dashboard.stats, 'iter_history', boom)
+    with pytest.raises(HTTPError) as exc:
+        _get(live_server + '/api/history?from=2h')
+    assert exc.value.code == 503
+    assert 'cannot read the state directory' in exc.value.read().decode('utf-8')

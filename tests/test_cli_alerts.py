@@ -107,7 +107,7 @@ def test_show_log_dumps_blackbox(monkeypatch, capsys):
         }
     ]
     stub = StubPSU({'product': 'MPG Ai1600TS'}, blackbox=records)
-    code, out = _run_main(monkeypatch, capsys, stub, ['prog', '--once', '--show-log'])
+    code, out = _run_main(monkeypatch, capsys, stub, ['prog', '--show-log'])
     assert code == EXIT_OK
     assert '#1' in out.out
 

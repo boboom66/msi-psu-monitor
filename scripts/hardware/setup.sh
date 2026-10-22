@@ -96,10 +96,10 @@ WRAP
 fi
 
 info "Installing udev rule and systemd unit"
-install -m 644 "$KIT_DIR/systemd/99-msi-psu.rules" "$UDEV"
-install -m 644 "$KIT_DIR/systemd/msi-psu-monitor.service" "$UNIT"
+install -D -m 644 "$KIT_DIR/systemd/99-msi-psu.rules" "$UDEV"
+install -D -m 644 "$KIT_DIR/systemd/msi-psu-monitor.service" "$UNIT"
 if [ ! -e "$CONFIG" ]; then
-    install -m 644 "$KIT_DIR/msi-psu-monitor.conf.example" "$CONFIG"
+    install -D -m 644 "$KIT_DIR/msi-psu-monitor.conf.example" "$CONFIG"
     info "Installed the example config at $CONFIG (all values commented out)"
 else
     info "Keeping the existing $CONFIG"

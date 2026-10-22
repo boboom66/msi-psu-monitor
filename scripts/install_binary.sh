@@ -32,7 +32,7 @@ install -m 755 "$SRC/msi-psu-monitor" "$SRC/msi-psu-monitor-daemon" "$PREFIX/bin
 
 if command -v udevadm >/dev/null 2>&1; then
     info "Installing the udev rule"
-    install -m 644 "$SRC/99-msi-psu.rules" "$UDEV"
+    install -D -m 644 "$SRC/99-msi-psu.rules" "$UDEV"
     udevadm control --reload-rules || true
     udevadm trigger --subsystem-match=hidraw || true
 else
@@ -43,12 +43,12 @@ if [ -e "$CONFIG" ]; then
     info "Keeping the existing $CONFIG"
 else
     info "Installing the example config (all values commented out)"
-    install -m 644 "$SRC/msi-psu-monitor.conf.example" "$CONFIG"
+    install -D -m 644 "$SRC/msi-psu-monitor.conf.example" "$CONFIG"
 fi
 
 if [ -d /run/systemd/system ]; then
     info "Installing and starting the daemon unit"
-    install -m 644 "$SRC/msi-psu-monitor.service" "$UNIT"
+    install -D -m 644 "$SRC/msi-psu-monitor.service" "$UNIT"
     mkdir -p /var/lib/node_exporter
     systemctl daemon-reload
     systemctl enable --now msi-psu-monitor.service

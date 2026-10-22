@@ -625,7 +625,7 @@ def test_send_command_without_an_open_fd_is_a_failure():
         # Rejected write to a real register: echoed register, then NAK.
         ([0x50, 0x41, 0x55, 0x55, 0x55], b'\x50\x41\xfe', None),
         # A *read* whose first payload byte is 0xFE is data, not a NAK: byte 2
-        # carries the low byte of a 12 V LINEAR11 word (11.984 V = 0xCEFE) or of
+        # carries the low byte of a 12 V LINEAR11 word (11.984 V = 0xCDFE) or of
         # the uptime counter, so the byte-2 test must not run on reads.
         ([0x51, 0x69], b'\x51\x69\xfe', b'\xfe'),
         ([0x51, 0xE0], b'\x51\xe0\xfe\xce' + bytes(4), b'\xfe\xce' + bytes(4)),
@@ -709,7 +709,7 @@ def _answering_device(monkeypatch, replies):
 
 
 def test_a_meg_frame_whose_first_payload_byte_is_0xfe_is_still_decoded(monkeypatch):
-    """11.984 V is 0xCEFE in LINEAR11, so byte 2 of a valid 0xE0 reply is 0xFE.
+    """11.984 V is 0xCDFE in LINEAR11, so byte 2 of a valid 0xE0 reply is 0xFE.
 
     The read path used to treat any reply whose byte 2 was 0xFE as a NAK, so a
     perfectly healthy 20-byte MEG frame was discarded: ``get_sensors`` returned an

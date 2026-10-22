@@ -30,7 +30,7 @@ usage() {
     cat <<EOF
 Usage: sudo ./acceptance.sh [--demo] [--writes] [--yes] [--port N] [--out DIR]
   --demo     use the synthetic PSU (proves the harness itself; NOT hardware)
-  --writes   also test fan/Zero Fan/buzzer/multirail writes (asks first)
+  --writes   test the fan write (asks first); Zero Fan/buzzer/rail stay manual
   --yes      non-interactive confirmation for the write tests
   --port N   dashboard port (default 8899)
   --out DIR  evidence directory (default /var/log/msi-psu-acceptance/<stamp>)

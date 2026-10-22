@@ -1,5 +1,6 @@
 """Edge-triggered alert engine for MSI PSU E1h status bits."""
 
+import math
 from dataclasses import dataclass, field
 
 SEVERITY_WARNING = 'warning'
@@ -196,7 +197,14 @@ def evaluate_pin_alerts(
         return {}
     try:
         values = [float(value) for value in pins]
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        return {}
+    # A 12V-2x6 has 12 pins. A longer list is a malformed frame, not new pins:
+    # enumerating it produced phantom ocp_pin13/14 alerts. Non-finite values are
+    # unreadable, not measurements (NaN comparisons would silently hide both the
+    # per-pin and the imbalance rule).
+    values = values[:12]
+    if any(not math.isfinite(value) for value in values):
         return {}
     active = {}
     if pin_max_a > 0:
@@ -218,9 +226,27 @@ def _reading(sensors, key):
     if isinstance(value, tuple):
         value = value[0]
     try:
-        return float(value)
-    except (TypeError, ValueError):
+        value = float(value)
+    except (TypeError, ValueError, OverflowError):
         return None
+    # NaN/inf are not measurements. Returning them would evaluate every limit
+    # as False (NaN comparisons are false) and clear a latched alert; None makes
+    # the caller omit the name, which keeps the latched state.
+    return value if math.isfinite(value) else None
+
+
+def _safe_limit(raw):
+    """Return a threshold as float, or 0.0 (disabled) when unusable.
+
+    Config values arrive sanitised, but hand-built dicts (tests, API use)
+    may carry strings like 'abc' or non-finite floats. Raising here would
+    turn one bad limit into a failed alert poll, so treat it as disabled.
+    """
+    try:
+        value = float(raw or 0.0)
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+    return value if math.isfinite(value) else 0.0
 
 
 def evaluate_threshold_alerts(sensors, thresholds):
@@ -232,14 +258,14 @@ def evaluate_threshold_alerts(sensors, thresholds):
     """
     active = {}
     for name, (sensor_key, config_key) in THRESHOLD_SOURCES.items():
-        limit = float(thresholds.get(config_key) or 0.0)
+        limit = _safe_limit(thresholds.get(config_key))
         if limit <= 0:
             continue
         value = _reading(sensors, sensor_key)
         if value is None:
             continue
         active[name] = value >= limit
-    connector_limit = float(thresholds.get(CONNECTOR_LIMIT_KEY) or 0.0)
+    connector_limit = _safe_limit(thresholds.get(CONNECTOR_LIMIT_KEY))
     if connector_limit > 0:
         pins = sensors.get('iout_pins')
         if isinstance(pins, tuple):
@@ -247,7 +273,7 @@ def evaluate_threshold_alerts(sensors, thresholds):
         if isinstance(pins, list) and len(pins) == 12:
             try:
                 values = [float(pin) for pin in pins]
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 values = None
             if values is not None:
                 for index, offset in enumerate((0, 6), start=1):
@@ -265,8 +291,8 @@ def configured_threshold_names(thresholds, has_per_pin_data):
     """
     names = set()
     for name, (_sensor_key, config_key) in THRESHOLD_SOURCES.items():
-        if float(thresholds.get(config_key) or 0.0) > 0:
+        if _safe_limit(thresholds.get(config_key)) > 0:
             names.add(name)
-    if has_per_pin_data and float(thresholds.get(CONNECTOR_LIMIT_KEY) or 0.0) > 0:
+    if has_per_pin_data and _safe_limit(thresholds.get(CONNECTOR_LIMIT_KEY)) > 0:
         names.update(CONNECTOR_ALERTS)
     return names

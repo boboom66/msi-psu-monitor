@@ -217,7 +217,16 @@ THRESHOLD_KEYS = (
 
 def threshold_limits(cfg):
     """Return the enabled local thresholds as {config_key: float} (0 = disabled)."""
-    return {key: float(cfg.get(key) or 0.0) for key in THRESHOLD_KEYS}
+    limits = {}
+    for key in THRESHOLD_KEYS:
+        try:
+            value = float(cfg.get(key) or 0.0)
+        except (TypeError, ValueError, OverflowError):
+            value = 0.0
+        if not math.isfinite(value):
+            value = 0.0
+        limits[key] = value
+    return limits
 
 
 def _as_float(raw, fallback):

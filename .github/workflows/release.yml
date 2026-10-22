@@ -54,12 +54,12 @@ jobs:
       - name: Assert the package does not require Python
         run: |
           ! dpkg-deb -f dist/msi-psu-monitor_*_${{ matrix.deb_arch }}.deb Depends | grep -q python
+      - name: Build the hardware acceptance kit
+        run: bash scripts/build_hardware_kit.sh "${{ matrix.arch }}"
       - name: Generate the SBOM
         run: |
           python3 scripts/build_sbom.py --dist dist \
             --output dist/SBOM-${{ matrix.arch }}.json --arch ${{ matrix.arch }}
-      - name: Build the hardware acceptance kit
-        run: bash scripts/build_hardware_kit.sh "${{ matrix.arch }}"
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.arch }}
@@ -92,9 +92,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" \
-            dist/msi-psu-monitor_*.tar.gz dist/msi-psu-monitor_*_amd64.deb \
-            dist/msi-psu-monitor_*_arm64.deb dist/SBOM-*.json \
-            dist/*hardware-kit*.tar.gz dist/SHA256SUMS \
+            dist/msi-psu-monitor_*.tar.gz dist/msi-psu-monitor_*.tar.gz.sha256 \
+            dist/msi-psu-monitor_*_amd64.deb dist/msi-psu-monitor_*_amd64.deb.sha256 \
+            dist/msi-psu-monitor_*_arm64.deb dist/msi-psu-monitor_*_arm64.deb.sha256 \
+            dist/SBOM-*.json \
+            dist/*hardware-kit*.tar.gz dist/*hardware-kit*.tar.gz.sha256 \
+            dist/SHA256SUMS \
             --repo "${{ github.repository }}" \
             --title "${{ github.ref_name }}" \
             --generate-notes

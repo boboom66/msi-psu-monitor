@@ -74,12 +74,14 @@ done
 wait "$PID"
 RC=$?
 PID=""
+FAILED=0
 if [ "$POLLS" -eq 0 ]; then
-    # Only possible for very short runs; do not silently report "0 KB fds 0".
+    # A run that measured no RSS/fd is a failed gate, not a warning: the
+    # ceilings below would otherwise pass on "0 KB, fd 0" without evidence.
     echo "soak: daemon finished before a poll (RSS/fd not measured)" >&2
+    FAILED=1
 fi
 
-FAILED=0
 fail() {
     echo "SOAK FAIL: $1" >&2
     FAILED=1
