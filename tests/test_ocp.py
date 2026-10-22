@@ -246,6 +246,13 @@ def test_run_ocp_unsupported_model_is_not_an_error(capsys):
     assert 'MEG Ai1300P' in out
     assert monitor.OCP_UNSUPPORTED in out
 
+    # Dump/load is the C0h threshold path, not the read-only --ocp view: an
+    # unsupported model must fail it (the read-only command stays exit 0).
+    dump_args = monitor.build_parser().parse_args(['--dump-thresholds'])
+    dump_args.format = 'text'
+    assert monitor.run_ocp_thresholds(psu, dump_args) == EXIT_ERROR
+    assert monitor.OCP_UNSUPPORTED in capsys.readouterr().err
+
 
 def test_run_ocp_unsupported_model_json(capsys):
     psu = StubPSU(None, supported=False, product='MEG Ai1300P')

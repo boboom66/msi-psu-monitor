@@ -47,7 +47,7 @@ case "$ARCH" in
     *) die "unsupported architecture: $ARCH" ;;
 esac
 
-GLIBC=$(ldd --version | head -1 | awk '{print $NF}')
+GLIBC=$(ldd --version | awk 'NR==1{print $NF}')
 if "$PY" - "$GLIBC" "$GLIBC_FLOOR" <<'PY'
 import sys
 

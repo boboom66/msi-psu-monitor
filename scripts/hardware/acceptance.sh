@@ -141,7 +141,7 @@ fi
     id
     uname -a
     cat /etc/os-release 2>/dev/null || true
-    ldd --version 2>/dev/null | head -1 || true
+    ldd --version 2>/dev/null | awk 'NR==1' || true
     printf "kit: %s\n" "$KIT_DIR"
     printf "monitor: %s\n" "${MONITOR[*]}"
     printf "daemon: %s\n" "${DAEMON[*]}"
