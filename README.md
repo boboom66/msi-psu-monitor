@@ -458,7 +458,7 @@ the 62-byte `0xE0` bulk read layout and the register map.
 
 A Chinese walkthrough of the major features added on top of the upstream tool —
 what each one does, how it is implemented, and which parts still need real hardware
-— is in [`docs/新增功能与实现方案.md`](docs/新增功能与实现方案.md).
+— is in [`docs/新增功能指令与预览.md`](docs/新增功能指令与预览.md)（历史 v1.0.0 输出）.
 
 ## Security and support
 

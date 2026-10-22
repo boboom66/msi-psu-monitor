@@ -1,4 +1,4 @@
-# Ai1300TS 严格测试报告
+# Ai1300TS 严格测试报告（历史快照）
 
 > **历史快照（2026-10-19/21）**。当前门禁为 **803 tests / 94% 分支覆盖率 / smoke 58 / soak 5000**；当前事实见 `docs/verify.md`、`bug-audit/FIX_LOG.md` 与 `bug-audit/RELEASE_READINESS.md`。
 

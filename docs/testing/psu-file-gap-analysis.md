@@ -1,4 +1,4 @@
-# psu-file 需求资料 vs 当前实现：差距与缺陷对比（2026-10-19）
+# psu-file 需求资料 vs 当前实现：差距与缺陷对比（2026-10-19，2026-10-22 更新）
 
 ## 0. 方法与范围
 
@@ -9,14 +9,14 @@
 | 文件索引 / 冻结缺口清单 | `psu-file/README_文件索引.md`、`psu-file/msi-psu-monitor-missing-features.md` | 冻结范围口径 |
 | 定稿需求（DocMost m00066） | `psu-file/01_需求文档/需求分析.md` | 一期/二期/不做的最终口径 |
 | CLI 手册 | `psu-file/01_需求文档/CLI-输入参数与输出格式.md` | 参数、退出码、三种输出样例 |
-| 技术评估（差距矩阵） | `psu-file/01_需求文档/msi-psu-monitor-技术评估报告.md`（F-01..F-22） | 逐项差距与处置 T-01..T-22 |
+| 技术评估（差距矩阵） | `psu-file/01_需求文档/技术评估-msi-psu-monitor对比Msi-Center.md`（F-01..F-22） | 逐项差距与处置 T-01..T-22 |
 | 需求改动清单（草案） | `psu-file/01_需求文档/PSU-7ZPU-需求分析与技术评估.md`（REQ-1..REQ-19） | 草案条目，区分"冻结/未冻结" |
 | 官方规格 | `02_官方规格/CWT_MSI_..._REV6.pdf`、`MPG-Ai1300TS-PCIE5.pdf` | 寄存器与产品能力 |
 | 参考实现 | `03_参考实现/msi-psu-monitor`（上游 v1.0.0）、`msi-psu-jackdoan/msi-psu.c` | 行为/NAK/边界对照 |
 | MSI Center 源码 | `04_MSI-Center源码/Msi-Center/Power Supply Unit/.../CPSU.cs`、`C_PSU.cs` | 真实行为基准（E2） |
 | 实屏 | `05_截图/images/01..10` | 总览/曲线/导出/风扇：UI 语义 |
 
-当前实现：本仓库工作树（803 tests，覆盖率 94%，smoke 58/58），详见
+当前实现：本仓库 HEAD `2076d3f`（工作树 clean；803 tests，覆盖率 94%，smoke 58/58），详见
 [bug-audit/TEST_REPORT.md](../../bug-audit/TEST_REPORT.md)。
 
 ## 1. 结论摘要
@@ -134,10 +134,10 @@ stderr+exit 2/`alerts-*.log`，但名字独立（`power_high`/`temp_high`/`rail_
 |---|---|---|---|---|---|
 | DEF-032 | P2 | `--buzzer-off` 输出/文档宣称 "Buzzer: silenced"，但 C2h 是无参数、无回读的 **toggle**；第二次执行会重新打开蜂鸣，用户却以为已静音 | `CPSU.cs:1148-1159`（`BUZZER_SWITCH`，无 payload、无读回）；`verify.md` §8.11 早已标注"switch 还是静音待确认" | 输出改为 `Buzzer: switch toggled (no read-back)`，帮助/审计行/README/协议文档统一为"开关切换、不宣称静音"；行为仍只发一次 C2h | `test_buzzer_off_writes_and_reports_the_switch`、audit 断言、smoke 期望同步 |
 | DEF-033 | P2 | `--set-rail` 即使当前已是目标模式也会写 + F1h 保存；草案 REQ-11 明确"发前先读回，值一致直接返回（硬件同值会报错）"，且每次幂等调用都消耗一次 flash 保存 | `PSU-7ZPU-需求分析与技术评估.md` REQ-11 | `apply_rail_mode()` 先读 `read_multirail_ocp()`，一致则直接返回 `(mode, changed=False)`；输出 `Rail mode: multi (already set)`，审计行带 `changed=` | `test_set_rail_is_a_noop_when_already_in_the_requested_mode`；原写入/读回失败用例保持 |
-| DEF-034 | P3 | Dashboard 的"7 张实时曲线"实际是 12V/5V/3.3V/12V 总电流/温度/风扇/功率(含效率)，缺独立效率曲线，且 12V 总电流不在 MSI 的 7 张里 | `msi-psu-monitor-技术评估报告.md` §2（温度/12V/5V/3.3V/风扇/效率/瓦数 CPU/GPU/Total）；实屏 02 | CHARTS 改为 12V/5V/3.3V/efficiency/temperature/fan/power(CPU/GPU/Total)；12V 总电流仍进历史/导出/Prometheus | `test_the_seven_charts_match_the_msi_dashboard`（含 id 顺序与功率卡不含 eff 断言）；Node live harness |
+| DEF-034 | P3 | Dashboard 的"7 张实时曲线"实际是 12V/5V/3.3V/12V 总电流/温度/风扇/功率(含效率)，缺独立效率曲线，且 12V 总电流不在 MSI 的 7 张里 | `技术评估-msi-psu-monitor对比Msi-Center.md` §2（温度/12V/5V/3.3V/风扇/效率/瓦数 CPU/GPU/Total）；实屏 02 | CHARTS 改为 12V/5V/3.3V/efficiency/temperature/fan/power(CPU/GPU/Total)；12V 总电流仍进历史/导出/Prometheus | `test_the_seven_charts_match_the_msi_dashboard`（含 id 顺序与功率卡不含 eff 断言）；Node live harness |
 | DEF-035 | P3 | MEG 机型序列号取 0x13 整包，依赖 24 字节后的报告全为 0；参考实现固定读 24 字节 | `CPSU.cs:515-523`（MEG 固定 24）；`CPSU.cs:525-528`（TS 长度前缀） | `init()` 按机型分支：MPG TS 长度前缀、MEG 固定 24 字节、未知机型保留旧启发式 | `test_a_meg_serial_is_cut_to_the_msi_fixed_length`；TS 长度前缀/legacy/64 字节上限用例保持 |
 | FEAT-01 | — | 本地阈值/告警补齐（原 U-01、REQ-13/14 草案） | REQ-13/14、J-01..J-03 | `[alerts]` 8 个可配极限；统一 AlertEngine（去抖/exit 2/审计日志）；文本 Thresholds 行、JSON `threshold_alerts/limits`、Prometheus `msi_psu_threshold_*`；payload 失败不清 latched | `test_alerts.py` 6 例、`test_config.py` 4 例、`test_cli_features.py` 5 例、`test_daemon.py` 3 例 |
-| FEAT-04 | — | 可靠性/发布收口：soak 门禁、fuzz、多轨 formatter、CHANGELOG、裸 3.13 复核 | QUAL-01..03 | `scripts/soak.sh` 进 CI（5k）、确定性 fuzz、多轨 formatter 测试、CHANGELOG 随所有包、Python 3.13.15 裸跑 735 passed | `test_soak.py` 3 例、`test_robustness.py` 3 例、`test_monitor_format.py` 3 例、`test_packaging.py` |
+| FEAT-04 | — | 可靠性/发布收口：soak 门禁、fuzz、多轨 formatter、CHANGELOG、裸 3.13 复核 | QUAL-01..03 | `scripts/soak.sh` 进 CI（5k）、确定性 fuzz、多轨 formatter 测试、CHANGELOG 随所有包、Python 3.13.15/3.10.21 裸跑 803 passed | `test_soak.py` 3 例、`test_robustness.py` 3 例、`test_monitor_format.py` 3 例、`test_packaging.py` |
 | FEAT-03 | — | 硬件 OCP 阈值写/导出/导入 + 握手退避 + promtool 替代 | REQ-12/16/18、F-16/F-17 | `--dump-thresholds`/JSON、`--ocp-set`、`--load-thresholds`（8B + F1h + 读回 3 次；范围硬校验；同值不写；机型门）；初始化握手 3 次退避；严格 exposition 测试替代 promtool | `test_ocp.py` 5 例、`test_cli_features.py` 14 例、`test_psu_sensors.py` 2 例、`test_prometheus_exposition.py` 4 例；保护写仍待真机 bench |
 | FEAT-02 | — | 运维/CLI 打磨（U-04、U-06、U-07、F-19） | REQ-8/16、F-19 | Prometheus 规范 exposition（`metric{} value`，无空格）、电量 counter 双名、`docs/prometheus-rules.yml` 随包、`--dump-config`（text/json，无 PSU 也可打印生效阈值）、`--help` 注明 5s 平均/EFF 源/针序、阈值告警带 measured/limit 明细 | `test_cli_features.py`（dump-config/alias/描述）、`test_packaging.py`（规则随包）、`test_monitor_format.py` |
 
@@ -160,5 +160,5 @@ stderr+exit 2/`alerts-*.log`，但名字独立（`power_high`/`temp_high`/`rail_
 2. 真机 bench：OCP 阈值写必须先在样机上导出原值、写入、断电保持验证，再恢复；
    默认值/阈值/保护点都按真实负载校准。U-07 只剩 TS 针到 12V3/12V5 的映射。
    U-04 的 promtool 自检需有工具的环境补跑；U-05 的 udev 序列号软链经评估不做。
-3. 发布：本轮修复未提交/未发布；确认后 bump 版本、走新 CI release，并补 arm64 运行、
+3. 发布：本轮修复已提交（`cf57e8d`/`e57bd44`/`2076d3f`）但未打 tag/发布；确认后 bump 版本、走新 CI release，并补 arm64 运行、
    真实 systemd/udev、桌面浏览器、24h/72h。

@@ -248,14 +248,15 @@ MSI_PSU_DEMO_MODEL=ai1300p MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --set-rail m
 .venv/bin/msi-psu-monitor --ocp -f prometheus | grep ocp_
 ```
 
-非 12V-2x6 机型（MEG 系列）应打印「not available on this model」并 **exit 0**——
+MEG P（Ai1300P/Ai1000P）应打印 `Multirail OCP (0xC0)` 单/多轨标志并 **exit 0**；
+MEG Ai1600T 两个 C0h 视图都没有，应打印「not available on this model」并 **exit 0**——
 这是机型事实而非错误，脚本可无条件调用；该分支由 `tests/test_ocp.py` 覆盖：
 
 ```bash
 uv run --group dev pytest -q tests/test_ocp.py
 ```
 
-`--ocp` 与 `--watch`/`--export`/`--show-log`/`--dashboard`/风扇写互斥（argparse 报错 exit 2）。
+`--ocp` 与 `--once`/`--watch`/`--export`/`--show-log`/`--dashboard`/风扇写互斥（argparse 报错 exit 2）。
 
 ### 2.2 OCP 阈值导出/写入/导入（MPG TS；真实保护写）
 
@@ -532,7 +533,7 @@ journalctl -u msi-psu-monitor -f
 7. 72h 烤机：`state.json` 的 `energy_wh` 与插座功率计积分值偏差可接受；
 8. `--ocp` 读出的 4 个阈值与 MSI Center 界面 / 出厂规格一致（12A/5A/20s/180s），
    且 `ConnN` 状态与 `--once` 的 `12V-2x6 Status` 行不矛盾；
-9. `--ocp` 在 MEG P 系（`0x56D4`/`0xE760`）上输出 1 字节单多轨标志（`per-rail protection`
+9. `--ocp` 在 MEG P 系（`0x56D4`/`0xE749`）上输出 1 字节单多轨标志（`per-rail protection`
    或 `single combined-rail`），与 MSI Center 的对应开关一致，不产生 NAK 重试或超时；
 10. `--ocp` 在 MEG Ai1600T（`0xC9EB`）上打印「not available」并 exit 0（两个 `0xC0` 视图
    都不支持），不产生 NAK 重试或超时；
@@ -540,7 +541,7 @@ journalctl -u msi-psu-monitor -f
     `--buzzer-off` 在 12+4 OCP 蜂鸣触发时能让蜂鸣停止（C2h 无回读，只看 ACK 与听感）；
     再执行一次，确认它是「静音」还是 MSI 命名的「switch」（第二次是否会重新响）；
 12. `--set-rail multi` / `--set-rail single` 在 MEG Ai1300P（`0x56D4`）上读回一致，
-    断电重启后模式保持；Ai1000P（`0xE760`）同样验证；MPG TS 和 Ai1600T 应拒绝并
+    断电重启后模式保持；Ai1000P（`0xE749`）同样验证；MPG TS 和 Ai1600T 应拒绝并
     exit 1（机型门），且不产生错误寄存器写入；
 13. `--set-rail` 切换前后 `--ocp` 的 multirail 标志与读回一致；切换后的 OCP 行为
     （单轨总电流 vs 各轨独立限流）与 MSI Center 的 Multi Rail/Single Rail 一致；
