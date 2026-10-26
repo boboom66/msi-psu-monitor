@@ -16,12 +16,12 @@ gates green; full feature matrix AMBER.
 | ID | Feature | User job | Baseline status | Decision | Priority | Next action |
 |---|---|---|---|---|---|---|
 | F-01 | CLI help/entry | Find the right command | Automated tests pass; flat 25+ flags | **Improve** | P1 | Grouped help + examples; no flag removal |
+| F-06 | `--dashboard-text` | No-browser live view | **DONE**: box alignment + truncation fixed, 4 tests | **Improve — partial DONE** | P1 | PTY captures at 80x24/120x40; keys/footer next |
+| F-07 | `--menu` | Discover commands without flags | **DONE**: `?` help, `0` quit, alert-log entry, dynamic footer | **Improve — partial DONE** | P2 | Role decision vs dashboard-text still open |
 | F-02 | Device discovery | Pick the right PSU | `--serial` only | **Improve** | P1 | `--list` table, `--device`, safe default |
 | F-03 | One-shot text | Read the PSU at a glance | Smoke passes | **Keep** | P1 | Golden-output polish only |
 | F-04 | JSON | Script the readings | Smoke passes | **Keep** | P2 | Add schema version, keep keys |
 | F-05 | Watch | Watch live in a terminal | Automated pass; TTY capture missing | **Improve** | P1 | Cursor restore, JSONL decision, PTY test |
-| F-06 | `--dashboard-text` | No-browser live view | Unit tests pass; PTY capture missing | **Improve** | P1 | 80x24/120x40 capture, keys/footer, resize |
-| F-07 | `--menu` | Discover commands without flags | Unit tests pass; overlaps watch/dashboard | **Replace or Improve** | P2 | Decide: launcher role, merge, or remove |
 | F-08 | Web dashboard | See history/trends in a browser | HTTP smoke passes; visual states missing | **Improve** | P1 | Empty/stale/error banner, time range, responsive |
 | F-09 | Export CSV | Report/share data | Smoke covers export | **Improve** | P1 | `--to`, `-O -`, timezone, column validation |
 | F-10 | Alerts | Understand and act on a warning | Alert paths pass | **Improve** | P1 | measured vs limit, source, next command, recovery |

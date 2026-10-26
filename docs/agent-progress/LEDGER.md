@@ -19,8 +19,16 @@ Append-only task table. `UNKNOWN` is not `PASS`.
 | T-013 | Feature portfolio / G1 proposal | G | **DONE** | pending | `FEATURE_PORTFOLIO.md` | self-checked | 30 features; 5 themes; 5 G1 questions |
 | T-014 | Rename buzzer flag to `--buzzer-toggle` | F | **DONE** | `7f01604` | `monitor.py`, tests, README, CHANGELOG | CI | Primary name; `--buzzer-off` hidden alias; 2 new tests; docs count 861 |
 | T-015 | Verify buzzer rename in CI | F | **PASS** | `7f01604` | run `40291862435` | CI | 3.10/3.12/3.13 + freeze all green |
+| T-016 | termdash: colour-width box + safe truncation | F | **DONE** | `ffb158f` | `termdash.py`, 4 new tests | CI run `40294017182` PASS | Box aligned by visible width; header/rows cut without splitting escapes |
+| T-017 | menu: `?` help, `0` quit, alert-log entry, dynamic footer | F | **DONE** | `ffb158f` | `menu.py`, 5 new tests | CI run `40294017182` PASS | `?` was decoded but ignored; alert log runs locally (no hidraw) |
+| T-018 | Intermediate CI failures fixed | F | **DONE** | `41a31a3`→`ffb158f` | runs `40293264056`, `40293672414` | CI | ruff format + stale doc count 861→870 + wrong header-line assertion |
 
-## Next (G2)
+## Next (user-feature polish, continuing)
+
+- T-019 Web dashboard empty/stale/error banners + time-range labels (design → implement)
+- T-020 Watch ANSI redraw: PTY evidence at 80x24/120x40 + cursor-restore test
+- T-021 Naming/units matrix for TUI vs text vs JSON vs Prometheus
+- Then G2 review of the remaining scope before more code.
 
 - Human approved the portfolio with “开始”; G1 is treated as approved.
 - Next: design cards for OCP dry-run/backup/restore, `--doctor`, `--list`;
