@@ -15,6 +15,7 @@ No third-party imports; colours are plain SGR sequences and disappear when
 """
 
 import os
+import re
 import time
 
 RESET = '\x1b[0m'
@@ -74,6 +75,57 @@ def colour_enabled(stream, env=None):
 
 def _paint(text, code, enabled):
     return f'{code}{text}{RESET}' if enabled else text
+
+
+_ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+
+
+def _visible_len(text):
+    """Column count of ``text`` with SGR colour sequences removed.
+
+    The box frames every row to the same width; padding by ``len()`` counts
+    each escape as visible columns, which shifted the right border by nine
+    columns for every coloured value.
+    """
+    return len(_ANSI_RE.sub('', text))
+
+
+def _cut_visible(text, width):
+    """Truncate to ``width`` columns without splitting an escape sequence.
+
+    Painted chunks carry their own RESET, but a cut can drop it and bleed the
+    colour into the rest of the frame; close any surviving colour instead.
+    """
+    if width <= 0:
+        return ''
+    out = []
+    seen = 0
+    index = 0
+    while index < len(text):
+        if text[index] == '\x1b':
+            match = _ANSI_RE.match(text, index)
+            if match is None:
+                break  # a malformed escape cannot be kept intact
+            out.append(match.group(0))
+            index = match.end()
+            continue
+        if seen >= width:
+            break
+        out.append(text[index])
+        seen += 1
+        index += 1
+    cut = ''.join(out)
+    if _ANSI_RE.search(cut) and not cut.endswith(RESET):
+        cut += RESET
+    return cut
+
+
+def _header(plain, color):
+    """Paint the fixed title inside an already width-capped plain header."""
+    title = ' MSI PSU Monitor'
+    if plain.startswith(title):
+        return _paint(title, BOLD, color) + plain[len(title) :]
+    return plain
 
 
 def _reading(sensors, key):
@@ -174,10 +226,12 @@ def _box(lines, width, enabled, ascii_only):
         side = '│'
     out = [_paint(top, DIM, enabled)]
     for line in lines:
-        visible = line
-        pad = inner - len(visible)
+        # Colour escapes are not columns: cut by visible width first, then pad
+        # by visible width, or a long row pushes past the right border.
+        line = _cut_visible(line, inner)
+        pad = inner - _visible_len(line)
         out.append(
-            _paint(side, DIM, enabled) + visible + ' ' * max(0, pad) + _paint(side, DIM, enabled)
+            _paint(side, DIM, enabled) + line + ' ' * max(0, pad) + _paint(side, DIM, enabled)
         )
     out.append(_paint(bottom, DIM, enabled))
     return out
@@ -201,8 +255,10 @@ def render(
     serial = str(sensors.get('serial', ''))
     inner = max(20, min(width, 100) - 2)
 
-    header = f' {_paint("MSI PSU Monitor", BOLD, color)}  {product}  {serial}'
-    header = header[:inner]
+    # Truncate the plain identity before painting: a slice through a painted
+    # header can split an escape sequence and garble the whole frame.
+    plain = f' MSI PSU Monitor  {product}  {serial}'
+    header = _header(_cut_visible(plain, inner), color)
     sub = f' {stamp}   refresh {interval:g}s   Ctrl-C to stop'
 
     lines = [header, sub, '']

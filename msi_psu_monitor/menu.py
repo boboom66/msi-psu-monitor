@@ -76,9 +76,21 @@ ITEMS = (
         'effective configuration',
         'config',
     ),
+    Item(
+        '8',
+        'History',
+        'Alert log',
+        'msi-psu-monitor --show-alert-log',
+        'local alert audit trail (no PSU needed)',
+        'alerts',
+    ),
 )
 GROUPS = ('Monitor', 'History', 'System')
-FOOTER = 'Up/Down move   Enter run   1-7 jump   q quit'
+
+
+def _footer_text():
+    """Key legend; the jump range follows the item count."""
+    return f'Up/Down move   Enter run   1-{len(ITEMS)} jump   q quit   ? keys'
 MIN_WIDTH = 40
 MIN_HEIGHT = 8
 
@@ -158,13 +170,12 @@ def _body_lines(items, selected, width, color):
     return lines, selected_line
 
 
-def render_menu(items, selected, offset, width, height, *, color=True):
+def render_menu(items, selected, offset, width, height, *, color=True, help_mode=False):
     """Pure renderer: returns (frame, new_offset) for tests and the loop."""
     inner = max(MIN_WIDTH, min(width, 100))
     header = ' MSI PSU Monitor - menu'
     rule = '-' * inner
     body, selected_line = _body_lines(items, selected, inner, color)
-    footer = ' ' + _truncate(FOOTER, inner - 1)
 
     available = max(1, height - 5)  # header, two rules, detail, footer
     offset = max(0, min(offset, max(0, len(body) - available)))
@@ -174,7 +185,14 @@ def render_menu(items, selected, offset, width, height, *, color=True):
         offset = selected_line - available + 1
     window = body[offset : offset + available]
     item = items[selected]
-    detail = ' ' + _truncate(f'{item.label}: {item.purpose}', inner - 1)
+    if help_mode:
+        # The detail slot is the most readable place for the key legend; the
+        # footer keeps its usual shape so the frame height never changes.
+        detail = ' ' + _truncate(_footer_text(), inner - 1)
+        footer = ' ' + _truncate('? returns to the list', inner - 1)
+    else:
+        detail = ' ' + _truncate(f'{item.label}: {item.purpose}', inner - 1)
+        footer = ' ' + _truncate(_footer_text(), inner - 1)
     frame = [header, rule, *window, rule, detail, footer]
     return '\n'.join(frame), offset
 
@@ -212,6 +230,8 @@ def _decode_key(data):
         b'\n': 'enter',
         b'q': 'quit',
         b'Q': 'quit',
+        # The line prompt quits on 0; the interactive map must agree.
+        b'0': 'quit',
         b'?': 'help',
     }
     if data in mapping:
@@ -323,6 +343,12 @@ def _run(action, psu, args, cfg, monitor_state, engine):
     if action == 'config':
         _paged(lambda: monitor.emit(monitor._dump_effective_config(cfg, 'text'), None))
         return monitor.EXIT_OK
+    if action == 'alerts':
+        local = copy.copy(args)
+        local.show_alert_log = True
+        local.format = 'text'
+        local.output = None
+        return _paged(monitor.run_show_alert_log, local, cfg)
     if action == 'watch':
         local = copy.copy(args)
         local.watch = 1
@@ -351,7 +377,11 @@ def _line_show():
         print(f' {item.number}) {item.command}')
         print(f'    -> {item.purpose}')
     print('  0) quit')
-    print('====================================================')
+    print('=====================================================')
+
+
+def _line_prompt():
+    return f'[1-{len(ITEMS)}, ?=menu, 0=quit] choice: '
 
 
 _DEVICE_ACTIONS = frozenset({'once', 'watch', 'dashboard', 'ocp', 'log'})
@@ -390,7 +420,7 @@ def _line_menu(psu, args, cfg, monitor_state, engine, psu_factory=None):
         _clear()
         _line_show()
         try:
-            choice = input('[1-7, ?=menu, 0=quit] choice: ').strip()
+            choice = input(_line_prompt()).strip()
         except (EOFError, KeyboardInterrupt):
             print()
             return monitor.EXIT_OK
@@ -418,6 +448,7 @@ def _interactive_menu(psu, args, cfg, monitor_state, engine, psu_factory=None):
     fd = sys.stdin.fileno()
     selected = 0
     offset = 0
+    help_mode = False
     signals = monitor._watch_enable_soft_termination()
     old_tty = None
     cursor_hidden = False
@@ -444,7 +475,9 @@ def _interactive_menu(psu, args, cfg, monitor_state, engine, psu_factory=None):
                 dirty = True
             if dirty:
                 width, height = size
-                frame, offset = render_menu(ITEMS, selected, offset, width, height)
+                frame, offset = render_menu(
+                    ITEMS, selected, offset, width, height, help_mode=help_mode
+                )
                 _clear()
                 sys.stdout.write(frame + '\n')
                 sys.stdout.flush()
@@ -457,6 +490,12 @@ def _interactive_menu(psu, args, cfg, monitor_state, engine, psu_factory=None):
                 continue
             if key == 'quit':
                 return monitor.EXIT_OK
+            if key == 'help':
+                # ``?`` was decoded but silently ignored (it fell into the
+                # generic redraw path); it now toggles the key legend.
+                help_mode = not help_mode
+                dirty = True
+                continue
             if key in ('up', 'k'):
                 selected = (selected - 1) % len(ITEMS)
             elif key in ('down', 'j'):
@@ -503,6 +542,7 @@ def _interactive_menu(psu, args, cfg, monitor_state, engine, psu_factory=None):
             finally:
                 old_tty = _cbreak(fd)
             dirty = True
+            help_mode = False
     finally:
         if old_tty is not None:
             _restore_tty(fd, old_tty)

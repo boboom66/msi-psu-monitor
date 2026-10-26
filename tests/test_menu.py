@@ -332,3 +332,61 @@ def test_page_prints_short_text_and_pauses(monkeypatch):
     menu._page('line one\nline two')
     assert 'line one' in out.getvalue()
     assert paused == [True]
+
+
+def test_zero_quits_in_the_interactive_keymap():
+    """The line prompt quits on 0; the arrow-key map used to swallow it."""
+    assert menu._decode_key(b'0') == 'quit'
+
+
+def test_item_numbers_are_dense_and_the_alert_log_entry_is_local():
+    numbers = [item.number for item in menu.ITEMS]
+    assert numbers == [str(n) for n in range(1, len(menu.ITEMS) + 1)]
+    item = menu.ITEMS[-1]
+    assert item.action == 'alerts'
+    assert '--show-alert-log' in item.command
+    # The alert log reads local state files; opening hidraw for it would steal
+    # the device from a running daemon just to print a file.
+    assert item.action not in menu._DEVICE_ACTIONS
+    assert f'1-{len(menu.ITEMS)} jump' in menu._footer_text()
+
+
+def test_alert_log_entry_runs_the_local_viewer(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        monitor,
+        'run_show_alert_log',
+        lambda args, cfg: calls.append(args.show_alert_log) or monitor.EXIT_OK,
+    )
+    args = _args()
+    args.output = None
+    args.format = 'text'
+    code = menu._run('alerts', None, args, copy.deepcopy(config.DEFAULTS), None, None)
+    assert code == monitor.EXIT_OK
+    assert calls == [True]
+
+
+def test_help_toggle_renders_the_key_legend():
+    plain, _ = menu.render_menu(menu.ITEMS, 0, 0, 80, 24, color=False)
+    assert 'returns to the list' not in plain
+    frame, _ = menu.render_menu(
+        menu.ITEMS, 0, 0, 80, 24, color=False, help_mode=True
+    )
+    assert 'Up/Down move' in frame
+    assert 'q quit' in frame
+    assert 'returns to the list' in frame
+
+
+def test_line_prompt_range_follows_the_item_count(monkeypatch, capsys):
+    """Adding an entry must not leave the prompt advertising a stale range."""
+    prompts = []
+
+    def fake_input(prompt=''):
+        prompts.append(prompt)
+        return '0'
+
+    monkeypatch.setattr(builtins, 'input', fake_input)
+    code = menu._line_menu(None, _args(), copy.deepcopy(config.DEFAULTS), None, None, None)
+    assert code == monitor.EXIT_OK
+    assert prompts == [menu._line_prompt()]
+    assert prompts[0] == f'[1-{len(menu.ITEMS)}, ?=menu, 0=quit] choice: '

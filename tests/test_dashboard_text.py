@@ -1,6 +1,7 @@
 """Terminal dashboard: ANSI rendering and CLI contract (no browser involved)."""
 
 import io
+import re
 import sys
 import types
 
@@ -167,3 +168,58 @@ def test_dashboard_loop_renders_and_restores_the_cursor(monkeypatch):
     assert '\x1b[?25l' in text and '\x1b[?25h' in text
     assert 'MSI PSU Monitor' in text
     assert text.count('MSI PSU Monitor') >= 2
+
+
+_ANSI = re.compile(r'\x1b\[[0-9;]*m')
+
+
+def _visible(line):
+    """Column count with SGR sequences removed (what the terminal measures)."""
+    return len(_ANSI.sub('', line))
+
+
+def test_colour_does_not_shift_the_box():
+    """Padding by len() counted escape bytes; the right border used to wander."""
+    frame = termdash.render(sensors(), width=80, height=24, color=True)
+    widths = {_visible(line) for line in frame.splitlines()}
+    assert len(widths) == 1, widths
+
+
+def test_colour_pins_and_alerts_keep_the_box_aligned():
+    data = sensors()
+    data['threshold_alerts'] = ['power_high']
+    frame = termdash.render(data, width=100, height=30, color=True)
+    widths = {_visible(line) for line in frame.splitlines()}
+    assert len(widths) == 1, widths
+
+
+def test_long_identity_does_not_leak_partial_escape():
+    """A header cut through a colour sequence garbled the rest of the frame."""
+    data = sensors()
+    data['product'] = 'MPG Ai1600TS ' + 'X' * 200
+    data['serial'] = 'S' * 120
+    frame = termdash.render(data, width=80, height=24, color=True)
+    lines = frame.splitlines()
+    assert len({_visible(line) for line in lines}) == 1
+    for line in lines:
+        assert not re.search(r'\x1b\[[0-9;]*$', line), repr(line[-12:])
+    assert 'MSI PSU Monitor' in lines[0]
+
+
+def test_long_rows_cannot_escape_the_box():
+    """A wide range/row used to push past the right border (pad went negative)."""
+    history = [
+        {
+            '12v': 12.0001 + index * 0.00001,
+            '5v': 5.0,
+            '3v3': 3.3,
+            'power': 100.0 + index,
+            'eff': 90.0,
+            'temp': 40.0,
+            'fan': 1200,
+        }
+        for index in range(60)
+    ]
+    frame = termdash.render(sensors(), history=history, width=44, height=24, color=False)
+    widths = {len(line) for line in frame.splitlines()}
+    assert len(widths) == 1, widths

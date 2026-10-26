@@ -6,12 +6,30 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Menu alert-log entry** (`8`): `--show-alert-log` runs from `--menu` without
+  touching hidraw, so a running daemon keeps the device. The menu footer and
+  the numbered prompt now follow the item count instead of a hard-coded `1-7`.
+
 ### Changed
 
 - **`--buzzer-toggle` is the documented name** for the C2h buzzer switch.
   `--buzzer-off` remains as a hidden deprecated alias. The hardware switch
   toggles and has no read-back, so the output still says "switch toggled",
   never "silenced".
+
+### Fixed
+
+- **Terminal dashboard box alignment with colour**: padding counted ANSI escape
+  bytes as columns, so the right border wandered nine columns to the left for
+  every coloured value. Rows are now padded by visible width.
+- **Terminal dashboard truncation**: a narrow terminal could cut the header
+  inside a colour sequence and garble the frame; long identity strings and wide
+  rows are now cut on visible-width boundaries with colours re-closed.
+- **Menu `?` key**: it was decoded as "help" but silently ignored; it now
+  toggles the key legend, and `0` quits the arrow-key menu like the numbered
+  prompt always did.
 
 ## [1.0.1] - 2026-10-21
 
