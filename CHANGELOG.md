@@ -11,6 +11,12 @@ All notable changes to this project are documented here. The format follows
 - **Menu alert-log entry** (`8`): `--show-alert-log` runs from `--menu` without
   touching hidraw, so a running daemon keeps the device. The menu footer and
   the numbered prompt now follow the item count instead of a hard-coded `1-7`.
+- **Dashboard live badge**: the 1 s `/api/live` poll now drives a visible
+  `● live` / `○ not updating` badge, so a stopped daemon stops *looking* live
+  after ten missed polls while the history keeps serving.
+- **PTY evidence tests** (`tests/test_pty_watch.py`): `--watch` in-place redraw
+  with cursor restore, pipe mode with no escape codes, `--dashboard-text`
+  SIGINT cleanliness, and a too-small PTY falling back to streaming.
 
 ### Changed
 

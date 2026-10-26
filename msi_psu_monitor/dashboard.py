@@ -77,6 +77,7 @@ PAGE = """<!DOCTYPE html>
 <body>
 <h1>MSI PSU Monitor</h1>
 <div class="sub" id="info">loading&hellip;</div>
+<div id="livebadge" style="display:none;font-size:12px;margin:-8px 0 14px"></div>
 <div class="bar">
   <span>Range</span>
   <button data-from="30m">30m</button>
@@ -113,6 +114,9 @@ const ROW_LIMIT = __ROW_LIMIT__;
 // A successful /api/state is not proof of a live daemon: state.json survives a
 // stop, so the age of its last sample is the only evidence the page has.
 const STALE_AFTER_S = __STALE_AFTER_S__;
+// A 1 s poll against a 10 s snapshot lifetime needs its own stale threshold:
+// one missed /api/live is routine, ten is a stopped daemon.
+const LIVE_STALE_POLLS = 10;
 
 function buildCards() {
   const grid = document.getElementById('grid');
@@ -312,6 +316,36 @@ async function load() {
   render();
 }
 
+// The 1 s /api/live poll is the only daemon heartbeat the page has. History
+// keeps serving a stopped daemon for STALE_AFTER_S, so "the charts moved a
+// second ago" must be its own visible claim -- otherwise a stopped daemon looks
+// live right up until the numbers matter. Polled misses are not daemon noise:
+// [daemon] live_snapshot=off produces the same 503, so the badge says "not
+// updating" rather than "daemon crashed".
+let liveMisses = 0;
+let lastLiveTs = null;
+
+function setLiveBadge(ok, stamp) {
+  const badge = document.getElementById('livebadge');
+  const age = stamp ? Math.round(Date.now() / 1000 - stamp) : null;
+  if (ok) {
+    liveMisses = 0;
+    badge.style.display = '';
+    badge.style.color = '#5ce09b';
+    badge.textContent = '\u25cf live \u00b7 sample ' + ago(age) + ' ago';
+    return;
+  }
+  liveMisses += 1;
+  // One failed poll is a hiccup; only a streak turns the badge red so a
+  // single dropped packet does not alarm an operator watching a healthy PSU.
+  if (liveMisses < LIVE_STALE_POLLS) return;
+  badge.style.display = '';
+  badge.style.color = '#e0a25c';
+  badge.textContent = '\u25cb not updating \u00b7 live samples stopped (' +
+    (stamp ? 'last ' + ago(Math.round(Date.now() / 1000 - stamp)) + ' ago' : 'no live sample') +
+    '); history below still shows the recorded range';
+}
+
 document.getElementById('grid').addEventListener('click', e => {
   const png = e.target.dataset.png, csv = e.target.dataset.csv;
   if (png) toPng(png);
@@ -339,9 +373,13 @@ async function loadLive() {
     if (last && Date.parse(last.time) >= Date.parse(stamp)) return;
     rows.push(live);
     if (rows.length > ROW_LIMIT) rows.shift();
+    setLiveBadge(true, live.ts);
+    lastLiveTs = live.ts;
     render();
   } catch (err) {
-    // The history poll already reports an unavailable daemon.
+    // The history poll already reports an unavailable daemon; the badge is the
+    // visible, one-second-granular statement that live samples stopped.
+    setLiveBadge(false, lastLiveTs);
   }
 }
 setInterval(load, __REFRESH_MS__);

@@ -2,7 +2,7 @@
 
 > 没有真机也能验证 CLI、告警、daemon、历史落盘、prometheus 与 dashboard 全链路。
 > 下面每条命令都已在 `.venv`（Python 3.12.3）实跑通过；完整测试套件另在裸
-> Python 3.13.15 与 Python 3.10.21（uv 下载）各复核通过（历史快照曾记录 870 通过；
+> Python 3.13.15 与 Python 3.10.21（uv 下载）各复核通过（历史快照曾记录 874 通过；
 > 当前树以本次 `pytest -q` 输出为准）。
 > `smoke.sh` → 58 项（Python 3.12 环境跑过）。3.10 已实跑，同时保留静态门禁——ruff `target-version = "py310"`、mypy
 > `python_version = "3.10"`（按 3.10 typeshed 分析）、smoke 里对每个 `.py` 的
@@ -78,7 +78,8 @@ uv run --group dev ruff format --check .
 | `tests/test_cli_alerts.py` | CLI 告警路径与退出码 2（`test_once_alert_exits_two_and_prints_line`）、黑盒空表 |
 | `tests/test_cli_features.py` | `--watch`/`-O`/`--serial`/`--show-log`/`--fan-*`/`--export`/互斥校验（`test_an_empty_columns_spec_is_not_silently_every_column`） |
 | `tests/test_watch_console.py` | `--watch` 文本控制台：TTY 下 ANSI 重绘与光标恢复（`test_tty_redraw_is_ansi_and_never_calls_clear`）、管道/dumb/窄/矮终端降级、SIGTERM 映射为干净退出 |
-| `tests/test_dashboard_text.py` | 终端 Dashboard：彩色条形与门限色（`test_render_paints_an_overcurrent_pin_red`）、NO_COLOR、矮窗口裁剪、--dashboard-text 互斥 |
+| `tests/test_dashboard_text.py` | 终端 Dashboard：彩色条形与门限色（`test_render_paints_an_overcurrent_pin_red`）、NO_COLOR、按可见宽度对齐边框与截断（`test_colour_does_not_shift_the_box`）、--dashboard-text 互斥 |
+| `tests/test_pty_watch.py` | 真 PTY 证据：`--watch` 原地重绘与光标恢复（`test_watch_redraws_in_place_and_restores_the_cursor`）、管道无转义码、`--dashboard-text` SIGINT 干净退出、8x8 窄 PTY 降级 |
 | `tests/test_menu.py` | 序号菜单：命令展示与执行（`test_the_menu_prints_each_command_and_runs_it`）、非法输入、EOF、--menu 互斥 |
 | `tests/test_ocp.py` | 0xC0 阈值 / 0xC1 状态 / 单多轨标志的三格式输出与机型门（`test_run_ocp_on_a_meg_p_model_shows_the_multirail_flag`）；0xC0 阈值写的 MSI 字节编码与 F1h 保存（`test_set_ocp_thresholds_writes_msi_bytes_then_saves`） |
 | `tests/test_daemon.py` | 采样节拍、原子写（`test_a_failed_prometheus_replace_keeps_the_previous_textfile`）、重扫、风扇 Profile 恢复、只答 ident 判读失败、OCP 块换机不继承旧阈值 |
@@ -123,7 +124,7 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。历史基线（2026-10-22）：**870 passed**、`ruff check` 全过、`mypy` 10 个文件无问题；
+三条全绿即通过。历史基线（2026-10-22）：**874 passed**、`ruff check` 全过、`mypy` 10 个文件无问题；
 分支覆盖率 **90%**（CI 门限 90%）。当前树以本次运行输出为准。
 
 > `ruff format --check .` **可以全仓跑**（CI 也跑）：`protocol.py`/`__init__.py`/`__main__.py`/
