@@ -79,7 +79,7 @@ sudo ./acceptance.sh --writes
 ```
 
 脚本会先询问；写入项包括风扇 duty 60 并恢复原设置。`--zero-fan`、
-`--buzzer-off`、`--set-rail` 会以手动命令形式提示，因为：
+`--buzzer-toggle`、`--set-rail` 会以手动命令形式提示，因为：
 
 - 蜂鸣器 C2h 没有回读，无法从脚本确认状态；
 - 多轨切换需要真机确认断电保持/OCP 行为；

@@ -1767,7 +1767,7 @@ def run_write_controls(psu, args):
         # alarm while the user believes it is off.
         if not psu.silence_buzzer():
             logger.error(
-                'Error: the PSU did not accept --buzzer-off '
+                'Error: the PSU did not accept --buzzer-toggle '
                 '(the C2h buzzer switch; or the model does not support it).'
             )
             return EXIT_ERROR
@@ -2066,9 +2066,18 @@ Notes:
         help='Enable or disable Zero Fan (43h + F1h; 12+4 models only)',
     )
     parser.add_argument(
-        '--buzzer-off',
+        '--buzzer-toggle',
+        dest='buzzer_off',
         action='store_true',
         help='Toggle the 12+4 OCP buzzer switch (C2h; write-only, no read-back; 12+4 models only)',
+    )
+    # Deprecated alias: MSI calls C2h BUZZER_SWITCH and it toggles, so the old
+    # "--buzzer-off" name promised a state the tool cannot observe.
+    parser.add_argument(
+        '--buzzer-off',
+        dest='buzzer_off',
+        action='store_true',
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         '--set-rail',
@@ -2450,7 +2459,7 @@ def _validate_args(parser, args):
         parser.error('--watch only supports the text format')
     if _write_requested(args) and (args.show_log or args.export or args.watch is not None):
         parser.error(
-            'control writes (--fan-mode/--fan-duty/--zero-fan/--buzzer-off) cannot '
+            'control writes (--fan-mode/--fan-duty/--zero-fan/--buzzer-toggle) cannot '
             'be combined with --watch, --export or --show-log'
         )
     if args.fan_mode in (FAN_MODE_AUTO, FAN_MODE_PERFORMANCE) and args.fan_duty is not None:

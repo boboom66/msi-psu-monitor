@@ -145,7 +145,7 @@ sudo msi-psu-monitor -f prometheus -O /var/lib/node_exporter/msi-psu.prom
 ```
 msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
                 [-O OUTPUT] [--serial SERIAL] [--fan-mode {auto,performance,customized}]
-                [--fan-duty 0-100] [--zero-fan {on,off}] [--buzzer-off]
+                [--fan-duty 0-100] [--zero-fan {on,off}] [--buzzer-toggle]
                 [--set-rail {multi,single}]
                 [--export] [--from FROM_SPEC]
                 [--columns COLUMNS] [--dashboard] [--dashboard-text] [--menu] [--port PORT] [--show-log]
@@ -169,10 +169,11 @@ msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
                    and is refused together with --fan-mode auto/performance
       --zero-fan   Enable/disable Zero Fan (43h) and save it (F1h); 12+4
                    (MPG TS) models only
-      --buzzer-off Toggle the 12+4 OCP buzzer switch (C2h); write-only, no
-                   read-back; MPG TS models only. The
-                   method is a switch on the PSU (no read-back): test the second
-                   invocation on hardware before treating it as idempotent
+      --buzzer-toggle
+                   Toggle the 12+4 OCP buzzer switch (C2h); write-only, no
+                   read-back; MPG TS models only. The method is a switch on the
+                   PSU: test the second invocation on hardware before treating it
+                   as idempotent. `--buzzer-off` is a deprecated alias.
       --set-rail   Switch 12V protection between multi and single rail
                    (C0h + F1h); MEG Ai1000P/Ai1300P only, verified by read-back
       --export     Export the daemon history as CSV
@@ -232,7 +233,7 @@ sudo msi-psu-monitor --fan-mode auto
 
 # Zero Fan toggle and buzzer switch (MPG TS models)
 sudo msi-psu-monitor --zero-fan off
-sudo msi-psu-monitor --buzzer-off
+sudo msi-psu-monitor --buzzer-toggle
 
 # PSU curve (the PCIE5 "Performance" mode) and the MEG P rail mode
 sudo msi-psu-monitor --fan-mode performance

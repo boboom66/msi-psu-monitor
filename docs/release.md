@@ -58,7 +58,7 @@ The source `.deb` stage also ships `CHANGELOG.md`, `docs/prometheus-rules.yml` a
 
 `scripts/build_binary.sh` also smoke-tests the frozen executables before
 packaging: `--version`, `--once` on `MSI_PSU_DEMO=1`, one daemon iteration,
-`--zero-fan off` and `--buzzer-off` (all without a PSU). A freeze that loses a
+`--zero-fan off` and `--buzzer-toggle` (all without a PSU). A freeze that loses a
 module or an import fails the build instead of shipping.
 
 The tarball is assembled deterministically: sorted names, fixed mtimes, numeric

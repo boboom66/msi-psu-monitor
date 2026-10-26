@@ -229,13 +229,13 @@ demo 可验证写路径与输出语义（真实写入需 root + 真机）：
 
 ```bash
 MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --zero-fan off   # Zero Fan: off（43h + F1h + 42h 读回）
-MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --buzzer-off     # Buzzer: switch toggled (no read-back)
+MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --buzzer-toggle  # Buzzer: switch toggled (no read-back)
 MSI_PSU_DEMO_MODEL=ai1300p MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --set-rail multi
 # ↑ 写 C0h 1 字节 + F1h + 读回；与当前值相同时不重复写，输出 (already set)
 ```
 
-`--buzzer-off` 在 MSI 的命名里是 **switch** 且没有回读，所以只报告 ACK/toggled，
-不宣称"已静音"；第二次调用是否会重新响必须真机确认。
+`--buzzer-toggle` 在 MSI 的命名里是 **switch** 且没有回读，所以只报告 ACK/toggled，
+不宣称"已静音"；第二次调用是否会重新响必须真机确认。`--buzzer-off` 是兼容别名。
 
 ### 2.1 OCP 阈值检视（`--ocp`，只读）
 
@@ -544,7 +544,7 @@ journalctl -u msi-psu-monitor -f
 10. `--ocp` 在 MEG Ai1600T（`0xC9EB`）上打印「not available」并 exit 0（两个 `0xC0` 视图
    都不支持），不产生 NAK 重试或超时；
 11. `--zero-fan on/off` 写后读回一致（42h byte 4），`F1h` 保存后断电重启仍生效；
-    `--buzzer-off` 在 12+4 OCP 蜂鸣触发时能让蜂鸣停止（C2h 无回读，只看 ACK 与听感）；
+    `--buzzer-toggle` 在 12+4 OCP 蜂鸣触发时能让蜂鸣停止（C2h 无回读，只看 ACK 与听感）；
     再执行一次，确认它是「静音」还是 MSI 命名的「switch」（第二次是否会重新响）；
 12. `--set-rail multi` / `--set-rail single` 在 MEG Ai1300P（`0x56D4`）上读回一致，
     断电重启后模式保持；Ai1000P（`0xE749`）同样验证；MPG TS 和 Ai1600T 应拒绝并

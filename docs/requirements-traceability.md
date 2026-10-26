@@ -107,7 +107,7 @@
 | 風扇設定儲存（`[0x50 0xF1]`，REV6 0 數據字節） | `set_fan_mode()` 内联发 `REG_SAVE_SETTING` | `test_cli_features.py` | 🧪 待真机 |
 | 風扇配置按 Profile 恢復 | `daemon.restore_fan_profile()`（每次打開/重連重發 41h + F1h，並按 `[fan] zero_fan` 重發 43h + F1h）；`[fan] mode/duty/zero_fan` opt-in | `test_daemon.py`、`test_config.py` | 🧪 待真机 |
 | Zero Fan 開關（43h + F1h，讀回 42h byte 4） | `MSIPSU.set_zero_fan()`、`monitor.apply_zero_fan_setting()`、`--zero-fan`；daemon 依 `[fan] zero_fan` 恢復 | `test_set_zero_fan_*`、`test_zero_fan_*`、`test_zero_fan_only_profile_is_restored` | 🧪 待真机 |
-| 蜂鳴器開關切換（C2h，只寫無回讀；MSI 名為 BUZZER_SWITCH，會 toggle，CLI 不宣稱已靜音） | `MSIPSU.silence_buzzer()`、`monitor.run_write_controls()`、`--buzzer-off` | `test_silence_buzzer_*`、`test_buzzer_off_*` | 🧪 待真机 |
+| 蜂鳴器開關切換（C2h，只寫無回讀；MSI 名為 BUZZER_SWITCH，會 toggle，CLI 不宣稱已靜音） | `MSIPSU.silence_buzzer()`、`monitor.run_write_controls()`、`--buzzer-toggle`（`--buzzer-off` 為兼容別名） | `test_silence_buzzer_*`、`test_buzzer_toggle_*`、`test_buzzer_off_remains_*` | 🧪 待真机 |
 | OCP 閾值檢視（單針 12 A、針差 5 A、觸發 20 s、警告 180 s）+ 導出（`--dump-thresholds`/JSON） | `protocol.read_ocp_thresholds()`（0xC0 8 B）、`read_ocp_state()`（0xC1 42 B）、`monitor.run_ocp()`、`monitor.run_ocp_thresholds()`；daemon 每個 prom 週期一併導出（C1 是 5 s 滾動平均，不快取） | `test_ocp.py`、`test_cli_features.py`、`test_daemon.py` | ✅ 实现；数值/状态需真机核对 |
 | 單多軌模式檢視（`==2` 為多軌） | `protocol.read_multirail_ocp()`（0xC0 1 B）、`monitor.format_multirail_*()` | `test_ocp.py`、`test_demo.py` | 🧪 待真机（**提前落地**） |
 | 單多軌模式切換（MEG Ai1000P/Ai1300P；`--set-rail`，C0h 2/1 + F1h，寫前先讀回、同值不寫，寫後讀回） | `protocol.set_multirail_ocp()`、`monitor.apply_rail_mode()`（同值返回 `(mode, False)`，見 REQ-11） | `test_psu_sensors.py`、`test_cli_features.py`、`test_demo.py` | 🧪 待真机（用户要求补齐 MSI 的 DC Output 开关；不属于 12V-2x6 阈值写） |

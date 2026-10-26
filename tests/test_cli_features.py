@@ -828,8 +828,16 @@ def test_zero_fan_and_fan_mode_write_together(monkeypatch, capsys):
     ]
 
 
-def test_buzzer_off_writes_and_reports_the_switch(monkeypatch, capsys):
-    """C2h is MSI's BUZZER_SWITCH: write-only and a toggle, so no "silenced" claim."""
+def test_buzzer_toggle_writes_and_reports_the_switch(monkeypatch, capsys):
+    """The primary name says what C2h does: it toggles, it does not force off."""
+    stub = StubPSU(sensors())
+    code, out = run_main(monkeypatch, capsys, stub, ['--buzzer-toggle'])
+    assert code == EXIT_OK
+    assert stub.buzzer_requests == 1
+    assert out.out.strip() == 'Buzzer: switch toggled (no read-back)'
+
+
+def test_buzzer_off_remains_a_compatible_alias(monkeypatch, capsys):
     stub = StubPSU(sensors())
     code, out = run_main(monkeypatch, capsys, stub, ['--buzzer-off'])
     assert code == EXIT_OK
@@ -837,11 +845,17 @@ def test_buzzer_off_writes_and_reports_the_switch(monkeypatch, capsys):
     assert out.out.strip() == 'Buzzer: switch toggled (no read-back)'
 
 
-def test_buzzer_off_refused_exits_one(monkeypatch, capsys):
+def test_buzzer_toggle_is_the_documented_name():
+    help_text = monitor.build_parser().format_help()
+    assert '--buzzer-toggle' in help_text
+    assert '--buzzer-off' not in help_text
+
+
+def test_buzzer_toggle_refused_exits_one(monkeypatch, capsys):
     stub = StubPSU(sensors(), accept_buzzer=False)
-    code, out = run_main(monkeypatch, capsys, stub, ['--buzzer-off'])
+    code, out = run_main(monkeypatch, capsys, stub, ['--buzzer-toggle'])
     assert code == EXIT_ERROR
-    assert 'buzzer-off' in out.err
+    assert 'buzzer-toggle' in out.err
 
 
 def test_set_rail_writes_and_verifies(monkeypatch, capsys):
