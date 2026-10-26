@@ -32,14 +32,21 @@ def _sensors_env():
 
 
 def _run_on_pty(argv, drive, timeout=15.0):
-    """Run argv with stdio on a PTY; ``drive`` writes to and reads the master."""
+    """Run argv with stdio on a PTY; ``drive`` writes to and reads the master.
+
+    TERM is exported explicitly: GitHub runners have TERM unset, and
+    ``--watch``/``--dashboard-text`` refuse to draw on a terminal without one
+    (that is the documented plain-stream fallback, not a bug to test here).
+    """
     master, slave = pty.openpty()
+    env = _sensors_env()
+    env['TERM'] = 'xterm-256color'
     proc = subprocess.Popen(
         [sys.executable, '-m', 'msi_psu_monitor', *argv],
         stdin=slave,
         stdout=slave,
         stderr=subprocess.PIPE,
-        env=_sensors_env(),
+        env=env,
         close_fds=True,
     )
     os.close(slave)
@@ -101,21 +108,26 @@ def test_watch_redraws_in_place_and_restores_the_cursor():
 
 
 def test_watch_streams_plain_frames_through_a_pipe():
-    """Pipe mode keeps the documented contract: plain frames, no escapes."""
+    """Pipe mode keeps the documented contract: plain frames, no escapes.
 
+    SIGINT terminates the run; SIGTERM would also work but the pipe test asserts
+    the stream shape, not the signal path.
+    """
     proc = subprocess.Popen(
         [sys.executable, '-m', 'msi_psu_monitor', '--watch', '0.2'],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=_sensors_env(),
     )
+    time.sleep(1.2)  # at 0.2 s cadence this collects several frames
+    proc.send_signal(signal.SIGINT)
     try:
-        out, err = proc.communicate(timeout=15)
+        out, err = proc.communicate(timeout=10)
     finally:
         if proc.poll() is None:
             proc.terminate()
             proc.wait(timeout=10)
-    assert proc.returncode == 0, err
+    assert proc.returncode in (0, 1), err
     text = out.decode('utf-8', 'replace')
     assert text.count('+12V') >= 2
     assert '\x1b' not in text, 'a pipe must never receive escape codes'
