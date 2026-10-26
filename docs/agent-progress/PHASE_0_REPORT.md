@@ -4,7 +4,7 @@
 
 - Integration branch: `work/product-v2`
 - Base: `wip/pre-agent-2026-10-26` @ `6a0191f`
-- Phase 0 commit: the commit that adds this report (see `git log -1`)
+- Phase 0 commit: `209a135`
 - Original `master`: `ca8a6d5` (clean)
 
 ## Tasks completed

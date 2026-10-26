@@ -3,7 +3,7 @@
 - Phase: **Phase 0 — Baseline stabilization**
 - Task: **T-008 — Phase 0 report / G0 approval**
 - Branch: `work/product-v2`
-- HEAD: `6a0191f` (preserved work) + Phase 0 commit pending
+- HEAD: `209a135` (Phase 0 commit; base `6a0191f`)
 - Master: `ca8a6d5` (clean; original worktree)
 - Preserved work: `wip/pre-agent-2026-10-26` @ `6a0191f`
 - Environment: Windows host; **no WSL distro, no Docker, no `uv`**;
