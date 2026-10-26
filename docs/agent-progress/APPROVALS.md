@@ -2,7 +2,22 @@
 
 Human gates from `docs/AGENT_MASTER_PLAN.md` §9.
 
-## G0 — Baseline and environment — **PENDING**
+## G0 — Baseline and environment — **SATISFIED for automated gates via CI**
+
+### Result (2026-10-26)
+
+- Green baseline: `baseline-2026-10-26-r2` @ `a21f971`.
+- CI run `40290163974`: all jobs green (Python 3.10/3.12/3.13 + freeze).
+- Automated gates: pytest, ruff, format, mypy, shellcheck, coverage, smoke,
+  soak, `.deb`, binaries, no-Python proof, clean-env `--once`.
+- Full feature matrix is **AMBER**: TUI visuals, dashboard states, five-model
+  matrix, root install, hardware, arm64, 24h remain unexecuted.
+- The CI path is usable without `gh auth` for pass/fail and annotations; full
+  job logs still need `gh auth login` for deep debugging.
+- WSL is now optional (for local TUI/PTY captures), not required for the
+  automated gates.
+
+### Original decision (kept for history)
 
 ### What is already done
 

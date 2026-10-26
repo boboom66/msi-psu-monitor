@@ -106,3 +106,35 @@ ADR-style log. Context → Decision → Consequence.
   and record `UNKNOWN` for log-level evidence.
 - Consequence: CI can be triggered now; debugging a failure may require one
   human auth step.
+
+## D-011 — Use public CI annotations for failure diagnosis
+
+- Context: full job logs require authentication, but public check-run
+  annotations and the run HTML are readable.
+- Decision: add `::error` annotations for `FAILED`/`ERROR` pytest lines and a
+  job-summary tail; use the public annotations API for diagnosis. Do not
+  exfiltrate logs or tokens.
+- Consequence: the first baseline failure was identified without `gh auth`;
+  this CI diagnostic remains useful after release.
+
+## D-012 — Baseline r1 failed docs consistency; r2 is green
+
+- Context: the first freeze candidate (`d0d8d91`) failed
+  `test_quoted_test_counts_are_accurate` because the new plan quoted a
+  historical 645-test count as current.
+- Decision: fix the quote (`a21f971`), keep r1 as the failed candidate, and tag
+  `baseline-2026-10-26-r2` at the green commit. No product code changed.
+- Consequence: the green baseline is r2; r1 remains a transparent record of the
+  docs-only failure.
+
+## D-013 — Baseline verdict: green automated, amber full matrix
+
+- Context: CI run `40290163974` passed pytest/ruff/format/mypy/shellcheck/
+  coverage/smoke/soak/deb on 3.10/3.12/3.13 and the freeze job. TUI visuals,
+  dashboard states, five-model matrix, promtool, root install, hardware, arm64,
+  and 24h remain unexecuted.
+- Decision: treat the baseline as **GREEN for automated gates** and **AMBER for
+  the full feature matrix**. Start Phase 1 with the known gaps listed in
+  `BASELINE_TEST_REPORT.md`; do not claim release readiness.
+- Consequence: improvements may start, but every later claim must cite the
+  remaining evidence gaps.

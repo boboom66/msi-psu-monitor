@@ -2,11 +2,13 @@
 
 ## What is frozen
 
-- Tag: `baseline-2026-10-26` (annotated)
-- Branch: `baseline/pre-product-v2`
-- The tag points to the commit that adds this file.
+- Candidate tag: `baseline-2026-10-26` (failed docs-consistency candidate)
+- Green tag: `baseline-2026-10-26-r2`
+- Green branch: `baseline/pre-product-v2-r2`
+- Green commit: `a21f971`
 - Base before freeze: `aee015e` (`work/product-v2`).
 - Package version: **1.0.1** (`pyproject.toml`).
+- CI run: `40290163974` — all jobs green (3.10/3.12/3.13 + freeze).
 
 This is a **test snapshot, not a release**:
 
@@ -27,12 +29,17 @@ This is a **test snapshot, not a release**:
 
 ## Baseline test plan
 
-See `BASELINE_TEST_PLAN.md`. Results go to `BASELINE_TEST_REPORT.md` after the
-Linux environment runs the suite.
+See `BASELINE_TEST_PLAN.md`. Results are in `BASELINE_TEST_REPORT.md`.
+
+The first candidate (`d0d8d91`, tag `baseline-2026-10-26`) failed the docs
+consistency test because the new plan quoted a historical 645-test count as
+current. The fix (`a21f971`) removes that quote; no product code changed. The
+green tag is `baseline-2026-10-26-r2`.
 
 ## Status
 
-- Freeze: **DONE**
-- Automated suite: **NOT RUN** (no Linux environment)
-- Feature matrix: **NOT RUN** (no Linux environment)
+- Freeze: **DONE** (`baseline-2026-10-26-r2`)
+- Automated suite: **PASS** (CI run `40290163974`, 3.10/3.12/3.13 + freeze)
+- Feature matrix: **PARTIAL** (automated paths pass; PTY/visual/5-model gaps)
+- Hardware/root/arm64/24h: **BLOCKED** (human evidence)
 - Static partial: `compileall` + `git diff --check` pass

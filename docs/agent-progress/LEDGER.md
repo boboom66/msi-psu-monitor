@@ -14,8 +14,10 @@ Append-only task table. `UNKNOWN` is not `PASS`.
 | T-008 | Phase 0 report / G0 request | G | **DONE** | 209a135 | `PHASE_0_REPORT.md`, `APPROVALS.md` | self-checked | Awaiting human G0 |
 | T-009 | Freeze baseline tag/branch | G | **DONE** | freeze commit | `BASELINE_FREEZE.md` | self-checked | `baseline-2026-10-26` / `baseline/pre-product-v2`; not a release |
 | T-010 | Baseline feature test matrix | G/F | **DONE** | freeze commit | `BASELINE_TEST_PLAN.md` | self-checked | 40+ cases; execution blocked on Linux |
+| T-011 | Run baseline gates via fork CI | F | **PASS** | `a21f971` | `BASELINE_TEST_REPORT.md`; run `40290163974` | CI | 3.10/3.12/3.13 + freeze all green |
+| T-012 | Create green baseline tag r2 | G | **DONE** | `a21f971` | `baseline-2026-10-26-r2` | self-checked | r1 failed docs consistency (stale 645 quote); r2 fixed docs only |
 
-## Next (blocked on G0)
+## Next (Phase 1)
 
 - T-101 Feature inventory (G)
 - T-102 Journey friction (G)
