@@ -1,0 +1,39 @@
+# T-001 — Preserve work, fix exec bits, create worktree
+
+## Commands run
+
+```text
+git status --short
+git branch --show-current
+git log -1 --format='%H %ad %s' --date=short
+git remote -v
+git config core.filemode false
+git update-index --chmod=+x -- <each scripts/*.sh and scripts/hardware/*.sh>
+git switch -c wip/pre-agent-2026-10-26
+git add -A
+git commit -m "wip: preserve user changes and agent plan before product v2"
+git switch master
+git worktree add ../msi-psu-product-v2 -b work/product-v2 wip/pre-agent-2026-10-26
+```
+
+## Results
+
+- Preserved commit: `6a0191f0f0734479af2b58673bec8c3073cabfc1`
+  (`wip/pre-agent-2026-10-26`).
+- `master` remains at `ca8a6d5` and is clean.
+- Integration worktree:
+  `C:\Users\timzhang\Desktop\project\msi-psu-product-v2`
+  on `work/product-v2`.
+- All tracked `scripts/*.sh` and `scripts/hardware/*.sh` are `100755` in the
+  index. `scripts/install.sh` changed from `100644` to `100755`.
+- The 11 working-tree-only mode changes are no longer reported because
+  `core.filemode=false` is set locally on this Windows checkout.
+- Commit `6a0191f` contains 29 files, +3689/−62.
+
+## Notes
+
+- The original worktree was switched back to `master`; the user's work is
+  recoverable from `wip/pre-agent-2026-10-26`.
+- The full diff is available at
+  `C:\Users\timzhang\AppData\Local\Temp\opencode\msi-psu-product-v2-baseline\baseline.patch`.
+- No secrets were found in the committed diff by a keyword scan.

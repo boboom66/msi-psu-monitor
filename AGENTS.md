@@ -8,7 +8,7 @@ Protocol rules live in `msi_psu_monitor/AGENTS.md` (auto-loaded via `opencode.js
 
 ```bash
 uv sync --group dev                                  # py>=3.10, dev toolchain (pytest/ruff/mypy), zero runtime deps
-uv run --group dev pytest -q                         # 859 tests, no hardware needed
+uv run --group dev pytest -q                         # full suite, no hardware needed (run for current count)
 uv run --group dev pytest -q tests/test_state.py     # single file
 uv run --group dev ruff check .                      # must be clean
 uv run --group dev mypy msi_psu_monitor/             # must be clean
@@ -32,6 +32,9 @@ sudo ./scripts/install.sh                            # package + systemd daemon 
 
 `docs/verify.md` is the full no-hardware checklist — use it instead of improvising.
 CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12/3.13.
+
+Agent progress and evidence for Product v2: `docs/agent-progress/`
+(`STATE.md`, `LEDGER.md`, `DECISIONS.md`, `APPROVALS.md`, `EVIDENCE/`).
 
 ## Gotchas (agent would miss these)
 

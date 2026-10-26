@@ -2,7 +2,8 @@
 
 > 没有真机也能验证 CLI、告警、daemon、历史落盘、prometheus 与 dashboard 全链路。
 > 下面每条命令都已在 `.venv`（Python 3.12.3）实跑通过；完整测试套件另在裸
-> Python 3.13.15 与 Python 3.10.21（uv 下载）各复核 **859 通过**；
+> Python 3.13.15 与 Python 3.10.21（uv 下载）各复核通过（历史快照曾记录 859 通过；
+> 当前树以本次 `pytest -q` 输出为准）。
 > `smoke.sh` → 58 项（Python 3.12 环境跑过）。3.10 已实跑，同时保留静态门禁——ruff `target-version = "py310"`、mypy
 > `python_version = "3.10"`（按 3.10 typeshed 分析）、smoke 里对每个 `.py` 的
 > `ast.parse(feature_version=(3, 10))`；CI 矩阵另在 3.10 / 3.12 / 3.13 上执行。
@@ -122,8 +123,8 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。当前基线：**859 passed**、`ruff check` 全过、`mypy` 10 个文件无问题；
-分支覆盖率 **90%**（CI 门限 90%）。
+三条全绿即通过。历史基线（2026-10-22）：**859 passed**、`ruff check` 全过、`mypy` 10 个文件无问题；
+分支覆盖率 **90%**（CI 门限 90%）。当前树以本次运行输出为准。
 
 > `ruff format --check .` **可以全仓跑**（CI 也跑）：`protocol.py`/`__init__.py`/`__main__.py`/
 > `tests/test_monitor.py` 这四个历史文件混用引号风格，已由 `[tool.ruff.format] exclude` +

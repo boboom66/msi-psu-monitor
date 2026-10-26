@@ -1,5 +1,9 @@
 # Release readiness — current assessment
 
+> **Snapshot note:** the counts below are from the 2026-10-22 audit. Re-run
+> `uv run --group dev pytest -q` on the current tree; do not quote 803 as the
+> current count without measuring it.
+
 **Verdict: NOT READY for a production release.** The software and packaging gates
 are green (803 tests, 94% branch coverage, smoke, soak, static security checks), and a
 local x86_64 1.0.1 freeze now exists with clean-env and kit checks. The

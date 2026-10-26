@@ -13,6 +13,21 @@ jobs:
         python-version: ['3.10', '3.12', '3.13']
     steps:
       - uses: actions/checkout@v4
+      # The scripts are user-facing entry points: a Windows checkout can lose the
+      # executable bit while the content still looks fine. Fail before the matrix
+      # so the cause is obvious.
+      - name: Shell script modes and line endings
+        run: |
+          bad=$(git ls-files -s -- 'scripts/*.sh' 'scripts/hardware/*.sh' | awk '$1 != "100755" {print $4}')
+          if [ -n "$bad" ]; then
+            echo "These shell scripts are not executable in the index:"
+            echo "$bad"
+            exit 1
+          fi
+          if git grep -Il $'\r' -- 'scripts/*.sh' 'scripts/hardware/*.sh'; then
+            echo "CRLF found in shell scripts; .gitattributes must keep LF."
+            exit 1
+          fi
       - uses: astral-sh/setup-uv@v5
       - uses: actions/setup-python@v5
         with:
