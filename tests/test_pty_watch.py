@@ -84,6 +84,23 @@ def _read_until(master, predicate, deadline, chunk=65536):
     return buffer
 
 
+def _drain(master, limit=262144):
+    """Read everything still buffered on the master (post-exit flush)."""
+    os.set_blocking(master, False)
+    data = b''
+    try:
+        while len(data) < limit:
+            chunk = os.read(master, 65536)
+            if not chunk:
+                break
+            data += chunk
+    except (BlockingIOError, OSError):
+        pass
+    finally:
+        os.set_blocking(master, True)
+    return data
+
+
 def test_watch_redraws_in_place_and_restores_the_cursor():
     """Two frames on a real PTY: home-clear redraw, no scroll, cursor shown."""
 
@@ -91,11 +108,14 @@ def test_watch_redraws_in_place_and_restores_the_cursor():
         deadline = time.time() + timeout
         buffer = _read_until(
             master,
-            lambda data: data.count(b'MSI PSU') >= 2 and b'\x1b[?25h' in data,
+            lambda data: data.count(b'MSI PSU') >= 2,
             deadline,
         )
-        proc.send_signal(signal.SIGINT)
+        # Write ^C through the master so the process sees a real Ctrl-C and its
+        # finally-clause has time to run before the PTY closes.
+        os.write(master, b'\x03')
         proc.wait(timeout=10)
+        buffer += _drain(master)
         return proc.returncode, buffer
 
     code, output = _run_on_pty(['--watch', '0.2'], drive)
@@ -144,8 +164,9 @@ def test_dashboard_text_exits_cleanly_on_sigint():
             deadline,
         )
         time.sleep(0.3)  # let the first frame settle before interrupting
-        proc.send_signal(signal.SIGINT)
+        os.write(master, b'\x03')
         proc.wait(timeout=10)
+        buffer += _drain(master)
         return proc.returncode, buffer
 
     code, output = _run_on_pty(['--dashboard-text'], drive)
@@ -161,33 +182,20 @@ def test_dashboard_text_exits_cleanly_on_sigint():
 
 def test_watch_on_a_tiny_pty_streams_instead_of_redrawing():
     """An 8x8 PTY is too small for a full-screen frame; it must not scroll."""
-
-    def drive(master, proc, timeout):
-        deadline = time.time() + timeout
-        buffer = _read_until(
-            master,
-            lambda data: b'Warning' in data or data.count(b'+12V') >= 2,
-            deadline,
-        )
-        proc.send_signal(signal.SIGINT)
-        proc.wait(timeout=10)
-        return proc.returncode, buffer
-
-    def tiny_pty():
-        return pty.openpty() + (8, 8)
-
-    master, slave, _, _ = tiny_pty()
     import fcntl
     import struct
     import termios
 
+    master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 8, 8, 0, 0))
+    env = _sensors_env()
+    env['TERM'] = 'xterm-256color'
     proc = subprocess.Popen(
         [sys.executable, '-m', 'msi_psu_monitor', '--watch', '0.2'],
         stdin=slave,
         stdout=slave,
         stderr=subprocess.PIPE,
-        env=_sensors_env(),
+        env=env,
         close_fds=True,
     )
     os.close(slave)
@@ -198,8 +206,9 @@ def test_watch_on_a_tiny_pty_streams_instead_of_redrawing():
             lambda data: b'Warning' in data or data.count(b'+12V') >= 2,
             deadline,
         )
-        proc.send_signal(signal.SIGINT)
+        os.write(master, b'\x03')
         proc.wait(timeout=10)
+        buffer += _drain(master)
         code = proc.returncode
     finally:
         os.close(master)
