@@ -17,9 +17,12 @@ Append-only task table. `UNKNOWN` is not `PASS`.
 | T-011 | Run baseline gates via fork CI | F | **PASS** | `a21f971` | `BASELINE_TEST_REPORT.md`; run `40290163974` | CI | 3.10/3.12/3.13 + freeze all green |
 | T-012 | Create green baseline tag r2 | G | **DONE** | `a21f971` | `baseline-2026-10-26-r2` | self-checked | r1 failed docs consistency (stale 645 quote); r2 fixed docs only |
 | T-013 | Feature portfolio / G1 proposal | G | **DONE** | pending | `FEATURE_PORTFOLIO.md` | self-checked | 30 features; 5 themes; 5 G1 questions |
+| T-014 | Rename buzzer flag to `--buzzer-toggle` | F | **DONE** | `7f01604` | `monitor.py`, tests, README, CHANGELOG | CI | Primary name; `--buzzer-off` hidden alias; 2 new tests; docs count 861 |
+| T-015 | Verify buzzer rename in CI | F | **PASS** | `7f01604` | run `40291862435` | CI | 3.10/3.12/3.13 + freeze all green |
 
-## Next (G1)
+## Next (G2)
 
-- Human approves/edits `FEATURE_PORTFOLIO.md`.
-- Then Phase 2 design cards for the approved P0/P1 items.
-- Then Phase 3 implementation, one feature per ticket.
+- Human approved the portfolio with “开始”; G1 is treated as approved.
+- Next: design cards for OCP dry-run/backup/restore, `--doctor`, `--list`;
+  then G2.
+- Then implementation, one feature per ticket.

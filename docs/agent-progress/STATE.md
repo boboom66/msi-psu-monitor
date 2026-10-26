@@ -1,7 +1,7 @@
 # STATE
 
-- Phase: **Phase 1 — feature portfolio proposal (G1)**
-- Task: **T-013 — Feature portfolio / G1 request**
+- Phase: **Phase 2 — implementation (first improvement done)**
+- Task: **T-015 — verify the `--buzzer-toggle` rename**
 - Branch: `work/product-v2`
 - HEAD: `git log -1` on `work/product-v2` (green baseline: `a21f971`)
 - Baseline tag: `baseline-2026-10-26-r2`
@@ -11,11 +11,12 @@
 - Master: `ca8a6d5` (clean; original worktree)
 - Preserved work: `wip/pre-agent-2026-10-26` @ `6a0191f`
 - Environment: GitHub Actions Linux for gates; Windows host for editing.
-- Last gates: CI run `40290163974` — **PASS** on Python 3.10/3.12/3.13
+- Last gates: CI run `40291862435` — **PASS** on Python 3.10/3.12/3.13
   (ruff/format/mypy/shellcheck/pytest/coverage/smoke/soak/deb) and freeze
-  (binaries/deb/no-Python/clean-env). `compileall` + `diff --check` local PASS.
+  (binaries/deb/no-Python/clean-env). Baseline run: `40290163974`.
 - Q escalations: **0/3 this phase, 0/10 total**
-- Next: **G1 approval** of `FEATURE_PORTFOLIO.md`; then Phase 2 design cards.
+- Next: design cards for the next P1 items (OCP dry-run/backup/restore,
+  `--doctor`, `--list`); then G2.
 - Blockers:
   - B-101: no local Linux runtime; CI is the gate runner.
   - B-102: `gh` unauthenticated; public API/HTML used for CI evidence, full

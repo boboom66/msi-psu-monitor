@@ -29,7 +29,7 @@ gates green; full feature matrix AMBER.
 | F-12 | Alert log viewer | See what happened | Smoke/pytest pass | **Improve** | P2 | `--since`, `--limit`, `--json` |
 | F-13 | Fan control | Set/verify fan mode | Smoke passes | **Improve** | P1 | Dry-run, current-vs-requested, consistent verbs |
 | F-14 | Zero Fan | Toggle Zero Fan safely | Smoke passes | **Improve** | P1 | Dry-run, model gate, read-back wording |
-| F-15 | Buzzer | Toggle the OCP buzzer | Smoke passes; name is misleading | **Replace** | P1 | Rename to `--buzzer-toggle`; keep alias; never say "off" |
+| F-15 | Buzzer | Toggle the OCP buzzer | **DONE**: `--buzzer-toggle` primary, `--buzzer-off` alias | **Replace — DONE** | P1 | Renamed with tests/docs; alias retained |
 | F-16 | Multirail | Switch rail protection | Partial (needs dedicated check) | **Improve** | P1 | Dry-run, current mode, dedicated smoke |
 | F-17 | OCP read | Inspect thresholds/state | Smoke passes | **Keep** | P1 | Units/table polish |
 | F-18 | OCP write | Change protection thresholds | Range/read-back tested; no dry-run/backup UX | **Improve** | **P0** | `--dry-run`, backup, restore, confirmation, bench plan |
