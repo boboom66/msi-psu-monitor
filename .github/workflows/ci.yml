@@ -54,7 +54,19 @@ jobs:
           sudo apt-get install -y -qq shellcheck
           shellcheck -S warning scripts/*.sh scripts/hardware/*.sh
       - name: Pytest
-        run: uv run --group dev pytest -q
+        run: |
+          set +e
+          uv run --group dev pytest -q 2>&1 | tee pytest.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            {
+              echo "## Pytest failure"
+              echo '```text'
+              tail -n 120 pytest.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
       - name: Coverage (branch)
         run: |
           uv run --group dev coverage run --branch -m pytest -q
