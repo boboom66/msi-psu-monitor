@@ -91,6 +91,8 @@ GROUPS = ('Monitor', 'History', 'System')
 def _footer_text():
     """Key legend; the jump range follows the item count."""
     return f'Up/Down move   Enter run   1-{len(ITEMS)} jump   q quit   ? keys'
+
+
 MIN_WIDTH = 40
 MIN_HEIGHT = 8
 

@@ -369,9 +369,7 @@ def test_alert_log_entry_runs_the_local_viewer(monkeypatch):
 def test_help_toggle_renders_the_key_legend():
     plain, _ = menu.render_menu(menu.ITEMS, 0, 0, 80, 24, color=False)
     assert 'returns to the list' not in plain
-    frame, _ = menu.render_menu(
-        menu.ITEMS, 0, 0, 80, 24, color=False, help_mode=True
-    )
+    frame, _ = menu.render_menu(menu.ITEMS, 0, 0, 80, 24, color=False, help_mode=True)
     assert 'Up/Down move' in frame
     assert 'q quit' in frame
     assert 'returns to the list' in frame
