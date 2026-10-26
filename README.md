@@ -8,7 +8,7 @@ MEG Ai1600(T), MEG Ai1300P, and MEG Ai1000P models.
 
 Python standard library only — no third-party runtime dependencies.
 
-> **Project status (2026-10-26):** the no-hardware gates are green (861 tests,
+> **Project status (2026-10-26):** the no-hardware gates are green (870 tests,
 > 90% branch coverage, smoke 58/58, soak 5000), but this release is **not
 > hardware accepted** yet. Real-PSU reads/writes, the 12V-2x6 OCP threshold
 > write, arm64 execution, a root/systemd/udev install, a desktop browser and a

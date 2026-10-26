@@ -203,7 +203,8 @@ def test_long_identity_does_not_leak_partial_escape():
     assert len({_visible(line) for line in lines}) == 1
     for line in lines:
         assert not re.search(r'\x1b\[[0-9;]*$', line), repr(line[-12:])
-    assert 'MSI PSU Monitor' in lines[0]
+    # The box frame wraps everything: line 0 is the top rule, the header is line 1.
+    assert 'MSI PSU Monitor' in lines[1]
 
 
 def test_long_rows_cannot_escape_the_box():
