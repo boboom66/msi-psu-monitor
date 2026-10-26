@@ -8,6 +8,14 @@ MEG Ai1600(T), MEG Ai1300P, and MEG Ai1000P models.
 
 Python standard library only — no third-party runtime dependencies.
 
+> **Project status (2026-10-26):** the no-hardware gates are green (859 tests,
+> 90% branch coverage, smoke 58/58, soak 5000), but this release is **not
+> hardware accepted** yet. Real-PSU reads/writes, the 12V-2x6 OCP threshold
+> write, arm64 execution, a root/systemd/udev install, a desktop browser and a
+> 24 h / 72 h soak are still outstanding; see
+> [bug-audit/RELEASE_READINESS.md](bug-audit/RELEASE_READINESS.md). The 1.0.1
+> tag and artifacts have not been published — v1.0.0 is the published release.
+
 ## Features
 
 - **One-shot, watch and machine-readable output** — text, JSON and Prometheus.
@@ -43,7 +51,8 @@ Python standard library only — no third-party runtime dependencies.
   60 s history line, rescan after 5 read failures (unplug/replug recovery).
 - **Cumulative statistics** — average power/efficiency and integrated energy (kWh)
   persisted across restarts, daily buckets kept for 30 days.
-- **History export** — 9-column CSV over any `m/h/d` window, to a file or stdout.
+- **History export** — CSV over any `m/h/d` window, 9 columns by default
+  (`--columns` selects a subset), to a file or stdout.
 - **Local dashboard** — loopback-only charts (7 cards + weekly energy, including
   CPU/GPU wattage) that overlay the daemon's 1 s `latest.json` snapshot on the
   one-minute history, with per-chart PNG/CSV export and a stale-daemon marker.
@@ -83,8 +92,8 @@ sudo ./install.sh
 
 The tarball ships the CLI and daemon executables, the udev rule, the systemd unit,
 the config example and the docs; `install.sh` copies the executables to
-`/usr/local/bin`, installs the unit/udev rule and starts the daemon. arm64 tarballs
-are published too. Check the download with the adjacent checksum:
+`/usr/local/bin`, installs the unit/udev rule and starts the daemon. The release
+workflow also builds arm64 tarballs. Check the download with the adjacent checksum:
 
 ```bash
 sha256sum -c msi-psu-monitor_<version>_linux_x86_64.tar.gz.sha256
@@ -139,7 +148,7 @@ msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
                 [--fan-duty 0-100] [--zero-fan {on,off}] [--buzzer-off]
                 [--set-rail {multi,single}]
                 [--export] [--from FROM_SPEC]
-                [--columns COLUMNS] [--dashboard] [--port PORT] [--show-log]
+                [--columns COLUMNS] [--dashboard] [--dashboard-text] [--menu] [--port PORT] [--show-log]
                 [--show-alert-log]
                 [--ocp] [--dump-thresholds] [--ocp-set ...]
                 [--load-thresholds FILE] [--no-alerts] [--config CONFIG]
@@ -171,6 +180,11 @@ msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
       --columns    Export columns (default: all)
       --dashboard  Serve local charts on 127.0.0.1 (it reads the history
                    files: --once/--serial/--format/-O do not apply)
+      --dashboard-text  Live terminal dashboard: coloured bars in the console,
+                   no browser; --once/--watch/--export/--format/-O do not apply
+      --menu       Grouped interactive menu over the normal commands: arrows or
+                   digits select, Enter runs, q quits (snapshot, watch, dashboard,
+                   export, OCP, log, config); pipes get a numbered prompt
       --port       Dashboard port (default 8899)
       --show-log   Dump the PSU black-box alert records (C1h; this format is
                    project-defined because MSI Center never reads that log)
@@ -199,6 +213,10 @@ or an argparse usage error (`2` is argparse's own convention and is not remapped
 ### Examples
 
 ```bash
+# Headless console views: live coloured dashboard and the numbered menu
+sudo msi-psu-monitor --dashboard-text
+sudo msi-psu-monitor --menu
+
 # Machine-readable output for scripting
 sudo msi-psu-monitor -f json
 
@@ -458,7 +476,7 @@ the 62-byte `0xE0` bulk read layout and the register map.
 
 A Chinese walkthrough of the major features added on top of the upstream tool —
 what each one does, how it is implemented, and which parts still need real hardware
-— is in [`docs/新增功能指令与预览.md`](docs/新增功能指令与预览.md)（历史 v1.0.0 输出）.
+— is in [`docs/新增功能指令与预览.md`](docs/新增功能指令与预览.md)（历史开发快照，`--version` 显示 1.0.0）.
 
 ## Security and support
 

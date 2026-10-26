@@ -8,7 +8,7 @@ Protocol rules live in `msi_psu_monitor/AGENTS.md` (auto-loaded via `opencode.js
 
 ```bash
 uv sync --group dev                                  # py>=3.10, dev toolchain (pytest/ruff/mypy), zero runtime deps
-uv run --group dev pytest -q                         # 803 tests, no hardware needed
+uv run --group dev pytest -q                         # 859 tests, no hardware needed
 uv run --group dev pytest -q tests/test_state.py     # single file
 uv run --group dev ruff check .                      # must be clean
 uv run --group dev mypy msi_psu_monitor/             # must be clean
@@ -109,8 +109,9 @@ CI (`.github/workflows/ci.yml`) runs ruff + mypy + pytest on py3.10/3.12/3.13.
   Our own exposition output is parsed by a strict test
   (`tests/test_prometheus_exposition.py`) as the local promtool stand-in.
 - **Reliability gates are executable**: `scripts/soak.sh 5000` drives the
-  demo daemon through 5k samples in CI and enforces state-file freshness, RSS <=256 MiB
-  and fd <=64; `tests/test_robustness.py` fuzzes random 0xE0 payloads/configs/OCP
+  demo daemon through 5k samples in CI, checks that state/latest/prom/daily were
+  written and are non-empty, and enforces `msi_psu_up 1`, RSS <=256 MiB and
+  fd <=64; `tests/test_robustness.py` fuzzes random 0xE0 payloads/configs/OCP
   specs; `CHANGELOG.md` is shipped by every package. Keep these wired instead of
   documenting "we ran it once".
 - **`docs/protocol.md` now matches the code** for 0xE1 (alert status), 0xC1 (alert log

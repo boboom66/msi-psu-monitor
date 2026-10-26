@@ -272,7 +272,7 @@
 ### 质量门禁
 
 ```
-uv run --group dev pytest -q                     → 803 passed
+uv run --group dev pytest -q                     → 859 passed
 uv run --group dev ruff check .                  → All checks passed
 uv run --group dev ruff format --check .         → 67 files already formatted
 uv run --group dev mypy msi_psu_monitor/         → 10 files, no issues
@@ -288,7 +288,7 @@ bash scripts/smoke.sh                            → 58 项全过（三种格式
 - `tests/test_stdlib_only.py`：`python -I` 子进程导入全部模块，第三方依赖混入即失败。
 - `ast.parse(feature_version=(3, 10))`：全部 `.py` 通过 3.10 语法校验（静态兜底）。
 - **Python 矩阵**：当前 `.venv`（3.10.21）、Python 3.12.3、裸 Python 3.13.15
-  各跑完整套件 **803 通过**；3.10 不再是“仅静态兜底”。`bash scripts/smoke.sh`
+  各跑完整套件 **859 通过**；3.10 不再是“仅静态兜底”。`bash scripts/smoke.sh`
   （**58 项全过**）在 3.12 环境跑过；CI 矩阵仍按 3.10 / 3.12 / 3.13 执行。
 - CI 含 3.10 / 3.12 / 3.13 三矩阵 + `ruff check` + `ruff format --check` + `mypy` + `pytest`
   + **构建 `.deb`**。
@@ -332,13 +332,13 @@ turn7 留下的 11 条已逐条修完；每条都补了「改回旧行为就会�
    写完、`os.replace` 失败」的用例，断言目标仍是旧字节、只多出一个 `.tmp`；换成原地
    `write_text()` 这两条都会红。测试：`test_an_interrupted_save_keeps_the_previous_state_intact`、
    `test_a_failed_prometheus_replace_keeps_the_previous_textfile`。
-7. **[P2] `docs/verify.md` 的覆盖表把功劳算给了错的模块**：§1.1 重写为 20 行（补上漏掉的
-   `test_protocol_discovery.py` / `test_packaging.py`），每行点名至少一个真实测试函数；
+7. **[P2] `docs/verify.md` 的覆盖表把功劳算给了错的模块**：§1.1 当时重写为 20 行（补上漏掉的
+   `test_protocol_discovery.py` / `test_packaging.py`；覆盖表随后增至 29 行），每行点名至少一个真实测试函数；
    `test_docs_consistency.py` 用 `pytest --collect-only` 的实际收集结果核对函数名，并要求每个
    测试文件都有行。顺带修正文件名正则不收数字的问题：`test_protocol_lin11.py` 之前根本不在
    两条文档校验的覆盖范围内。测试：`test_the_coverage_table_names_real_test_functions`。
 8. **[P2] turn7 留下的裸计数不在护栏里**：`TEST_COUNT_RE` 补 `通过|通過`。那个未受护栏保护的旧通过数已按裸环境实跑对齐：
-   当前 3.12.3、裸 3.13.15、uv 3.10.21 各 **803 通过**；3.10 已实跑。
+   当前 3.12.3、裸 3.13.15、uv 3.10.21 各 **859 通过**；3.10 已实跑。
 9. **[P2] 零依赖探针漏了 `__main__.py`**：`SHIPPED_MODULES` 元组补 `__main__`，并新增
    `test_the_probe_covers_every_shipped_module`，把元组与 `msi_psu_monitor/*.py` 精确对齐。
 10. **[P2] `test_pid_consistency.py` 比的是 `bulk_size` 而不是真正的门限 `payload_size`**：README
@@ -613,7 +613,7 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
 3. Ai1300TS（PID `0xAA6F`）变体识别。
 4. `--fan-duty 0/50/100` 读回一致 + F1h 断电重启后仍生效。
 4b. `[fan] mode = customized` 的 daemon 恢复确实改写了电源侧设置。
-5. 满载 >12A/针差 >5A 能触发告警。
+5. 满载 ≥12 A/针差 >5 A 能触发告警。
 6. 拔插 5 次失败后 daemon 自动重连。
 7. 72h 烤机 kWh 与插座功率计积分对照。
 8. `--ocp` 阈值与 MSI Center/出厂规格一致，且连接器状态与 `12V-2x6 Status` 行不矛盾。
@@ -673,7 +673,7 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
 - 新增 daemon 300 次迭代 fd 泄漏检查；修复 shellcheck DEF-001 的误判（命令字符串不能加引号）。
 - 覆盖率进入 dev 依赖与 CI（`coverage report --fail-under=90`）；release workflow 补 ruff/format/mypy/smoke 门禁。
 - 冻结二进制 smoke 增加 performance/多轨/AlertLog/VIN 检查。
-- 当前 **803 passed**，smoke **58**，分支覆盖率 **94%**；本地重建二进制通过。
+- 当前 **859 passed**，smoke **58**，分支覆盖率 **91%**；本地重建二进制通过。
 - 仍 BLOCKED：真实 PSU、root/systemd/udev、22.04/arm64、浏览器、长稳、真实发版。
 
 ## Phase 3（2026-10-19）：全量生产级审计增量
@@ -682,7 +682,7 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
   非正 interval、performance duty、`--columns all` 拼写、AlertLog limit=0、daemon init fd 泄漏、
   Dashboard CSV 错列。
 - 新增回归：输出路径/`/dev/full` 三类入口、配置边界、解析边界、daemon 资源、Dashboard CSV。
-- 全量 803 tests、ruff/format/mypy、smoke 58、shellcheck、systemd-analyze；覆盖率 94%。
+- 全量 859 tests、ruff/format/mypy、smoke 58、shellcheck、systemd-analyze；覆盖率 91%。
 - 仍未改变 P1：真实 PSU、CI 22.04/arm64、真实 systemd/udev、真实桌面浏览器、24h/72h、正式发版。
 - Playwright headless Chromium：range 切换、7 CSV/7 PNG、8 canvas、无 console/page error、无外部请求；
   320px 视口发现并修复图表网格横向溢出（DEF-012）。
@@ -713,11 +713,11 @@ duty = 60           ; 0-100, ignored by the PSU in auto mode
   --ocp-set）；多轨 formatter；严格 exposition 解析替代 promtool。
 - **发布文档**：新增 `CHANGELOG.md` 并随源码 deb/二进制 deb/tar/kit 发布；
   RELEASE_READINESS、support/incident/SECURITY、README/verify/protocol 同步。
-- **环境复核**：venv Python 3.12.3 **803 passed**；裸 Python 3.13.15 **803 passed**；
-  uv 下载的 Python 3.10.21 **803 passed**（3.10 已实跑，不再只是静态兜底）。
+- **环境复核**：venv Python 3.12.3 **859 passed**；裸 Python 3.13.15 **859 passed**；
+  uv 下载的 Python 3.10.21 **859 passed**（3.10 已实跑，不再只是静态兜底）。
   本地重建 frozen binary + binary .deb + hardware kit，kit demo 30 PASS（glibc 2.39
   本地 smoke build，非 release artifact）。
-- **当前门禁**：803 passed、ruff/format/mypy clean、coverage **94%**、smoke 58/58、
+- **当前门禁**：859 tests collected（855 pass / 4 skip）、ruff/format/mypy clean、coverage **90%**、smoke 58/58、
   soak 5k PASS、180 s 真实节奏 PASS、acceptance demo 30 PASS。
 - **本地 1.0.1 产物**：x86_64 tar/deb/kit（glibc 2.39 smoke，非官方 22.04/arm64）已生成；
   `env -i --once`、extracted deb、kit demo 均通过。

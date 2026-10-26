@@ -15,7 +15,7 @@ built or published.
 | Lint / format / types | ruff check + format clean, mypy clean (10 files) |
 | Coverage | **94%** branch coverage (3166 stmts / 183 missed / 1174 branches, floor 90%) |
 | Smoke (demo PSU, no hardware) | **58/58** passed, including daemon→prometheus→history→dashboard |
-| Accelerated soak | `scripts/soak.sh 5000`: exit 0, peak RSS 18 436 KB, fd=3, state files fresh |
+| Accelerated soak | `scripts/soak.sh 5000`: exit 0, peak RSS 18 436 KB, fd=3, state/latest/prom/daily written and non-empty |
 | Strict exposition | `tests/test_prometheus_exposition.py` parses HELP/TYPE, labels, finite values, duplicate series and the canonical `metric{} value` form |
 | Local 1.0.1 freeze | 2026-10-22 audit build: tar/deb/kit built on x86_64/glibc 2.39 (smoke only); tar SHA256SUMS and clean-env `--once` pass; extracted `.deb` runs; deb is `Depends: libc6 (>= 2.35), zlib1g`, no Python |
 | Real-time demo soak | 180 samples at 1 s: exit 0, peak RSS 18 000 KB, fd=3, state dir 16 KiB (not 24 h) |
@@ -42,7 +42,7 @@ built or published.
 ## 3. What a release would require
 
 1. Owner approval to tag/push `v1.0.1` (the version and CHANGELOG are already at
-   1.0.1; the tree is clean).
+   1.0.1; create the tag only after confirming the tree is clean).
 2. CI release run on Ubuntu 22.04 / arm64; verify x86_64/arm64 assets, SBOMs, hardware
    kits, `SHA256SUMS` coverage, and that no source `_all.deb` is published (DEF-013
    regression). The current local build is x86_64/glibc 2.39 only and is not a

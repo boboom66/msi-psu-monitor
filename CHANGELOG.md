@@ -28,7 +28,7 @@ All notable changes to this project are documented here. The format follows
   requirement name `msi_psu_energy_kwh_total`.
 - The 0xFA51 init handshake retries 3 times with 0.5/1.0 s backoff.
 - `scripts/soak.sh`: reproducible accelerated demo soak (5k samples in CI) with
-  RSS / file-descriptor ceilings and state-file freshness checks.
+  RSS / file-descriptor ceilings and checks that the state files were written.
 - A strict text-exposition parser test acts as the local promtool substitute.
 
 ### Changed

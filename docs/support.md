@@ -6,6 +6,9 @@
 |--------------|------------|-----------------|----------------|
 | 1.0.x        | 2026-10-19 | 2027-10-19      | GitHub Releases |
 
+The source tree and `CHANGELOG.md` are at 1.0.1, but no 1.0.1 artifact has been
+published yet; the support window above applies to the published 1.0.0 release.
+
 Security fixes are backported to the latest minor release only. When a line
 reaches end of support, its artifacts stay downloadable but receive no further
 fixes; the supported line and its replacement are listed in the release notes.

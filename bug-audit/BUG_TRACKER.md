@@ -2,7 +2,7 @@
 
 - Repository: `msi-psu-monitor` (`/home/timzhang/projects/project/msi-psu-monitor`)
 - Audit date: 2026-10-19; **updated 2026-10-22 after the second full audit**
-- Audit baseline: `fdfc97d`; current HEAD is the 2026-10-22 audit/doc commit (clean tree, ahead of `origin/master` at update time); current gate **803 tests / 94% branch coverage**
+- Audit baseline: `fdfc97d`; this ledger covers the 2026-10-22 second full audit and its follow-up doc commits. The current gate is **803 tests / 94% branch coverage**; open blockers are tracked in [RELEASE_READINESS.md](RELEASE_READINESS.md).
 - Earlier ledger: [docs/testing/bug-report.md](../docs/testing/bug-report.md) DEF-001..DEF-021.
   This file is the continuing global ledger; DEF-001..DEF-021 keep their status there.
 

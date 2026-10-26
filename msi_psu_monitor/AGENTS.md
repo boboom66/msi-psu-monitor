@@ -13,6 +13,8 @@ runtime imports.
 | `state.py` | `MonitorState` (avg + energy integral), `state.json` atomic persistence, `daily-*.log` history, `alerts-*.log` audit trail, `latest.json` live cache, `--from`/`--columns`/`build_export` |
 | `daemon.py` | Resident sample loop: 1 s alerts, 30 s atomic prometheus incl. the OCP block (`msi_psu_ocp_*` on TS / `msi_psu_multirail_ocp` on MEG P; variant-gated, refreshed every write because C1h is a 5 s rolling average), the same file rewritten with `msi_psu_up 0` + reason on a failed read, 1 s `latest.json`, alert-log append, 60 s history, rescan after 5 failures |
 | `dashboard.py` | Loopback-only `http.server` reading the history/`latest.json` files; non-loopback Host → 421, CSP/Permissions-Policy on every response; charts are hand-drawn `<canvas>` JS |
+| `termdash.py` | ANSI terminal dashboard for `--dashboard-text`: width-based bars + threshold colours, no browser and no third-party packages |
+| `menu.py` | Grouped numbered menu for `--menu`: arrow-key interactive selection on a tty (stdlib `termios`/`select`, no third-party code), numbered line prompt otherwise; pages long output and restores the terminal on exit |
 | `alerts.py` | `AlertEngine` (edge-triggered + consecutive debounce), severities, per-pin OCP/imbalance mirror, local threshold evaluation (power/temperature/rails/connector) |
 | `config.py` | INI config, precedence CLI > file > `DEFAULTS`; `[alerts]` local limits via `threshold_limits()` |
 | `demo.py` | `MSI_PSU_DEMO=1` synthetic PSU; the only synthetic source in the package |
@@ -202,7 +204,7 @@ runtime imports.
 ## Verification (no hardware required)
 
 ```bash
-uv run --group dev pytest -q              # 803 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
+uv run --group dev pytest -q              # 859 tests: lin11 vectors, formatters, ocp, state, daemon, dashboard, demo
 uv run --group dev ruff check .           # must be clean
 uv run --group dev mypy msi_psu_monitor/  # must be clean
 uv run --group dev coverage run --branch -m pytest -q

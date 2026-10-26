@@ -40,7 +40,7 @@ Phase 3 已修复 15 类软件缺陷（输出错误/配置边界/CSV/资源泄�
 
 ## 解除条件
 
-- 真机按 `docs/verify.md` §8 的 18 项完成，尤其 VIN、多轨、buzzer、黑盒 pin/set。
+- 真机按 `docs/verify.md` §8 的清单完成，尤其 VIN、多轨、buzzer、黑盒 pin/set。
 - arm64 环境执行 clean-env `--once` + smoke（x86_64/22.04 CI 已完成）。
 - root 容器/机器执行 install/uninstall/重装/`--purge`。
 - 真实桌面浏览器完成最终页面/下载验收（headless 已通过）。

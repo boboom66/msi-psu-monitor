@@ -25,9 +25,11 @@ SHIPPED_MODULES = (
     'daemon',
     'dashboard',
     'demo',
+    'menu',
     'monitor',
     'protocol',
     'state',
+    'termdash',
 )
 
 PROBE = """

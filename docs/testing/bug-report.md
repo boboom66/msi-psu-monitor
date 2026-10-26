@@ -21,7 +21,7 @@
 
 | ID | 级别 | 类型 | 风险 | 现状 | 建议 |
 |---|---|---|---|---|---|
-| RISK-001 | P1（阻塞发布） | 硬件 | 真实 PSU 通信、5 机型差异、告警/写控制/黑盒未验证 | 无 `/dev/hidraw*`，全部 BLOCKED | 真机按 verify §8 的 18 项执行 |
+| RISK-001 | P1（阻塞发布） | 硬件 | 真实 PSU 通信、5 机型差异、告警/写控制/黑盒未验证 | 无 `/dev/hidraw*`，全部 BLOCKED | 真机按 `verify.md` §8 的清单逐项执行（当前 19 项） |
 | RISK-002 | P1（CI 阻塞） | 构建环境 | 已用 Ubuntu 22.04 chroot 本地构建并在 22.04 内运行通过；CI `ubuntu-22.04` 仍未实际执行 | `docs/testing/evidence-2204-build.txt` | 在 CI 复跑并保留 provenance |
 | RISK-003 | P2 | 发布门禁 | release workflow 已补 ruff/format/mypy/smoke，但仍未跑 shellcheck；arm64 仍仅 release 时构建，且可绕过 CI 状态发布 | `.github/workflows/release.yml` | 继续把 CI 作为 release 的 needs 或加同样门禁 |
 | RISK-004 | P2 | 安装 | 用户命名空间内 install/uninstall/`--purge` 已实际通过（fake systemctl/udevadm）；真实 systemd/udev 启停未跑 | `tests/test_install_namespace.py` | 在真实 root 容器/机器复验 |

@@ -2,7 +2,7 @@
 
 > 没有真机也能验证 CLI、告警、daemon、历史落盘、prometheus 与 dashboard 全链路。
 > 下面每条命令都已在 `.venv`（Python 3.12.3）实跑通过；完整测试套件另在裸
-> Python 3.13.15 与 Python 3.10.21（uv 下载）各复核 **803 通过**；
+> Python 3.13.15 与 Python 3.10.21（uv 下载）各复核 **859 通过**；
 > `smoke.sh` → 58 项（Python 3.12 环境跑过）。3.10 已实跑，同时保留静态门禁——ruff `target-version = "py310"`、mypy
 > `python_version = "3.10"`（按 3.10 typeshed 分析）、smoke 里对每个 `.py` 的
 > `ast.parse(feature_version=(3, 10))`；CI 矩阵另在 3.10 / 3.12 / 3.13 上执行。
@@ -44,8 +44,9 @@ uv run --group dev coverage report --fail-under=90
 bash scripts/soak.sh 5000
 ```
 
-它检查 daemon 正常退出、state/latest/prom/daily 仍在更新、`msi_psu_up 1`，以及
-峰值 RSS ≤256 MiB、fd ≤64；输出 `SOAK PASS` 才算过。默认 5000，最少 100。
+它检查 daemon 正常退出、state/latest/prom/daily 均已生成且非空、`msi_psu_up 1`，以及
+峰值 RSS ≤256 MiB、fd ≤64；输出 `SOAK PASS` 才算过。默认 5000，最少 100。这是一次
+加速可靠性门槛，不替代 24 h / 72 h 真实节奏长稳。
 
 无 PSU 也能查看生效配置（含 `[alerts]` 阈值；text/json）：
 
@@ -75,6 +76,9 @@ uv run --group dev ruff format --check .
 | `tests/test_monitor_format.py` | text / json / prometheus 三种 formatter（`test_prometheus_reports_down_for_a_short_payload`）；多轨 12V1-5 电压/电流与 CPU/GPU 拆分（`test_prometheus_multi_rail_uses_rail_labels_and_cpu_gpu_metrics`）；prometheus 契约在这里，不在 `test_schema.py` |
 | `tests/test_cli_alerts.py` | CLI 告警路径与退出码 2（`test_once_alert_exits_two_and_prints_line`）、黑盒空表 |
 | `tests/test_cli_features.py` | `--watch`/`-O`/`--serial`/`--show-log`/`--fan-*`/`--export`/互斥校验（`test_an_empty_columns_spec_is_not_silently_every_column`） |
+| `tests/test_watch_console.py` | `--watch` 文本控制台：TTY 下 ANSI 重绘与光标恢复（`test_tty_redraw_is_ansi_and_never_calls_clear`）、管道/dumb/窄/矮终端降级、SIGTERM 映射为干净退出 |
+| `tests/test_dashboard_text.py` | 终端 Dashboard：彩色条形与门限色（`test_render_paints_an_overcurrent_pin_red`）、NO_COLOR、矮窗口裁剪、--dashboard-text 互斥 |
+| `tests/test_menu.py` | 序号菜单：命令展示与执行（`test_the_menu_prints_each_command_and_runs_it`）、非法输入、EOF、--menu 互斥 |
 | `tests/test_ocp.py` | 0xC0 阈值 / 0xC1 状态 / 单多轨标志的三格式输出与机型门（`test_run_ocp_on_a_meg_p_model_shows_the_multirail_flag`）；0xC0 阈值写的 MSI 字节编码与 F1h 保存（`test_set_ocp_thresholds_writes_msi_bytes_then_saves`） |
 | `tests/test_daemon.py` | 采样节拍、原子写（`test_a_failed_prometheus_replace_keeps_the_previous_textfile`）、重扫、风扇 Profile 恢复、只答 ident 判读失败、OCP 块换机不继承旧阈值 |
 | `tests/test_dashboard.py` | HTTP 端点、损坏 state.json 的 503（`test_a_corrupt_state_file_is_a_503_while_history_still_serves`）、HEAD 与错误码一致、真实时间 x 轴 |
@@ -118,8 +122,8 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。当前基线：**803 passed**、`ruff check` 全过、`mypy` 10 个文件无问题；
-分支覆盖率 **94%**（CI 门限 90%）。
+三条全绿即通过。当前基线：**859 passed**、`ruff check` 全过、`mypy` 10 个文件无问题；
+分支覆盖率 **90%**（CI 门限 90%）。
 
 > `ruff format --check .` **可以全仓跑**（CI 也跑）：`protocol.py`/`__init__.py`/`__main__.py`/
 > `tests/test_monitor.py` 这四个历史文件混用引号风格，已由 `[tool.ruff.format] exclude` +
@@ -169,13 +173,13 @@ MSI_PSU_DEMO_MODEL=meg_ai1600 .venv/bin/msi-psu-monitor --ocp; echo "exit=$?"
 ```bash
 .venv/bin/msi-psu-monitor -f prometheus | grep -E 'msi_psu_up|power_avg|status_12v_2x6|zero_fan|total_energy|serial='
 # daemon 的 textfile 里也要有 OCP 块（TS 机型 1 + 阈值；MEG 机型只有 available 0）
-grep -E 'msi_psu_ocp_available|msi_psu_ocp_pin_point_a' /var/lib/node_exporter/textfile/msi-psu.prom
+grep -E 'msi_psu_ocp_available|msi_psu_ocp_pin_point_a' /var/lib/node_exporter/msi-psu.prom
 ```
 
 ```bash
 .venv/bin/msi-psu-monitor --show-log
-# demo（MSI_PSU_DEMO=1）下应先出 #1 再出 #2：显示顺序按每条记录自己的累计计数器
-# 降序排（固件槽序没有任何可核对的依据），打印出来的 total 值就是顺序本身。
+# demo（MSI_PSU_DEMO=1）下应先出 #1 再出 #2：REV6 p.13 规定 InfoID 1 是最新一条，
+# 显示按 InfoID 升序（= 新到旧），累计计数器只展示、不参与排序——计数器可能回绕或清零。
 ```
 
 `[monitor] no_alerts = yes` 在 CLI（`--no-alerts` 等价）与 daemon 两侧都生效：没有 Status
@@ -340,14 +344,15 @@ head -1 /tmp/psu-p/daily-*.log       # 末两列应为 cpu_w,gpu_w
 MSI_PSU_STATE_DIR=/tmp/psu-p .venv/bin/msi-psu-monitor --export --from 30m --columns cpu,gpu
 ```
 
-退出码 0，接着应生成三个文件：
+退出码 0，接着应生成四个文件：
 
 ```bash
 ls /tmp/psu-demo && head -3 /tmp/psu-demo/msi-psu.prom && cat /tmp/psu-demo/state.json
 ```
 
-`daily-*.log`（每分钟一行 CSV）、`msi-psu.prom`（原子替换，无 `.tmp` 残留）、
-`state.json`（累计 count / 平均功率 / kWh / product / serial）。
+`state.json`（累计 count / 平均功率 / kWh / product / serial）、`latest.json`
+（1 秒实时快照，dashboard 用）、`msi-psu.prom`（原子替换，无 `.tmp` 残留）、
+`daily-*.log`（每分钟一行 CSV）。
 
 ```bash
 MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --export --from 30m --columns all | head -3
@@ -528,7 +533,7 @@ journalctl -u msi-psu-monitor -f
 4. `--fan-duty 0/50/100` 写后读回一致，`F1h` 保存后断电重启仍生效；
 4b. 配 `[fan] mode = customized` + `duty` 后重启 daemon，`journalctl` 出现
    `Restored the configured fan profile`，且电源侧设置确实被改写；
-5. 满载下单针 >12A 触发 `ocp_pinN`，针差 >5A 触发 `pin_imbalance`；
+5. 满载下单针 ≥12 A 触发 `ocp_pinN`，针差 >5 A 触发 `pin_imbalance`；
 6. 运行中拔插 USB：daemon 连续 5 次读失败后重扫并自动重连（`journalctl` 可见 `rescanning`）；
 7. 72h 烤机：`state.json` 的 `energy_wh` 与插座功率计积分值偏差可接受；
 8. `--ocp` 读出的 4 个阈值与 MSI Center 界面 / 出厂规格一致（12A/5A/20s/180s），

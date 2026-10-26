@@ -14,6 +14,8 @@ Usage:
     msi-psu-monitor --fan-mode customized --fan-duty 80
     msi-psu-monitor --export --from 2h --columns temp,fan,eff -O psu.csv
     msi-psu-monitor --dashboard               # local charts in a browser
+    msi-psu-monitor --dashboard-text          # coloured dashboard in the terminal
+    msi-psu-monitor --menu                    # numbered menu over the normal commands
 """
 
 import argparse
@@ -22,6 +24,7 @@ import json
 import logging
 import math
 import os
+import signal
 import sys
 import time
 
@@ -64,6 +67,13 @@ RAIL_MODE_MULTI = 'multi'
 RAIL_MODE_SINGLE = 'single'
 #: `--watch` without a number: take [monitor] interval from the config file.
 WATCH_FROM_CONFIG = 'config'
+#: Full-screen redraw for --watch on a real terminal. Home + erase-below instead
+#: of the external `clear` command: no subprocess per frame, no scrollback wipe,
+#: no dependency on ncurses-bin, and no "TERM environment variable not set."
+#: leaking into the frame when the console starts without TERM.
+_WATCH_HOME_CLEAR = '\x1b[H\x1b[J'
+_WATCH_HIDE_CURSOR = '\x1b[?25l'
+_WATCH_SHOW_CURSOR = '\x1b[?25h'
 _FAN_MODE_TO_BYTE = {
     FAN_MODE_AUTO: 1,
     FAN_MODE_PERFORMANCE: 1,
@@ -1262,6 +1272,82 @@ def run_once(psu, args, cfg, monitor_state, engine):
     return EXIT_OK
 
 
+def _stdout_is_tty(stream=None):
+    """``isatty()`` that never raises on a detached or exotic stdout."""
+    stream = sys.stdout if stream is None else stream
+    try:
+        return bool(stream.isatty())
+    except (AttributeError, OSError, ValueError):
+        return False
+
+
+def _terminal_size(stream=None):
+    """``(columns, lines)`` for the output terminal; ``(0, 0)`` when unknown."""
+    stream = sys.stdout if stream is None else stream
+    try:
+        fileno = stream.fileno()
+    except (AttributeError, OSError, ValueError):
+        return 0, 0
+    try:
+        size = os.get_terminal_size(fileno)
+    except OSError:
+        return 0, 0
+    return size.columns, size.lines
+
+
+def _watch_ansi(stream=None):
+    """True only for a real terminal that can interpret ANSI escapes.
+
+    ``TERM`` unset (systemd, ``sudo -i`` on a bare console) or ``dumb`` means the
+    redraw would either print an error or write literal escape codes, so those
+    cases keep the plain streaming behaviour --watch has always had for pipes.
+    """
+    stream = sys.stdout if stream is None else stream
+    if not _stdout_is_tty(stream):
+        return False
+    term = os.environ.get('TERM', '').strip().lower()
+    return bool(term) and term != 'dumb'
+
+
+def _watch_header(interval):
+    """One-line status header for the interactive redraw (never in pipe mode)."""
+    stamp = time.strftime('%Y-%m-%d %H:%M:%S')
+    return f'MSI PSU Monitor   {stamp}   every {interval:g}s   Ctrl-C to stop'
+
+
+def _watch_enable_soft_termination():
+    """Map SIGTERM/SIGHUP to KeyboardInterrupt so ``finally`` can restore the tty.
+
+    A plain ``kill`` would otherwise leave the cursor hidden for the rest of the
+    session. Returns ``(signum, previous_handler)`` pairs for the caller to
+    restore; failures (non-main thread) are ignored.
+    """
+    previous = []
+
+    def _interrupt(signum, frame):
+        raise KeyboardInterrupt
+
+    for name in ('SIGTERM', 'SIGHUP'):
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue
+        try:
+            old = signal.getsignal(sig)
+            signal.signal(sig, _interrupt)
+        except (ValueError, OSError):
+            continue
+        previous.append((sig, old))
+    return previous
+
+
+def _watch_restore_signals(previous):
+    for sig, handler in previous:
+        try:
+            signal.signal(sig, handler)
+        except (ValueError, OSError):
+            pass
+
+
 def run_watch(psu, args, cfg, monitor_state, engine):
     """Continuous text refresh; returns the process exit code.
 
@@ -1285,6 +1371,14 @@ def run_watch(psu, args, cfg, monitor_state, engine):
                 file=sys.stderr,
                 flush=True,
             )
+    # A real terminal gets a flicker-free redraw and a restored cursor; pipes,
+    # ``TERM=dumb`` and escaped stdout keep the plain frame stream documented
+    # for --watch. The redraw is one write per frame, so a slow terminal cannot
+    # interleave half a header with half a sensor block.
+    ansi = stream is None and _watch_ansi()
+    signals = _watch_enable_soft_termination() if ansi else []
+    cursor_hidden = False
+    warned = False
     last_save = 0.0
     try:
         while True:
@@ -1294,7 +1388,10 @@ def run_watch(psu, args, cfg, monitor_state, engine):
                 if stream is not None:
                     # Keep the file self-explanatory, the way --once -O does: an
                     # empty artifact says nothing about why the run stopped.
-                    stream.write(format_text(sensors) + '\n')
+                    try:
+                        stream.write(format_text(sensors) + '\n')
+                    except OSError as exc:
+                        logger.error(f'Error: cannot write {args.output}: {exc}')
                 return EXIT_ERROR
             if not has_readings(sensors):
                 # A stream survives one missed frame; the next one may land.
@@ -1319,25 +1416,193 @@ def run_watch(psu, args, cfg, monitor_state, engine):
 
             line = format_text(sensors)
             if stream is not None:
-                stream.write(line + '\n')  # line-buffered: a tail -f sees each frame
+                try:
+                    stream.write(line + '\n')  # line-buffered: a tail -f sees each frame
+                except OSError as exc:
+                    logger.error(f'Error: cannot write {args.output}: {exc}')
+                    return EXIT_ERROR
+            elif ansi:
+                columns, rows = _terminal_size()
+                header = _watch_header(interval)
+                # The header line + frame + trailing newline must fit the window:
+                # a 24-row console cannot show a 12V-2x6 frame and its header, and
+                # redrawing there scrolls the header out of view on every refresh.
+                needed_rows = line.count('\n') + 2
+                needed_columns = max(len(header), *(len(part) for part in line.split('\n')))
+                narrow = bool(columns) and columns < needed_columns
+                short = bool(rows) and rows < needed_rows
+                if narrow or short:
+                    if cursor_hidden:
+                        try:
+                            sys.stdout.write(_WATCH_SHOW_CURSOR)
+                            sys.stdout.flush()
+                            cursor_hidden = False
+                        except OSError:
+                            pass
+                    if not warned:
+                        if narrow:
+                            reason = (
+                                f'terminal is {columns} columns wide; '
+                                f'{needed_columns} are needed for a full-screen frame'
+                            )
+                        else:
+                            reason = (
+                                f'terminal is {rows} rows high but the frame needs {needed_rows}'
+                            )
+                        print(
+                            f'Warning: {reason}. Streaming frames instead.',
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                        warned = True
+                    print(line, flush=True)
+                else:
+                    if not cursor_hidden:
+                        try:
+                            sys.stdout.write(_WATCH_HIDE_CURSOR)
+                            sys.stdout.flush()
+                            cursor_hidden = True
+                        except OSError:
+                            pass
+                    try:
+                        sys.stdout.write(_WATCH_HOME_CLEAR + header + '\n' + line + '\n')
+                        sys.stdout.flush()
+                    except OSError as exc:
+                        logger.error(f'Error: cannot write output: {exc}')
+                        return EXIT_ERROR
             else:
-                # Clear only on a terminal: pipes keep a complete, parseable stream.
-                if sys.stdout.isatty():
-                    os.system('clear' if sys.platform == 'linux' else 'cls')
                 # flush so `msi-psu-monitor --watch | tee` still sees each frame.
                 print(line, flush=True)
             time.sleep(interval)
     except KeyboardInterrupt:
         return EXIT_OK
     finally:
+        if cursor_hidden:
+            try:
+                sys.stdout.write(_WATCH_SHOW_CURSOR)
+                sys.stdout.flush()
+            except OSError:
+                pass
+        _watch_restore_signals(signals)
         if stream is not None:
-            stream.close()
+            try:
+                stream.close()
+            except OSError as exc:
+                # A full disk can fail the final flush; report it like the
+                # per-frame write instead of letting it escape the finally.
+                logger.error(f'Error: cannot write {args.output}: {exc}')
         if monitor_state is not None:
             try:
                 monitor_state.save(stats.state_path(_state_dir(cfg)))
             except OSError as exc:
                 # Do not let an unwritable state directory turn Ctrl-C into a
                 # traceback/exit 1 after a perfectly good watch session.
+                logger.error(f'Cannot persist state: {exc}')
+
+
+def run_dashboard_text(psu, args, cfg, monitor_state, engine):
+    """Live ANSI dashboard: no browser, no third-party packages.
+
+    Reuses the ``--watch`` contract for cadence and conflicts; only the frame
+    renderer differs. Frames come from :mod:`msi_psu_monitor.termdash`, which
+    draws width-based bars rather than height-graded blocks (the VGA console
+    font renders every lower block as a full block).
+    """
+    from msi_psu_monitor import termdash
+
+    interval = args.interval
+    if interval is None:
+        interval = cfg['interval'] if args.watch == WATCH_FROM_CONFIG else args.watch
+
+    history = []
+    try:
+        history = list(stats.iter_history(_state_dir(cfg), since_ts=time.time() - 3600))[-120:]
+    except (OSError, ValueError):
+        # A damaged or unreadable history is not a reason to refuse a live view.
+        history = []
+
+    ansi = _watch_ansi()
+    signals = _watch_enable_soft_termination() if ansi else []
+    cursor_hidden = False
+    if ansi:
+        try:
+            sys.stdout.write(_WATCH_HIDE_CURSOR)
+            sys.stdout.flush()
+            cursor_hidden = True
+        except OSError:
+            ansi = False
+
+    def history_row(sensors, now):
+        def number(key):
+            reading = sensors.get(key)
+            if isinstance(reading, tuple):
+                return reading[0]
+            return ''
+
+        return {
+            'time': time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(now)),
+            '12v': number('vout_12v'),
+            '5v': number('vout_5v'),
+            '3v3': number('vout_3v3'),
+            'total_a': number('iout_12v_total'),
+            'temp': number('temp'),
+            'fan': number('fan_rpm'),
+            'power': number('power_total'),
+            'eff': number('efficiency'),
+            'cpu_w': '',
+            'gpu_w': '',
+        }
+
+    try:
+        while True:
+            sensors = psu.get_sensors()
+            if 'error' in sensors:
+                logger.error(f'Error: {sensors["error"]}')
+                return EXIT_ERROR
+            if not has_readings(sensors):
+                logger.error(f'Warning: {_missing_payload(sensors)} (frame skipped).')
+                time.sleep(interval)
+                continue
+            sensors.update(read_fan_fields(psu))
+            if not args.no_alerts:
+                attach_alerts(psu, engine, sensors, cfg)
+            apply_stats(sensors, monitor_state)
+
+            now = time.time()
+            history.append(history_row(sensors, now))
+            del history[:-120]
+
+            columns, rows = _terminal_size() if ansi else (80, 24)
+            frame = termdash.render(
+                sensors,
+                history,
+                width=columns or 80,
+                height=rows or 24,
+                interval=interval,
+                color=ansi and termdash.colour_enabled(sys.stdout),
+                ascii_only=termdash.ascii_only_default(),
+            )
+            if ansi:
+                sys.stdout.write(_WATCH_HOME_CLEAR + frame + '\n')
+                sys.stdout.flush()
+            else:
+                print(frame)
+                print()
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        return EXIT_OK
+    finally:
+        if cursor_hidden:
+            try:
+                sys.stdout.write(_WATCH_SHOW_CURSOR)
+                sys.stdout.flush()
+            except OSError:
+                pass
+        _watch_restore_signals(signals)
+        if monitor_state is not None:
+            try:
+                monitor_state.save(stats.state_path(_state_dir(cfg)))
+            except OSError as exc:
                 logger.error(f'Cannot persist state: {exc}')
 
 
@@ -1835,6 +2100,16 @@ Notes:
         help='Serve local charts on 127.0.0.1',
     )
     parser.add_argument(
+        '--dashboard-text',
+        action='store_true',
+        help='Live terminal dashboard with coloured bars (no browser)',
+    )
+    parser.add_argument(
+        '--menu',
+        action='store_true',
+        help='Numbered interactive menu over the normal commands',
+    )
+    parser.add_argument(
         '--port',
         type=int,
         default=None,
@@ -1909,6 +2184,81 @@ Notes:
 
 def _validate_args(parser, args):
     """Reject conflicting flag combinations before touching the device."""
+    if args.dashboard_text:
+        conflicts = []
+        if args.once:
+            conflicts.append('--once')
+        if args.watch is not None:
+            conflicts.append('--watch')
+        if args.export:
+            conflicts.append('--export')
+        if args.show_log:
+            conflicts.append('--show-log')
+        if args.show_alert_log:
+            conflicts.append('--show-alert-log')
+        if args.ocp:
+            conflicts.append('--ocp')
+        if args.dashboard:
+            conflicts.append('--dashboard')
+        if args.dump_thresholds:
+            conflicts.append('--dump-thresholds')
+        if args.ocp_set is not None or args.load_thresholds is not None:
+            conflicts.append('a threshold write')
+        if _write_requested(args):
+            conflicts.append('a control write')
+        if args.port is not None:
+            conflicts.append('--port')
+        if args.from_spec is not None or args.columns is not None:
+            conflicts.append('--from/--columns')
+        if args.output is not None:
+            conflicts.append('--output')
+        if conflicts:
+            parser.error(
+                '--dashboard-text is a live terminal view: it cannot be combined with '
+                + ', '.join(conflicts)
+            )
+        if args.format not in (None, 'text'):
+            parser.error('--dashboard-text draws on the terminal; --format does not apply')
+        # Reuse the --watch contract (cadence, interval rules, device selection);
+        # only the renderer differs.
+        args.watch = WATCH_FROM_CONFIG
+    if args.menu:
+        conflicts = []
+        if args.once:
+            conflicts.append('--once')
+        if args.watch is not None:
+            conflicts.append('--watch')
+        if args.dashboard:
+            conflicts.append('--dashboard')
+        if args.dashboard_text:
+            conflicts.append('--dashboard-text')
+        if args.export:
+            conflicts.append('--export')
+        if args.show_log:
+            conflicts.append('--show-log')
+        if args.show_alert_log:
+            conflicts.append('--show-alert-log')
+        if args.ocp:
+            conflicts.append('--ocp')
+        if args.dump_thresholds:
+            conflicts.append('--dump-thresholds')
+        if args.ocp_set is not None or args.load_thresholds is not None:
+            conflicts.append('a threshold write')
+        if _write_requested(args):
+            conflicts.append('a control write')
+        if args.port is not None:
+            conflicts.append('--port')
+        if args.from_spec is not None or args.columns is not None:
+            conflicts.append('--from/--columns')
+        if args.output is not None:
+            conflicts.append('--output')
+        if conflicts:
+            parser.error(
+                '--menu runs the normal commands interactively: it cannot be combined with '
+                + ', '.join(conflicts)
+            )
+        if args.format not in (None, 'text'):
+            parser.error('--menu prints text; --format does not apply')
     if args.dump_config:
         # The dump reads the config files only. Anything that would touch the
         # device/history/page must be rejected instead of silently ignored.
@@ -2190,6 +2540,14 @@ def main():
         _main()
     except BrokenPipeError:
         _redirect_stdout_to_devnull()
+    except KeyboardInterrupt:
+        # Ctrl-C outside --watch (interactive watch keeps its own clean exit):
+        # one line instead of a traceback, using the documented fault code.
+        try:
+            print('Interrupted.', file=sys.stderr, flush=True)
+        except OSError:
+            pass
+        sys.exit(EXIT_ERROR)
     except OSError as exc:
         # ENOSPC/EIO on stdout (e.g. > /dev/full): report one line and use the
         # documented exit code 1 instead of the interpreter's 120/traceback.
@@ -2232,6 +2590,12 @@ def _main():
         args.port = cfg['port']
     if args.serial is None:
         args.serial = cfg['serial']
+    if args.menu and cli_output is None and args.output:
+        logger.warning(
+            f'--menu prints each action in the terminal; ignoring '
+            f'[monitor] output = {args.output!r}'
+        )
+        args.output = None
     if not args.no_alerts:
         args.no_alerts = cfg['no_alerts']
 
@@ -2307,7 +2671,44 @@ def _main():
     if args.show_alert_log:
         sys.exit(run_show_alert_log(args, cfg))
 
-    if args.once or args.watch is None:
+    if args.menu:
+        # The menu itself and its local-history/config actions must work even
+        # when no PSU is attached. Acquire hidraw lazily, only for an entry that
+        # actually reads the device, and release it when that entry returns.
+        from msi_psu_monitor import menu
+
+        state_dir = _state_dir(cfg)
+        monitor_state = stats.MonitorState.load(stats.state_path(state_dir))
+        engine = AlertEngine(consecutive_required=cfg['consecutive_required'])
+
+        def menu_psu_factory():
+            path, available, blocked = resolve_device(args.serial)
+            if path is None:
+                if args.serial is not None and available:
+                    logger.error(
+                        f'Error: no PSU with serial {args.serial!r}. '
+                        f'Available: {", ".join(available)}'
+                    )
+                elif blocked:
+                    logger.error(
+                        'Error: could not open any MSI PSU device. Run as root, '
+                        'or install the udev rule.'
+                    )
+                else:
+                    logger.error('Error: MSI PSU not found. Is it connected via USB?')
+                return None
+            device = open_psu(path)
+            try:
+                device.open()
+                device.init()
+            except Exception:
+                device.close()
+                raise
+            return device
+
+        sys.exit(menu.run_menu(None, args, cfg, monitor_state, engine, menu_psu_factory))
+
+    if args.once or (args.watch is None and not args.menu):
         debounce = 1
     else:
         debounce = cfg['consecutive_required']
@@ -2352,6 +2753,8 @@ def _main():
         if args.ocp:
             sys.exit(run_ocp(psu, args))
         if args.watch is not None:
+            if args.dashboard_text:
+                sys.exit(run_dashboard_text(psu, args, cfg, monitor_state, engine))
             sys.exit(run_watch(psu, args, cfg, monitor_state, engine))
         sys.exit(run_once(psu, args, cfg, monitor_state, engine))
     except OutputError as exc:

@@ -32,12 +32,14 @@ credit.
 
 ## Security properties
 
-- No network service: the CLI and daemon only read `/dev/hidraw*` and write
-  local files. The dashboard binds to loopback, rejects a non-loopback `Host`
-  header with 421 (DNS-rebinding defence), and sends a self-contained CSP plus
-  Permissions-Policy on every response.
+- No remote network service: the CLI and daemon only read `/dev/hidraw*` and
+  write local files. The dashboard binds to loopback, rejects a non-loopback
+  `Host` header with 421 (DNS-rebinding defence), and sends a self-contained CSP
+  plus Permissions-Policy on every response.
 - No runtime Python dependency in the official download; the binaries are
-  frozen in CI on Ubuntu 22.04 and the `.deb` declares only libc6 and zlib1g.
+  frozen in CI on Ubuntu 22.04 and the binary `.deb` declares only libc6 and
+  zlib1g. The separate source `.deb` used for development is not the official
+  download.
 - Device-supplied strings (product, vendor, serial, firmware revision) are
   untrusted input and are filtered before they reach journald, Prometheus or
   CSV. Alert and black-box data are length-checked before decoding.

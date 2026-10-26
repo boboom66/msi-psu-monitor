@@ -1,8 +1,8 @@
 # Fix log — Phase 5 deep audit
 
-Baseline `fdfc97d`; all changes below are **uncommitted** (this audit task forbids committing or
-publishing without explicit authorization). Every row names the regression test that fails on the
-old code path and passes now.
+Baseline `fdfc97d`. The fixes below were made during the audit and are now committed; this log
+is kept as the record of what changed and which regression test pins each fix. Every row names
+the regression test that fails on the old code path and passes now.
 
 | Bug | Files changed | Change | Regression evidence |
 |---|---|---|---|
