@@ -75,3 +75,34 @@ ADR-style log. Context → Decision → Consequence.
   preserved feature work and the newer AGENTS.md.
 - Consequence: subsequent reads/edits use the Product v2 tree; the original
   repository remains on `master`.
+
+## D-008 — Freeze a test snapshot before improving
+
+- Context: the user asked to fix the version, test the implemented features, and
+  only then improve.
+- Decision: create annotated tag `baseline-2026-10-26` and branch
+  `baseline/pre-product-v2` on the freeze commit. Keep `pyproject.toml` at
+  `1.0.1`; this is a test snapshot, not a release. Do not create a `v*` tag.
+- Consequence: tests reference an immutable commit; improvements happen on
+  `work/product-v2`; the release version is chosen after the test report.
+
+## D-009 — Test before improve; red baseline blocks improvements
+
+- Context: changing code before measuring the existing features would make
+  failures ambiguous.
+- Decision: run `BASELINE_TEST_PLAN.md` on the frozen snapshot. If the baseline
+  is RED, fix baseline defects with regression tests first. If AMBER, record
+  known blockers and proceed. Improvements start only after the baseline report.
+- Consequence: every later improvement has a clean "before" reference.
+
+## D-010 — CI path: push works, log reading needs auth
+
+- Context: `git push --dry-run fork work/product-v2` succeeds even though
+  `gh auth status` reports no login; the unauthenticated Actions API is rate
+  limited.
+- Decision: pushing the branch to `fork` is allowed for CI; do not extract
+  tokens from Git Credential Manager. Reading full CI logs requires the human to
+  run `gh auth login` (Gate G0/B). Until then, use the public badge/HTML status
+  and record `UNKNOWN` for log-level evidence.
+- Consequence: CI can be triggered now; debugging a failure may require one
+  human auth step.

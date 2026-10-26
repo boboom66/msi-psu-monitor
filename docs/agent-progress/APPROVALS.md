@@ -16,6 +16,16 @@ Human gates from `docs/AGENT_MASTER_PLAN.md` §9.
 - CI guard added for script modes/LF.
 - Partial static checks: `compileall` and `git diff --check` pass.
 
+### Baseline freeze and test matrix (added after G0 draft)
+
+- Baseline tag: `baseline-2026-10-26`
+- Baseline branch: `baseline/pre-product-v2`
+- Package version: `1.0.1` (not bumped; test snapshot, not a release)
+- Test plan: `BASELINE_TEST_PLAN.md` (40+ cases)
+- `git push --dry-run fork work/product-v2` **succeeds** even though
+  `gh auth status` reports no login. CI can be triggered; reading full logs
+  still needs `gh auth login`.
+
 ### What is blocked
 
 Full Linux gates cannot run on this host:

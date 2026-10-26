@@ -12,6 +12,8 @@ Append-only task table. `UNKNOWN` is not `PASS`.
 | T-006 | Add `docs/agent-progress` to docs index | F | **DONE** | 209a135 | `AGENTS.md` link | self-checked | Agent progress path documented |
 | T-007 | Inventory current user-added features | F | **DONE** | 209a135 | `BASELINE.md` | self-checked | `--dashboard-text`, `--menu`, watch redraw, tests, docs |
 | T-008 | Phase 0 report / G0 request | G | **DONE** | 209a135 | `PHASE_0_REPORT.md`, `APPROVALS.md` | self-checked | Awaiting human G0 |
+| T-009 | Freeze baseline tag/branch | G | **DONE** | freeze commit | `BASELINE_FREEZE.md` | self-checked | `baseline-2026-10-26` / `baseline/pre-product-v2`; not a release |
+| T-010 | Baseline feature test matrix | G/F | **DONE** | freeze commit | `BASELINE_TEST_PLAN.md` | self-checked | 40+ cases; execution blocked on Linux |
 
 ## Next (blocked on G0)
 
