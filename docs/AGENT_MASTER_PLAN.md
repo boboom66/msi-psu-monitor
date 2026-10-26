@@ -144,7 +144,7 @@ Correctness, safety, usability, reliability, security, compatibility, maintainab
 |---|---|---|---|
 | B-001 | 32 files dirty, +501/−62 | Audit baseline is not reproducible | P0 |
 | B-002 | 11 `scripts/*.sh` show `100755 → 100644`; `core.filemode=true` | A careless `git add -A` ships non-executable installers | P0 |
-| B-003 | Docs claim 803 / 859 / 645 tests | Agent may quote stale facts | P1 |
+| B-003 | Docs quote conflicting test counts | Agent may quote stale facts | P1 |
 | B-004 | OCP threshold write never touched real hardware | Safety-critical evidence missing | P0 (human) |
 | B-005 | Root/systemd/udev install not run on a real host | Install path unproven | P0 (human) |
 | B-006 | arm64 built in CI, not executed | Runtime unproven | P1 (human) |
@@ -443,7 +443,7 @@ Batch commits per task group; push once per group to conserve CI minutes.
 | T-001 | Preserve work, fix exec bits, create worktree | F | `git status` clean; scripts `100755` |
 | T-002 | Run baseline gates in Linux; record truth | F | Gates output saved; count/coverage recorded |
 | T-003 | Create progress ledgers and templates | F | Files exist; STATE filled |
-| T-004 | Fix docs baseline drift (803/859/645) | F | No hard-coded test counts; release doc current |
+| T-004 | Fix docs baseline drift (conflicting counts) | F | No hard-coded test counts; release doc current |
 | T-005 | CI check for exec bits and LF | F | CI fails on `100644` scripts / CRLF |
 | T-006 | Add `docs/agent-progress` to docs index | F | Linked from README/AGENTS |
 | T-007 | Inventory current uncommitted features | F | List of user-added features and docs |
