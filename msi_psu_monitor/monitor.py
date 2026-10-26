@@ -2787,6 +2787,15 @@ def _main():
             traceback.print_exc()
         sys.exit(EXIT_ERROR)
     finally:
+        # A SIGTERM mapped to KeyboardInterrupt inside run_watch must still
+        # restore the cursor here: the generator wrote the escapes directly to
+        # the TTY, so anything left behind outlives the process.
+        if sys.stdout.isatty():
+            try:
+                sys.stdout.write(_WATCH_SHOW_CURSOR)
+                sys.stdout.flush()
+            except (OSError, ValueError):
+                pass
         if psu is not None:
             psu.close()
 
