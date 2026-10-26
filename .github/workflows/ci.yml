@@ -65,6 +65,9 @@ jobs:
               tail -n 120 pytest.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
+            grep -E '^(FAILED|ERROR) ' pytest.log | head -n 20 | while IFS= read -r line; do
+              echo "::error title=Pytest failure::$line"
+            done
           fi
           exit "$status"
       - name: Coverage (branch)
