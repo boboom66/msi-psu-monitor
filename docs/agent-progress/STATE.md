@@ -1,7 +1,7 @@
 # STATE
 
-- Phase: **Baseline tested — automated gates green**
-- Task: **T-011 — Baseline test report**
+- Phase: **Phase 1 — feature portfolio proposal (G1)**
+- Task: **T-013 — Feature portfolio / G1 request**
 - Branch: `work/product-v2`
 - HEAD: `git log -1` on `work/product-v2` (green baseline: `a21f971`)
 - Baseline tag: `baseline-2026-10-26-r2`
@@ -15,8 +15,7 @@
   (ruff/format/mypy/shellcheck/pytest/coverage/smoke/soak/deb) and freeze
   (binaries/deb/no-Python/clean-env). `compileall` + `diff --check` local PASS.
 - Q escalations: **0/3 this phase, 0/10 total**
-- Next: Phase 1 — feature inventory, journey friction, reference survey,
-  UI evidence pack (PTY + dashboard screenshots); stop at G1.
+- Next: **G1 approval** of `FEATURE_PORTFOLIO.md`; then Phase 2 design cards.
 - Blockers:
   - B-101: no local Linux runtime; CI is the gate runner.
   - B-102: `gh` unauthenticated; public API/HTML used for CI evidence, full

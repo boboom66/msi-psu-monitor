@@ -16,14 +16,10 @@ Append-only task table. `UNKNOWN` is not `PASS`.
 | T-010 | Baseline feature test matrix | G/F | **DONE** | freeze commit | `BASELINE_TEST_PLAN.md` | self-checked | 40+ cases; execution blocked on Linux |
 | T-011 | Run baseline gates via fork CI | F | **PASS** | `a21f971` | `BASELINE_TEST_REPORT.md`; run `40290163974` | CI | 3.10/3.12/3.13 + freeze all green |
 | T-012 | Create green baseline tag r2 | G | **DONE** | `a21f971` | `baseline-2026-10-26-r2` | self-checked | r1 failed docs consistency (stale 645 quote); r2 fixed docs only |
+| T-013 | Feature portfolio / G1 proposal | G | **DONE** | pending | `FEATURE_PORTFOLIO.md` | self-checked | 30 features; 5 themes; 5 G1 questions |
 
-## Next (Phase 1)
+## Next (G1)
 
-- T-101 Feature inventory (G)
-- T-102 Journey friction (G)
-- T-103 Reference survey (G/F)
-- T-104 UI evidence pack (F)
-- T-105 Error message inventory (F)
-- T-106 Naming/units matrix (F)
-- T-107 Help/docs consistency (F)
-- T-108 Phase 1 report / G1 (G)
+- Human approves/edits `FEATURE_PORTFOLIO.md`.
+- Then Phase 2 design cards for the approved P0/P1 items.
+- Then Phase 3 implementation, one feature per ticket.
