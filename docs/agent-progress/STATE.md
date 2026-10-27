@@ -6,7 +6,7 @@
 - HEAD: documentation-only commits after the T-022 code commit; see `git log -1`
 - Baseline tag: `baseline-2026-10-26-r2`
 - Package version: `1.0.1`
-- Tests: **896 tests / 33 test modules**, per the latest recorded CI run
+- Tests: **898 tests / 33 test modules**, per the latest recorded CI run
 - Last code gates: CI run `40441033415` on T-022 code commit `e0f2929` — **PASS**
   (Python 3.10/3.12/3.13 matrix and frozen-release job)
 - Documentation checks: relative links checked in 22 changed Markdown files; `git diff --check` clean

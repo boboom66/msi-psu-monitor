@@ -777,3 +777,15 @@ def test_state_dir_falls_back_when_the_default_path_is_a_regular_file(monkeypatc
     monkeypatch.setattr(stats, 'DEFAULT_STATE_DIR', blocker)
     monkeypatch.setenv('XDG_STATE_HOME', str(tmp_path / 'xdg'))
     assert stats.default_state_dir() == tmp_path / 'xdg' / 'msi-psu-monitor'
+
+
+def test_a_slow_cadence_integrates_with_a_wider_gap_guard():
+    """The 300 s guard is for suspend/outage, not a cap on a slow poll.
+
+    A --watch 600 / sample_interval = 600 run used to exceed it on every sample,
+    so the kWh counter silently stopped for the whole session.
+    """
+    monitor_state = stats.MonitorState()
+    monitor_state.update(600.0, 90.0, ts=1000.0)
+    monitor_state.update(600.0, 90.0, ts=1600.0, max_gap_s=1200.0)
+    assert monitor_state.energy_wh == pytest.approx(600.0 * 600 / 3600)

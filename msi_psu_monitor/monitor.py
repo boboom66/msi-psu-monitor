@@ -1113,14 +1113,23 @@ def _valid_sample(sensors):
     return watts, eff
 
 
-def apply_stats(sensors, monitor_state):
-    """Fold the sample into the cumulative stats and expose the derived values."""
+def apply_stats(sensors, monitor_state, max_gap_s=None):
+    """Fold the sample into the cumulative stats and expose the derived values.
+
+    ``max_gap_s`` must cover the caller's real cadence: the 300 s default is the
+    guard against a suspend/outage, not a cap on a legitimately slow poll. A
+    ``--watch 600`` or ``[daemon] sample_interval = 600`` used to exceed it on
+    every single sample, so the kWh integral silently stopped for the whole run.
+    """
     if monitor_state is None:
         return
     monitor_state.note_identity(sensors)
     sample = _valid_sample(sensors)
     if sample is not None:
-        monitor_state.update(*sample)
+        if max_gap_s is None:
+            monitor_state.update(*sample)
+        else:
+            monitor_state.update(*sample, max_gap_s=max_gap_s)
     sensors['power_avg'] = (round(monitor_state.power_avg, 2), 'W')
     sensors['efficiency_avg'] = (round(monitor_state.efficiency_avg, 2), '%')
     sensors['total_energy'] = (round(monitor_state.total_energy_kwh, 3), 'kWh')
@@ -1358,6 +1367,10 @@ def run_watch(psu, args, cfg, monitor_state, engine):
     interval = args.interval
     if interval is None:
         interval = cfg['interval'] if args.watch == WATCH_FROM_CONFIG else args.watch
+    # Two missed samples are still one expected gap; a longer pause (suspend, an
+    # outage) is not integrated. Without this, any cadence above the 300 s default
+    # froze the kWh counter for the whole run.
+    stats_gap = max(stats.MAX_SAMPLE_GAP_S, interval * 2)
     stream = None
     if args.output:
         try:
@@ -1401,7 +1414,7 @@ def run_watch(psu, args, cfg, monitor_state, engine):
             sensors.update(read_fan_fields(psu))
             if not args.no_alerts:
                 attach_alerts(psu, engine, sensors, cfg)
-            apply_stats(sensors, monitor_state)
+            apply_stats(sensors, monitor_state, max_gap_s=stats_gap)
 
             now = time.time()
             if monitor_state is not None and now - last_save >= 30.0:
@@ -1513,6 +1526,7 @@ def run_dashboard_text(psu, args, cfg, monitor_state, engine):
     interval = args.interval
     if interval is None:
         interval = cfg['interval'] if args.watch == WATCH_FROM_CONFIG else args.watch
+    stats_gap = max(stats.MAX_SAMPLE_GAP_S, interval * 2)
 
     history = []
     try:
@@ -1566,7 +1580,7 @@ def run_dashboard_text(psu, args, cfg, monitor_state, engine):
             sensors.update(read_fan_fields(psu))
             if not args.no_alerts:
                 attach_alerts(psu, engine, sensors, cfg)
-            apply_stats(sensors, monitor_state)
+            apply_stats(sensors, monitor_state, max_gap_s=stats_gap)
 
             now = time.time()
             history.append(history_row(sensors, now))

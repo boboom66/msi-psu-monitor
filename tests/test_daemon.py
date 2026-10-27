@@ -1088,3 +1088,18 @@ def test_unopenable_devices_are_explained_once(tmp_path, monkeypatch, caplog):
         rec for rec in caplog.records if 'Could not open any MSI PSU device' in rec.getMessage()
     ]
     assert len(hits) == 1
+
+
+def test_energy_integrates_at_a_slow_configured_cadence(tmp_path):
+    """sample_interval above the 300 s default must still accumulate energy."""
+    clock = Clock()
+    daemon = make_daemon(
+        tmp_path,
+        StubPSU(clean_sensors(), alerts={'ocp_12v': False}),
+        clock=clock,
+        sample_interval=600,
+    )
+    daemon.sample()
+    clock.advance(600)
+    daemon.sample()
+    assert daemon.state.energy_wh == pytest.approx(600.0 * 600 / 3600)

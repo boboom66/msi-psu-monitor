@@ -62,6 +62,9 @@ class MonitorDaemon:
         self.prom_interval = float(cfg.get('prom_interval') or 30.0)
         self.history_interval = float(cfg.get('history_interval') or 60.0)
         self.retention_days = int(cfg.get('retention_days') or stats.RETENTION_DAYS)
+        # A deliberately slow cadence is not a "long gap": the guard exists for
+        # suspend/outage, so it must never be shorter than the expected interval.
+        self.state_gap_s = max(stats.MAX_SAMPLE_GAP_S, self.sample_interval * 2)
         self.alert_log = bool(cfg.get('alert_log', True))
         self.live_snapshot = bool(cfg.get('live_snapshot', True))
         self.fan_mode = cfg.get('fan_mode') or None
@@ -317,7 +320,7 @@ class MonitorDaemon:
             # engine's recovery buffer would grow for the life of the daemon.
             self._record_alerts(fired, self.engine.take_cleared())
         try:
-            monitor.apply_stats(sensors, self.state)
+            monitor.apply_stats(sensors, self.state, max_gap_s=self.state_gap_s)
         except Exception as exc:
             # A malformed reading must not kill the resident daemon either.
             logger.warning(f'Unexpected error while enriching the sample: {exc}')
