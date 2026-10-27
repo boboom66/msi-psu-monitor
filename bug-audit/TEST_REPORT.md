@@ -1,6 +1,6 @@
 # Test report — Phase 5 deep audit
 
-> **历史快照（Phase 5）**。当前门禁为 **803 tests / 94% 分支覆盖率 / smoke 58 / soak 5000**；当前事实见 `FIX_LOG.md` 与 `RELEASE_READINESS.md`。
+> **历史快照（Phase 5）**。本文记录的测试数、覆盖率和门禁结果仅代表当时；当前测试与发布状态见 [`RELEASE_READINESS.md`](RELEASE_READINESS.md)。
 
 All commands were executed in `/home/timzhang/projects/project/msi-psu-monitor` (WSL Linux,
 x86_64, Python 3.12.3 in `.venv`). Nothing below is inferred from reading code.

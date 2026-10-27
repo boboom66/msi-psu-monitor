@@ -1,6 +1,6 @@
 # Code audit — Phase 5
 
-> **历史快照（Phase 5）**。当前运行时约 **6 774 行 / 9 模块 / 29 测试模块 / 803 tests**；当前事实见 `FIX_LOG.md` 与 `RELEASE_READINESS.md`。
+> **历史快照（Phase 5）**。本报告中的代码规模和测试数仅代表审计时点；当前缺陷/修复见 `FIX_LOG.md`，当前发布判断见 `RELEASE_READINESS.md`。
 
 ## 1. Scope actually read
 
