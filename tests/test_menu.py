@@ -591,3 +591,37 @@ def test_the_thresholds_entry_opens_the_device_lazily(monkeypatch):
     assert code == monitor.EXIT_OK
     assert opened == [True]
     assert psu.closed is True
+
+
+def test_real_pty_keystrokes_drive_the_interactive_menu(monkeypatch):
+    """End-to-end through the real key reader, not a stubbed ``_read_key``.
+
+    The other interactive tests replace ``_read_key``, so select()/os.read()/
+    termios and the escape-sequence splitter were only unit-tested in isolation.
+    This drives the shipped loop from a pty master: ESC [ B (down), Enter (run
+    "Live view"), then q (quit).
+    """
+    master, slave = pty.openpty()
+    stdin = os.fdopen(os.dup(slave), 'r', encoding='utf-8', buffering=1)
+    stdout = FakeIO(True)
+    monkeypatch.setattr(menu.sys, 'stdin', stdin)
+    monkeypatch.setattr(menu.sys, 'stdout', stdout)
+    monkeypatch.setenv('TERM', 'xterm')
+    monkeypatch.setattr(menu, '_size', lambda fd=None: (80, 24))
+    monkeypatch.setattr(menu, '_pause', lambda: None)
+    runs = []
+    monkeypatch.setattr(menu, '_run', lambda action, *args: runs.append(action) or monitor.EXIT_OK)
+    os.write(master, b'\x1b[B\rq')  # down, enter, quit
+    try:
+        code = menu.run_menu(
+            StubPSU(), _args(), {'retention_days': 30, 'interval': 1.0}, None, None
+        )
+        text = stdout.getvalue()  # before the finally closes the fake stdout
+    finally:
+        stdin.close()
+        stdout.close()
+        os.close(master)
+        os.close(slave)
+    assert code == monitor.EXIT_OK
+    assert runs == ['watch']
+    assert 'last:' in text
