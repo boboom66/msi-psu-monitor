@@ -9,7 +9,7 @@
 - Tests: **889 tests / 33 test modules**, per the latest recorded CI run
 - Last code gates: CI run `40441033415` on T-022 code commit `e0f2929` — **PASS**
   (Python 3.10/3.12/3.13 matrix and frozen-release job)
-- Documentation checks: relative links checked in 20 Markdown files; `git diff --check` clean
+- Documentation checks: relative links checked in 22 changed Markdown files; `git diff --check` clean
 - Local test limitation: Windows cannot collect the full Linux suite (`fcntl`, `termios`,
   and `os.geteuid` are unavailable); this is not counted as a project test failure
 - Master: kept unchanged; Product v2 work remains on `work/product-v2`
