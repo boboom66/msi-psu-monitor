@@ -1,6 +1,6 @@
 # msi-psu-monitor 缺陷与风险登记（第一阶段）
 
-> **历史缺陷台账（2026-10-19）**。其中 NR-002/NR-003 已在 2026-10-22 修复；当前门禁为 **803 tests / 94% 分支覆盖率 / smoke 58 / soak 5000**，当前状态见 `bug-audit/FIX_LOG.md` 与 `bug-audit/BUG_TRACKER.md`。
+> **历史缺陷台账（2026-10-19）**。其中 NR-002/NR-003 已在 2026-10-22 修复；当前缺陷和发布状态分别见 [`bug-audit/BUG_TRACKER.md`](../../bug-audit/BUG_TRACKER.md) 与 [`bug-audit/RELEASE_READINESS.md`](../../bug-audit/RELEASE_READINESS.md)。
 
 - 基线：`650076a`；执行时间：2026-10-19。
 - 本文件区分“确认缺陷”和“测试缺口/发布风险”；未执行的测试不写成通过。

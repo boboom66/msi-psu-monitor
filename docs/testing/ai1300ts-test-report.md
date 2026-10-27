@@ -1,6 +1,6 @@
 # Ai1300TS 严格测试报告（历史快照）
 
-> **历史快照（2026-10-19/21）**。当前门禁为 **803 tests / 94% 分支覆盖率 / smoke 58 / soak 5000**；当前事实见 `docs/verify.md`、`bug-audit/FIX_LOG.md` 与 `bug-audit/RELEASE_READINESS.md`。
+> **历史快照（2026-10-19/21）**。本文结果只代表当时的 demo 测试；当前发布状态见 [`bug-audit/RELEASE_READINESS.md`](../../bug-audit/RELEASE_READINESS.md)。
 
 - 日期：2026-10-21
 - 对象：MSI MPG Ai1300TS，USB PID 0xAA6F，内部 variant mpg_ai1300ts
