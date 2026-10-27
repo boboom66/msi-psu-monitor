@@ -2221,6 +2221,11 @@ def _validate_args(parser, args):
             conflicts.append('--from/--columns')
         if args.output is not None:
             conflicts.append('--output')
+        if args.menu:
+            # Named here rather than left to the --menu block below: that block
+            # would see the synthetic args.watch and report "--watch", sending the
+            # user after a flag they never typed.
+            conflicts.append('--menu')
         if conflicts:
             parser.error(
                 '--dashboard-text is a live terminal view: it cannot be combined with '
@@ -2288,6 +2293,7 @@ def _validate_args(parser, args):
             or args.ocp_set is not None
             or args.load_thresholds is not None
             or _write_requested(args)
+            or args.menu
             or args.format not in (None, 'text', 'json')
         ):
             parser.error(
@@ -2661,6 +2667,12 @@ def _main():
     elif args.show_alert_log and cli_serial is None and args.serial:
         logger.warning(
             f'--show-alert-log reads local files; ignoring [monitor] serial = {args.serial!r}'
+        )
+    elif args.dashboard_text and cli_output is None and args.output:
+        # Same contract as --dashboard: the live view owns the terminal, so a
+        # config-sourced output path would be accepted and silently ignored.
+        logger.warning(
+            f'--dashboard-text draws on the terminal; ignoring [monitor] output = {args.output!r}'
         )
 
     if args.dump_config:

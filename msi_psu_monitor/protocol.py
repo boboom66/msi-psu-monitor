@@ -835,7 +835,11 @@ class MSIPSU:
         if data is None or len(data) < 2:
             return None
         raw = struct.unpack("<H", bytes(data[:2]))[0]
-        return (round(lin11_to_int(raw, 1, False), 1), "V")
+        # LINEAR11 is a *floating* format: MSI's ValueCalc multiplies by 2**exponent,
+        # so 461 x 2**-1 V is 230.5 V. The integer shift used here before truncated
+        # every sub-volt value whenever the device chose a negative exponent, while
+        # the display claims 0.1 V resolution.
+        return (round(self._lin11_float(raw), 1), "V")
 
     @property
     def alert_names(self):
@@ -1157,7 +1161,15 @@ class MSIPSU:
         data = self.hid.read_register(REG_MULTIRAIL)
         if data is None or len(data) < 1:
             return None
-        return data[0] == 2
+        value = data[0]
+        if value not in (1, 2):
+            # 1 = one combined rail, 2 = per-rail protection (CPSU.cs:823-832).
+            # Any other byte is not one of the two states this register defines;
+            # reporting it as "single rail" invented a protection mode the PSU
+            # never stated (the 8-byte 0xC0 read treats an invalid enable byte the
+            # same way).
+            return None
+        return value == 2
 
     def set_multirail_ocp(self, enabled):
         """Switch the MEG P 12V rail protection mode (C0h, 1 byte) and save it.

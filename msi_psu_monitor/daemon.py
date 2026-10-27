@@ -79,6 +79,10 @@ class MonitorDaemon:
         self.failures = 0
         self.samples = 0
         self.stopping = False
+        #: Why the last discovery found nothing (filled by the default _discover).
+        self.discovery_available = []
+        self.discovery_blocked = []
+        self._discovery_note = None
         #: Reason of the read failure the current textfile was written for, so a
         #: broken read rewrites ``msi_psu_up 0`` once instead of every second.
         self.prom_failure = None
@@ -98,8 +102,43 @@ class MonitorDaemon:
 
     def _discover(self):
         """Return the hidraw path to use, honouring the optional serial filter."""
-        path, _, _ = monitor.resolve_device(self.cfg.get('serial'))
+        path, available, blocked = monitor.resolve_device(self.cfg.get('serial'))
+        # Keep the reason a miss had none of the three shapes: no device at all,
+        # a serial that is not attached, or devices that all refused to open.
+        self.discovery_available = list(available)
+        self.discovery_blocked = list(blocked)
         return path
+
+    def _note_discovery_miss(self):
+        """Explain a discovery miss once, instead of failing silently forever.
+
+        ``resolve_device`` already knows why nothing matched, but the daemon used
+        to reduce all three cases to a debug line every five seconds: a typo in
+        ``[monitor] serial`` left the service running and logging nothing an
+        operator would ever see. The message is emitted once per distinct reason
+        (a replaced/rejected device changes the text, a repeated miss does not).
+        """
+        serial = self.cfg.get('serial')
+        if serial and self.discovery_available:
+            note = (
+                f'No PSU with serial {serial!r} is attached; seen: '
+                f'{", ".join(self.discovery_available)}. '
+                f'Retrying every {DISCOVERY_RETRY_S:g}s.'
+            )
+        elif self.discovery_blocked:
+            note = (
+                'Could not open any MSI PSU device (permission, or another process '
+                f'holds it). Run as root, or install the udev rule. Retrying every '
+                f'{DISCOVERY_RETRY_S:g}s.'
+            )
+        elif serial:
+            note = f'No PSU with serial {serial!r} is attached yet; retrying.'
+        else:
+            return
+        if note == self._discovery_note:
+            return
+        self._discovery_note = note
+        logger.warning(note)
 
     def _open_default(self, path):
         return monitor.open_psu(path)
@@ -124,6 +163,7 @@ class MonitorDaemon:
                 self._next_discovery = self.clock() + DISCOVERY_RETRY_S
                 return None
             if self.device_path is None:
+                self._note_discovery_miss()
                 logger.debug('No MSI PSU found yet; retrying shortly.')
                 return None
         psu = None
@@ -158,6 +198,7 @@ class MonitorDaemon:
             self._next_discovery = self.clock() + DISCOVERY_RETRY_S
             return None
         self.psu = psu
+        self._discovery_note = None
         logger.info(f'Opened {self.device_path}: {getattr(psu, "product", "unknown")}')
         self.restore_fan_profile(psu)
         return psu

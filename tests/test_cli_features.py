@@ -1442,3 +1442,35 @@ def test_config_output_and_serial_are_not_silently_ignored_by_dashboard(
     assert started == [True]
     assert 'ignoring [monitor] output' in captured.err
     assert 'ignoring [monitor] serial' in captured.err
+
+
+def test_config_output_is_not_silently_ignored_by_dashboard_text(monkeypatch, capsys, tmp_path):
+    conf = tmp_path / 'dash-text.conf'
+    conf.write_text('[monitor]\noutput = /tmp/never-written\n', encoding='utf-8')
+    started = []
+    monkeypatch.setattr(monitor, 'run_dashboard_text', lambda *args: started.append(True) or 0)
+    code, captured = run_main(
+        monkeypatch, capsys, StubPSU(sensors()), ['--dashboard-text', '--config', str(conf)]
+    )
+    assert code == EXIT_OK
+    assert started == [True]
+    assert 'ignoring [monitor] output' in captured.err
+
+
+def test_dashboard_text_and_menu_conflict_names_the_menu_flag(monkeypatch, capsys):
+    """The menu check runs after --dashboard-text fakes a --watch value.
+
+    Reporting "--watch" sent the user after a flag they never typed.
+    """
+    code, captured = run_main(
+        monkeypatch, capsys, StubPSU(sensors()), ['--dashboard-text', '--menu']
+    )
+    assert code == 2
+    assert '--menu' in captured.err
+    assert '--watch' not in captured.err
+
+
+def test_dump_config_rejects_menu(monkeypatch, capsys):
+    code, captured = run_main(monkeypatch, capsys, StubPSU(sensors()), ['--dump-config', '--menu'])
+    assert code == 2
+    assert 'cannot be combined' in captured.err

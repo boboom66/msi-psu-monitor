@@ -1045,3 +1045,46 @@ def test_no_alerts_also_skips_the_local_thresholds(tmp_path):
     sample = daemon.sample()
     assert 'threshold_alerts' not in sample
     assert 'threshold_limits' not in sample
+
+
+def test_an_unattached_serial_is_explained_once(tmp_path, monkeypatch, caplog):
+    """A typo in [monitor] serial used to leave the daemon silent forever.
+
+    __discover() already knows why nothing matched, but every case was reduced to
+    a debug line once every five seconds: the service kept running, sampled
+    nothing, and ``journalctl -u`` showed no reason at the default level.
+    """
+    monkeypatch.setattr(monitor, 'resolve_device', lambda serial: (None, ['SN-OTHER'], []))
+    daemon = MonitorDaemon(
+        dict(DEFAULTS, state_dir=str(tmp_path), consecutive_required=1, serial='MISSING'),
+        clock=Clock(),
+        wall_clock=Clock(),
+    )
+    with caplog.at_level(logging.WARNING, logger='msi_psu.daemon'):
+        assert daemon.sample() is None
+        daemon.clock.advance(10)
+        assert daemon.sample() is None
+        daemon.clock.advance(10)
+        assert daemon.sample() is None
+    messages = [rec.getMessage() for rec in caplog.records if 'serial' in rec.getMessage()]
+    assert len(messages) == 1, messages
+    assert 'MISSING' in messages[0]
+    assert 'SN-OTHER' in messages[0]
+
+
+def test_unopenable_devices_are_explained_once(tmp_path, monkeypatch, caplog):
+    """Permission/busy failures must not look like "no PSU attached"."""
+    monkeypatch.setattr(monitor, 'resolve_device', lambda serial: (None, [], ['/dev/hidraw3']))
+    daemon = MonitorDaemon(
+        dict(DEFAULTS, state_dir=str(tmp_path), consecutive_required=1),
+        clock=Clock(),
+        wall_clock=Clock(),
+    )
+    with caplog.at_level(logging.WARNING, logger='msi_psu.daemon'):
+        assert daemon.sample() is None
+        daemon.clock.advance(10)
+        assert daemon.sample() is None
+    hits = [
+        rec for rec in caplog.records if 'Could not open any MSI PSU device' in rec.getMessage()
+    ]
+    assert len(hits) == 1

@@ -66,3 +66,26 @@ recorded with their regression tests in
 - `--once` + `--export/--show-log/--show-alert-log/--ocp/--dump-thresholds` → usage error (exit 2).
 - Config `output`/`serial` ignored by a mode → explicit warning; explicit CLI flags still exit 2.
 - 0xC0 `enabled` bytes other than 0/1 → C0h read unusable (not “disabled”).
+
+## Independent re-audit (2026-10-27)
+
+Scope: the whole `work/product-v2` tree (protocol/state/daemon/dashboard/alerts/
+config/demo/menu/termdash, scripts, unit, udev, CI). Method: line-by-line read,
+cross-check against `docs/protocol.md` and CPSU.cs anchors already quoted in the
+tree, local ruff/format/mypy, and the full Linux suite via fork CI (Windows cannot
+collect the POSIX-only modules). Existing tests were re-read, not trusted by name.
+
+| ID | Sev | Status | Files | Category | Trigger | Actual before fix | Root cause / fix | Regression test |
+|---|---|---|---|---|---|---|---|---|
+| DEF-036 | P2 | **FIXED (CI pending)** | `msi_psu_monitor/protocol.py` | data correctness | VIN (0x20) on a MEG model encoded with a negative LINEAR11 exponent | integer shift truncated sub-volt values: 461 x 2**-1 V (230.5 V) was reported as 230.0 V while the CLI prints 0.1 V and MSI's `ValueCalc` is floating (`CPSU.cs:1248`) | `read_vin()` decodes with `_lin11_float()` | `test_read_vin_keeps_sub_volt_precision` |
+| DEF-037 | P2 | **FIXED (CI pending)** | `msi_psu_monitor/daemon.py` | diagnosability/ops | daemon with `[monitor] serial` that matches nothing (typo, or the wrong unit plugged in) | every discovery miss was a debug line once per 5 s: the unit stayed "active", sampled nothing, and the journal had no visible reason | `_discover()` keeps `available`/`blocked`; `_note_discovery_miss()` warns once per distinct reason and resets after a successful open | `test_an_unattached_serial_is_explained_once`, `test_unopenable_devices_are_explained_once` |
+| DEF-038 | P3 | **FIXED (CI pending)** | `msi_psu_monitor/monitor.py` | CLI contract | `--dump-config --menu` | `--menu` was accepted and silently ignored (dump-config exits before the menu) | `--menu` added to the dump-config conflict list → usage error, exit 2 | `test_dump_config_rejects_menu` |
+| DEF-039 | P3 | **FIXED (CI pending)** | `msi_psu_monitor/monitor.py` | CLI contract | `[monitor] output = ...` together with `--dashboard-text` | the config-sourced path was accepted and silently ignored; the live view owns the terminal | explicit "ignoring [monitor] output" warning, matching `--dashboard` | `test_config_output_is_not_silently_ignored_by_dashboard_text` |
+| DEF-040 | P3 | **FIXED (CI pending)** | `msi_psu_monitor/protocol.py` | protection-state correctness | 0xC0 multirail byte other than 1/2 (0, 3, 0xFF) | `data[0] == 2` reported every other byte as "single rail": a protection mode the PSU never stated | undefined bytes return `None` (like an invalid `enabled` byte in the 8-byte 0xC0 read) | `test_read_multirail_ocp_refuses_an_undefined_byte` |
+| DEF-041 | P3 | **FIXED (CI pending)** | `msi_psu_monitor/monitor.py` | CLI clarity | `--dashboard-text --menu` | rejected, but the message named `--watch` (dashboard-text injects a synthetic watch value before the menu check) | the dashboard-text conflict list names `--menu` itself | `test_dashboard_text_and_menu_conflict_names_the_menu_flag` |
+
+Not re-fixed / still open after this pass: NR-004 (black box NAK vs empty
+indistinguishable), NR-005/NR-006 (hardware, arm64, root install, 24 h). The
+`--watch` path still does not reopen a device that disappears (documented as a
+daemon-only recovery); no change made, recorded here so it is not mistaken for
+covered.

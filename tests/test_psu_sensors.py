@@ -821,10 +821,35 @@ def test_read_multirail_ocp_gates_on_the_model():
     assert psu.read_multirail_ocp() is None
 
 
+def test_read_multirail_ocp_refuses_an_undefined_byte():
+    """Only 1 (combined) and 2 (per-rail) are defined; 0/3+ is not a mode.
+
+    Reporting an undefined byte as "single rail" invented a protection state the
+    PSU never sent -- the 8-byte 0xC0 read already refuses an invalid enable byte
+    the same way.
+    """
+    psu = _psu_1300p()
+    for value in (0, 3, 0xFF):
+        psu.hid = RecordingHID(registers={0xC0: bytes([value])})
+        assert psu.read_multirail_ocp() is None
+
+
 def test_read_vin_decodes_volts_on_a_non_ts_model():
     psu = _psu_1300ts(commands={(0xFA, 0x51): b'MEG Ai1300P' + bytes([0])})
     psu.hid = RecordingHID(registers={0x20: bytes([0x73, 0x08])})
     assert psu.read_vin() == (230.0, 'V')
+
+
+def test_read_vin_keeps_sub_volt_precision():
+    """LINEAR11 is floating: 461 x 2**-1 V is 230.5 V, not 230 V.
+
+    MSI's ValueCalc multiplies the mantissa by 2**exponent (CPSU.cs:1248), so the
+    device may encode a fractional mains voltage with a negative exponent; the
+    integer shift used before truncated it while the display claims 0.1 V.
+    """
+    psu = _psu_1300p()
+    psu.hid = RecordingHID(registers={0x20: bytes([0xCD, 0xF9])})  # 0xF9CD = 461 x 2**-1
+    assert psu.read_vin() == (230.5, 'V')
 
 
 def test_read_vin_is_refused_on_a_ts_model():
