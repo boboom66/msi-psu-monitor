@@ -2210,6 +2210,15 @@ Notes:
         'no PSU access; text or json',
     )
     parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
+    # Shorthand for the interactive menu: `msi-psu-monitor menu` instead of
+    # typing `--menu`. Hidden from the flag list; the --menu help is authoritative.
+    parser.add_argument(
+        'command',
+        nargs='?',
+        choices=('menu',),
+        metavar='COMMAND',
+        help=argparse.SUPPRESS,
+    )
     return parser
 
 
@@ -2605,6 +2614,9 @@ def main():
 def _main():
     parser = build_parser()
     args = parser.parse_args()
+    if args.command == 'menu':
+        # Accept `msi-psu-monitor menu` as the same switch as `--menu`.
+        args.menu = True
     _validate_args(parser, args)
 
     try:

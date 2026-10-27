@@ -187,7 +187,8 @@ msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
                    digits select, Enter runs, q/Esc quits (snapshot, watch,
                    dashboard, export, OCP, thresholds, log, alert log, config);
                    the header shows the last action's result, pipes get a
-                   numbered prompt; 9 entries in Monitor/History/System groups
+                   numbered prompt; 9 entries in Monitor/History/System groups.
+                   A bare `menu` is accepted as the same switch.
       --port       Dashboard port (default 8899)
       --show-log   Dump the PSU black-box alert records (C1h; this format is
                    project-defined because MSI Center never reads that log)

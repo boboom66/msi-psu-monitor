@@ -625,3 +625,22 @@ def test_real_pty_keystrokes_drive_the_interactive_menu(monkeypatch):
     assert code == monitor.EXIT_OK
     assert runs == ['watch']
     assert 'last:' in text
+
+
+def test_the_word_menu_is_a_shorthand_for_the_flag(monkeypatch):
+    """`msi-psu-monitor menu` must behave exactly like `--menu`."""
+    from msi_psu_monitor import menu as menu_module
+
+    opened = []
+    monkeypatch.setattr(
+        menu_module,
+        'run_menu',
+        lambda *args, **kwargs: opened.append(True) or monitor.EXIT_OK,
+    )
+    assert _run_main(monkeypatch, ['menu']) == monitor.EXIT_OK
+    assert opened == [True]
+
+
+def test_the_word_menu_still_rejects_a_conflicting_mode(monkeypatch, capsys):
+    assert _run_main(monkeypatch, ['menu', '--once']) == 2
+    assert '--menu' in capsys.readouterr().err
