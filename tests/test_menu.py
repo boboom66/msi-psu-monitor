@@ -808,3 +808,123 @@ def test_the_psu_command_passes_explicit_arguments_through(monkeypatch):
     monkeypatch.setattr(sys, 'argv', ['psu', '--version'])
     psu.main()
     assert seen == [['psu', '--version']]
+
+
+def _menu_args():
+    return monitor.build_parser().parse_args([])
+
+
+def test_the_json_and_prometheus_snapshot_entries_set_the_format(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        monitor, 'run_once', lambda psu, args, *rest: seen.append(args.format) or monitor.EXIT_OK
+    )
+    assert menu._run('once_json', StubPSU(), _menu_args(), {}, None, None) == monitor.EXIT_OK
+    assert menu._run('once_prometheus', StubPSU(), _menu_args(), {}, None, None) == monitor.EXIT_OK
+    assert seen == ['json', 'prometheus']
+
+
+def test_the_custom_watch_entry_prompts_for_the_interval(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        monitor, 'run_watch', lambda psu, args, *rest: seen.append(args.watch) or monitor.EXIT_OK
+    )
+    monkeypatch.setattr(builtins, 'input', lambda *a: '2.5')
+    assert menu._run('watch_custom', StubPSU(), _menu_args(), {}, None, None) == monitor.EXIT_OK
+    assert seen == [2.5]
+
+    monkeypatch.setattr(builtins, 'input', lambda *a: 'soon')
+    assert (
+        menu._run('watch_custom', StubPSU(), _menu_args(), {}, None, None)
+        == monitor.EXIT_ERROR
+    )
+
+
+def test_the_web_dashboard_entry_starts_the_server(monkeypatch):
+    seen = []
+    monkeypatch.setattr(monitor, 'run_dashboard', lambda args, cfg: seen.append(args.port) or 0)
+    assert menu._run('dashboard_web', None, _menu_args(), {'port': 8899}, None, None) == monitor.EXIT_OK
+    assert seen == [8899]
+
+
+def test_the_custom_export_entry_prompts_for_window_and_columns(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        monitor,
+        'run_export',
+        lambda args, cfg: seen.append((args.from_spec, args.columns)) or monitor.EXIT_OK,
+    )
+    answers = iter(['2h', 'temp,fan'])
+    monkeypatch.setattr(builtins, 'input', lambda *a: next(answers))
+    assert menu._run('export_custom', None, _menu_args(), {}, None, None) == monitor.EXIT_OK
+    assert seen == [('2h', 'temp,fan')]
+
+
+def test_the_fan_auto_entry_writes_the_curve_mode(monkeypatch):
+    written = []
+    monkeypatch.setattr(
+        monitor,
+        'run_write_controls',
+        lambda psu, args: written.append((args.fan_mode, args.fan_duty)) or monitor.EXIT_OK,
+    )
+    monkeypatch.setattr(builtins, 'input', lambda *a: 'y')
+    assert menu._run('fan_auto', StubPSU(), _menu_args(), {}, None, None) == monitor.EXIT_OK
+    assert written == [(monitor.FAN_MODE_AUTO, None)]
+
+
+def test_the_zero_fan_entry_validates_then_writes(monkeypatch, capsys):
+    written = []
+    monkeypatch.setattr(
+        monitor,
+        'run_write_controls',
+        lambda psu, args: written.append(args.zero_fan) or monitor.EXIT_OK,
+    )
+    monkeypatch.setattr(builtins, 'input', lambda *a: 'maybe')
+    assert menu._run('zero_fan', StubPSU(), _menu_args(), {}, None, None) == monitor.EXIT_ERROR
+    answers = iter(['on', 'n'])
+    monkeypatch.setattr(builtins, 'input', lambda *a: next(answers))
+    assert menu._run('zero_fan', StubPSU(), _menu_args(), {}, None, None) == monitor.EXIT_OK
+    assert written == []
+    answers = iter(['on', 'y'])
+    monkeypatch.setattr(builtins, 'input', lambda *a: next(answers))
+    assert menu._run('zero_fan', StubPSU(), _menu_args(), {}, None, None) == monitor.EXIT_OK
+    assert written == ['on']
+
+
+def test_the_rail_entry_validates_then_writes(monkeypatch):
+    written = []
+    monkeypatch.setattr(
+        monitor,
+        'run_write_controls',
+        lambda psu, args: written.append(args.set_rail) or monitor.EXIT_OK,
+    )
+    monkeypatch.setattr(builtins, 'input', lambda *a: 'both')
+    assert menu._run('rail', StubPSU(), _menu_args(), {}, None, None) == monitor.EXIT_ERROR
+    answers = iter(['multi', 'y'])
+    monkeypatch.setattr(builtins, 'input', lambda *a: next(answers))
+    assert menu._run('rail', StubPSU(), _menu_args(), {}, None, None) == monitor.EXIT_OK
+    assert written == ['multi']
+
+
+def test_the_ocp_load_entry_prompts_for_a_file(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        monitor,
+        'run_ocp_thresholds',
+        lambda psu, args: seen.append(args.load_thresholds) or monitor.EXIT_OK,
+    )
+    monkeypatch.setattr(builtins, 'input', lambda *a: '')
+    assert menu._run('ocp_load', StubPSU(), _menu_args(), {}, None, None) == monitor.EXIT_ERROR
+    answers = iter(['/tmp/ocp.json', 'y'])
+    monkeypatch.setattr(builtins, 'input', lambda *a: next(answers))
+    assert menu._run('ocp_load', StubPSU(), _menu_args(), {}, None, None) == monitor.EXIT_OK
+    assert seen == ['/tmp/ocp.json']
+
+
+def test_prompts_treat_eof_as_cancel(monkeypatch, capsys):
+    def eof(*_a):
+        raise EOFError
+
+    monkeypatch.setattr(builtins, 'input', eof)
+    assert menu._run('fan_duty', StubPSU(), _menu_args(), {}, None, None) == monitor.EXIT_ERROR
+    assert menu._run('buzzer', StubPSU(), _menu_args(), {}, None, None) == monitor.EXIT_OK
