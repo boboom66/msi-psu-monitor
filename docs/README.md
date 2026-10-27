@@ -39,8 +39,9 @@ records are snapshots, not a second source of current status.
 
 ## Source and research material
 
-The sibling [`psu-file` reference archive](../../psu-file/README_文件索引.md)
-contains source specifications, MSI Center reference code, screenshots, and
-original requirements. It is background evidence; current runtime behavior is
-defined by this repository's code, tests, [protocol reference](protocol.md),
-and [release-readiness record](../bug-audit/RELEASE_READINESS.md).
+The workspace may also contain a separate `psu-file` reference archive with
+source specifications, MSI Center reference code, screenshots, and original
+requirements. That archive is not part of this Git repository or release
+package. It is background evidence; current runtime behavior is defined by this
+repository's code, tests, [protocol reference](protocol.md), and
+[release-readiness record](../bug-audit/RELEASE_READINESS.md).
