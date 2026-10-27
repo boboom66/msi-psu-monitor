@@ -37,6 +37,9 @@ def _run_on_pty(argv, drive, timeout=15.0):
     TERM is exported explicitly: GitHub runners have TERM unset, and
     ``--watch``/``--dashboard-text`` refuse to draw on a terminal without one
     (that is the documented plain-stream fallback, not a bug to test here).
+
+    The interrupt is a ``^C`` byte on the PTY line discipline, so the child's
+    ``finally`` clause runs exactly as it would for a human typing Ctrl-C.
     """
     master, slave = pty.openpty()
     env = _sensors_env()
@@ -53,14 +56,21 @@ def _run_on_pty(argv, drive, timeout=15.0):
     try:
         return drive(master, proc, timeout)
     finally:
-        os.close(master)
-        if proc.poll() is None:
-            proc.terminate()
+        # Stop via the line discipline first, then SIGKILL as a backstop: a
+        # SIGTERM handler that raises KeyboardInterrupt inside the child is
+        # *good* there (it triggers the tty restore), but the ``finally`` in
+        # this test must never hang the suite if the child wedges.
         try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
+            os.write(master, b'\x03')
+        except OSError:
+            pass
+        if proc.poll() is None:
             proc.kill()
+        try:
             proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        os.close(master)
 
 
 def _read_until(master, predicate, deadline, chunk=65536):
@@ -111,10 +121,14 @@ def test_watch_redraws_in_place_and_restores_the_cursor():
             lambda data: data.count(b'MSI PSU') >= 2,
             deadline,
         )
-        # Write ^C through the master so the process sees a real Ctrl-C and its
-        # finally-clause has time to run before the PTY closes.
+        # ^C through the master: the child sees a real Ctrl-C, its finally
+        # clause restores the cursor, and the bytes appear on the master.
         os.write(master, b'\x03')
-        proc.wait(timeout=10)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
         buffer += _drain(master)
         return proc.returncode, buffer
 
@@ -165,7 +179,11 @@ def test_dashboard_text_exits_cleanly_on_sigint():
         )
         time.sleep(0.3)  # let the first frame settle before interrupting
         os.write(master, b'\x03')
-        proc.wait(timeout=10)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
         buffer += _drain(master)
         return proc.returncode, buffer
 
@@ -207,14 +225,21 @@ def test_watch_on_a_tiny_pty_streams_instead_of_redrawing():
             deadline,
         )
         os.write(master, b'\x03')
-        proc.wait(timeout=10)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
         buffer += _drain(master)
         code = proc.returncode
     finally:
         os.close(master)
         if proc.poll() is None:
-            proc.terminate()
-            proc.wait(timeout=10)
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
     assert code == 0
     text = buffer.decode('utf-8', 'replace')
     # Either the warning was printed, or the frames streamed plainly.
