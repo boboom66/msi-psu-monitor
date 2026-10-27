@@ -28,6 +28,7 @@ SHIPPED_MODULES = (
     'menu',
     'monitor',
     'protocol',
+    'psu',
     'state',
     'termdash',
 )

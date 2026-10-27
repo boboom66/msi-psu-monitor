@@ -322,5 +322,7 @@ def test_the_psu_shortcut_is_shipped_by_every_installer():
     assert '"psu:psu"' in BUILD_DEB_SH.read_text(encoding='utf-8')
     assert '"$SRC/psu"' in INSTALL_BINARY_SH.read_text(encoding='utf-8')
     assert '"$PREFIX/bin/psu"' in UNINSTALL_BINARY_SH.read_text(encoding='utf-8')
-    assert 'psu menu "$@"' in BUILD_BINARY_SH.read_text(encoding='utf-8')
+    build_binary = BUILD_BINARY_SH.read_text(encoding='utf-8')
+    assert 'linux-$ARCH/psu' in build_binary
+    assert 'menu "$@"' in build_binary
     assert '/usr/bin/psu' in BUILD_DEB_BINARY_SH.read_text(encoding='utf-8')

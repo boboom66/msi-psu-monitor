@@ -199,8 +199,8 @@ def test_decode_key_covers_arrows_enter_quit_and_digits():
 
 
 def test_render_shows_groups_selection_and_scrolls():
-    frame, offset = menu.render_menu(menu.ITEMS, 0, 0, 80, 24, color=False)
-    assert 'Monitor' in frame and 'History' in frame and 'System' in frame
+    frame, offset = menu.render_menu(menu.ITEMS, 0, 0, 80, 40, color=False)
+    assert all(group in frame for group in menu.GROUPS)
     assert '> 1)' in frame
     assert 'Up/Down move' in frame
     assert 'Snapshot: single snapshot' in frame
@@ -623,7 +623,7 @@ def test_real_pty_keystrokes_drive_the_interactive_menu(monkeypatch):
         os.close(master)
         os.close(slave)
     assert code == monitor.EXIT_OK
-    assert runs == ['watch']
+    assert runs == ['once_json']
     assert 'last:' in text
 
 
