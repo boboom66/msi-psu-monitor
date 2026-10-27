@@ -106,7 +106,10 @@ def test_a_truncated_ts_model_name_is_refused_instead_of_guessed(name):
     (``CPSU.cs``), so the trailing "S" is exactly what a short read loses -- and
     the generic ``Ai1300``/``Ai1600`` branch still matches what is left.
     """
-    psu = _psu_1300ts(commands={(0xFA, 0x51): (name + '\x00').encode()})
+    psu = _psu_1300ts(
+        commands={(0xFA, 0x51): (name + '\x00').encode()},
+        registers={0x11: None},
+    )
     assert psu.variant is None
     assert 'error' in psu.get_sensors()
 
@@ -115,7 +118,10 @@ def test_a_truncated_ts_model_name_is_refused_instead_of_guessed(name):
     'name,variant', [('MPG Ai1600TS', 'mpg_ai1600ts'), ('MPG Ai1300TS', 'mpg_ai1300ts')]
 )
 def test_a_complete_ts_model_name_still_dispatches(name, variant):
-    psu = _psu_1300ts(commands={(0xFA, 0x51): (name + '\x00').encode()})
+    psu = _psu_1300ts(
+        commands={(0xFA, 0x51): (name + '\x00').encode()},
+        registers={0x11: (name + '\x00').encode()},
+    )
     assert psu.variant == variant
 
 
@@ -228,7 +234,10 @@ def test_read_blackbox_stops_at_gap():
 
 
 def test_unknown_variant_refuses_to_parse():
-    psu = _psu_1300ts(commands={(0xFA, 0x51): b'Mystery 9000\x00'})
+    psu = _psu_1300ts(
+        commands={(0xFA, 0x51): b'Mystery 9000\x00'},
+        registers={0x11: b'Mystery 9000\x00'},
+    )
     assert psu.variant is None
     bulk = {(0x51, 0xE0): bytes(62)}
     psu.hid.commands.update(bulk)
@@ -772,7 +781,10 @@ def test_a_refused_zero_fan_write_returns_false():
 
 
 def test_zero_fan_and_buzzer_are_refused_on_a_meg_model():
-    psu = _psu_1300ts(commands={(0xFA, 0x51): b'MEG Ai1300P' + bytes([0])})
+    psu = _psu_1300ts(
+        commands={(0xFA, 0x51): b'MEG Ai1300P' + bytes([0])},
+        registers={0x11: b'MEG Ai1300P' + bytes([0])},
+    )
     psu.hid = RecordingHID()
     assert psu.set_zero_fan(True) is False
     assert psu.silence_buzzer() is False
@@ -794,7 +806,10 @@ def test_read_zero_fan_uses_the_fourth_fanduty_byte():
 
 
 def test_set_multirail_ocp_writes_c0_then_saves():
-    psu = _psu_1300ts(commands={(0xFA, 0x51): b'MEG Ai1300P' + bytes([0])})
+    psu = _psu_1300ts(
+        commands={(0xFA, 0x51): b'MEG Ai1300P' + bytes([0])},
+        registers={0x11: b'MEG Ai1300P' + bytes([0])},
+    )
     psu.hid = RecordingHID()
     assert psu.set_multirail_ocp(True) is True
     assert psu.hid.writes == [(0x50, 0xC0, 2), (0x50, 0xF1)]
@@ -811,7 +826,10 @@ def test_set_multirail_ocp_is_refused_on_a_ts_model():
 
 
 def test_read_multirail_ocp_gates_on_the_model():
-    psu = _psu_1300ts(commands={(0xFA, 0x51): b'MEG Ai1300P' + bytes([0])})
+    psu = _psu_1300ts(
+        commands={(0xFA, 0x51): b'MEG Ai1300P' + bytes([0])},
+        registers={0x11: b'MEG Ai1300P' + bytes([0])},
+    )
     psu.hid = RecordingHID(registers={0xC0: bytes([2])})
     assert psu.read_multirail_ocp() is True
     psu.hid = RecordingHID(registers={0xC0: bytes([1])})
@@ -835,7 +853,10 @@ def test_read_multirail_ocp_refuses_an_undefined_byte():
 
 
 def test_read_vin_decodes_volts_on_a_non_ts_model():
-    psu = _psu_1300ts(commands={(0xFA, 0x51): b'MEG Ai1300P' + bytes([0])})
+    psu = _psu_1300ts(
+        commands={(0xFA, 0x51): b'MEG Ai1300P' + bytes([0])},
+        registers={0x11: b'MEG Ai1300P' + bytes([0])},
+    )
     psu.hid = RecordingHID(registers={0x20: bytes([0x73, 0x08])})
     assert psu.read_vin() == (230.0, 'V')
 
@@ -883,7 +904,10 @@ def test_read_alert_status_accepts_the_ai1600t_13_byte_bitmap():
 
 
 def test_get_sensors_includes_vin_on_a_non_ts_model():
-    psu = _psu_1300ts(commands={(0xFA, 0x51): b'MEG Ai1300P' + bytes([0])})
+    psu = _psu_1300ts(
+        commands={(0xFA, 0x51): b'MEG Ai1300P' + bytes([0])},
+        registers={0x11: b'MEG Ai1300P' + bytes([0])},
+    )
     psu.hid = RecordingHID(registers={0x20: bytes([0x73, 0x08])})
     psu.hid.read_all = lambda: bytes(64)
     sensors = psu.get_sensors()
@@ -1005,3 +1029,149 @@ def test_the_init_handshake_stops_after_three_failed_attempts(monkeypatch):
     assert psu.product == ''
     assert hid.calls == 3
     assert sleeps == [0.5, 1.0]
+
+
+# ---- REV6 0x11 / 0x2C and the per-register fallback ----------------------
+
+
+def _scalar_register_payloads():
+    """Valid LINEAR11 words for every register the fallback reads."""
+    return {
+        0x24: _u16(_encode(96, -3)),  # 12.0 V
+        0x25: _u16(_encode(50, -1)),  # 25.0 A
+        0x26: _u16(_encode(40, -3)),  # 5.0 V
+        0x27: _u16(_encode(6, -1)),  # 3.0 A
+        0x28: _u16(_encode(211, -6)),  # 3.296875 V -> 3.297
+        0x29: _u16(_encode(4, -1)),  # 2.0 A
+        0x2A: _u16(_encode(300, 0)),  # 300 W
+        0x2B: _u16(_encode(92, 0)),  # 92 %
+        0x30: _u16(_encode(45, 0)),  # 45 C
+        0x40: _u16(_encode(900, 0)),  # 900 RPM
+    }
+
+
+def _pin_payload(values):
+    return b''.join(_u16(_encode(int(round(value * 2)), -1)) for value in values)
+
+
+PIN_VALUES = [8.0, 8.5, 9.0, 8.0, 7.5, 8.0, 7.0, 7.5, 8.0, 7.0, 6.5, 7.0]
+
+
+def test_iout_12_4_decodes_both_pin_sets():
+    psu = _psu_1300ts()
+    psu.hid = FakeHID(registers={0x2C: _pin_payload(PIN_VALUES)})
+    assert psu.supports_pin_currents
+    assert psu.read_pin_currents() == {
+        'pins_1_6': PIN_VALUES[:6],
+        'pins_7_12': PIN_VALUES[6:],
+    }
+
+
+@pytest.mark.parametrize('payload', [None, b'', bytes(23)])
+def test_iout_12_4_rejects_a_missing_or_short_reply(payload):
+    psu = _psu_1300ts()
+    psu.hid = FakeHID(registers={0x2C: payload})
+    assert psu.read_pin_currents() is None
+
+
+def test_iout_12_4_is_not_probed_on_a_meg_model():
+    psu = _psu_1300p()
+    psu.hid = FakeHID(registers={0x2C: _pin_payload(PIN_VALUES)})
+    assert not psu.supports_pin_currents
+    assert psu.read_pin_currents() is None
+
+
+def test_the_model_register_repairs_a_truncated_handshake():
+    """0x11 is the 12-byte source of truth; the handshake may stop at 11."""
+    psu = _psu_1300ts(commands={(0xFA, 0x51): b'MPG Ai1300T\x00'})
+    assert psu.product == 'MPG Ai1300TS'
+    assert psu.variant == 'mpg_ai1300ts'
+
+
+def test_a_non_model_product_register_does_not_override_the_handshake():
+    psu = _psu_1300ts(registers={0x11: b'MSI\x00'})
+    assert psu.product == 'MPG Ai1300TS'
+    assert psu.variant == 'mpg_ai1300ts'
+
+
+def test_read_model_caps_the_documented_twelve_bytes_and_cleans_the_text():
+    psu = _psu_1300ts()
+    psu.hid = FakeHID(registers={0x11: b'MPG Ai1600TS EXTRA'})
+    assert psu.read_model() == 'MPG Ai1600TS'
+    psu.hid = FakeHID(registers={0x11: b'MPG Ai1300TS\x01'})
+    assert psu.read_model() == 'MPG Ai1300TS'
+
+
+def test_read_model_stops_at_the_first_nul():
+    """A NUL ends the ASCII string; text after it is not part of the model."""
+    psu = _psu_1300ts()
+    psu.hid = FakeHID(registers={0x11: b'MPG\x00Ai1300TS\x01'})
+    assert psu.read_model() == 'MPG'
+
+
+def test_read_model_is_none_when_the_register_naks():
+    psu = _psu_1300ts()
+    psu.hid = FakeHID()
+    assert psu.read_model() is None
+
+
+def test_register_fallback_replaces_a_missing_bulk_frame():
+    registers = _scalar_register_payloads()
+    registers[0x2C] = _pin_payload(PIN_VALUES)
+    psu = _psu_1300ts(commands={(0x51, 0xE0): None}, registers=registers)
+    sensors = psu.get_sensors()
+    assert sensors['read_mode'] == 'registers'
+    assert 'payload_error' not in sensors
+    assert sensors['vout_12v'] == (12.0, 'V')
+    assert sensors['iout_12v_total'] == (25.0, 'A')
+    assert sensors['vout_5v'] == (5.0, 'V')
+    assert sensors['iout_5v'] == (3.0, 'A')
+    assert sensors['vout_3v3'] == (3.296, 'V')
+    assert sensors['iout_3v3'] == (2.0, 'A')
+    assert sensors['power_total'] == (300.0, 'W')
+    assert sensors['efficiency'] == (92.0, '%')
+    assert sensors['temp'] == (45.0, '\u00b0C')
+    assert sensors['fan_rpm'] == (900, 'RPM')
+    assert sensors['iout_pins'] == (PIN_VALUES, 'A')
+
+
+def test_register_fallback_keeps_the_short_frame_reason():
+    psu = _psu_1300ts(
+        commands={(0x51, 0xE0): bytes(10)},
+        registers=_scalar_register_payloads(),
+    )
+    sensors = psu.get_sensors()
+    assert 'got 10 of 44 bytes' in sensors['payload_error']
+    assert sensors['read_mode'] == 'registers'
+    assert sensors['vout_12v'] == (12.0, 'V')
+
+
+def test_register_fallback_omits_registers_that_do_not_answer():
+    psu = _psu_1300ts(
+        commands={(0x51, 0xE0): None},
+        registers={0x24: _u16(_encode(96, -3))},
+    )
+    sensors = psu.get_sensors()
+    assert sensors['read_mode'] == 'registers'
+    assert sensors['vout_12v'] == (12.0, 'V')
+    assert 'iout_12v_total' not in sensors
+    assert 'power_total' not in sensors
+    assert 'iout_pins' not in sensors
+
+
+def test_register_fallback_is_skipped_for_an_unknown_model():
+    """The register byte order is model-dependent, so an unknown model stays refused."""
+    registers = {
+        0x10: b'MSI\x00',
+        0x11: b'MSI PSU 9000\x00',
+        0x12: b'1.0',
+        0x13: bytes([4]) + b'SN01',
+        0x24: _u16(_encode(96, -3)),
+    }
+    psu = MSIPSU(FakeHID(registers=registers, commands={(0xFA, 0x51): b'MSI PSU 9000\x00'}))
+    psu.init()
+    assert psu.variant is None
+    sensors = psu.get_sensors()
+    assert 'error' in sensors
+    assert 'vout_12v' not in sensors
+    assert 'read_mode' not in sensors

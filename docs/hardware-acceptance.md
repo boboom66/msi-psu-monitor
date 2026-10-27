@@ -50,7 +50,7 @@ sudo ./acceptance.sh
 1. 版本/身份；
 2. `--once` 文本、JSON、Prometheus；
 3. `-O` 文件输出；
-4. `--ocp`、`--show-log`、`--show-alert-log`；
+4. `--ocp`、`--pins`（0x2C 每针电流，支持/不支持机型都 exit 0）、`--show-log`、`--show-alert-log`；
 5. `--watch` 多帧；
 6. daemon 两次采样 → state/history/prom/latest；
 7. Dashboard 的 `/`、`/api/state`、`/api/live`、`/api/export`；
@@ -95,7 +95,8 @@ sudo ./acceptance.sh --writes
 报告中的 MANUAL 项不会自动 PASS：
 
 - 与 MSI Center 对照电压/电流/功率/效率/温度/风扇；
-- 12V-2x6 每针电流与状态在负载下是否合理；
+- 12V-2x6 每针电流与状态在负载下是否合理（`--pins` 与 `--ocp` 的 C1h 针电流对照）；
+- 0x11 型号是否完整（TS 末尾 `S` 未丢失；参见 [verify.md](verify.md) §8 第 2d 项）；
 - 待机是否误报、真实告警是否出现并恢复；
 - 若执行 `--writes`，风扇声音/转速是否变化，Zero Fan/蜂鸣器是否符合预期；
 - MEG 机型：`AC Input` 是否接近 220-240 V；多轨切换后是否保持。

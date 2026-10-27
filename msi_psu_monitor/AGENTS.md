@@ -8,8 +8,8 @@ runtime imports.
 
 | Module | Role |
 |--------|------|
-| `protocol.py` | HID framing, register map, variant dispatch, init-handshake retry, `MSIPSU.get_sensors()`, fan/Zero Fan/buzzer/multirail/OCP-threshold writes, VIN, alert/black-box/OCP reads, `HIDDevice` + `flock` |
-| `monitor.py` | CLI: argument validation, three sensor formatters + three `--ocp` formatters, exit codes, fan/Zero Fan/buzzer/multirail/OCP-threshold writes, `--dump-thresholds`/`--ocp-set`/`--load-thresholds`, `--export`, `--show-log`, `--show-alert-log`, `--ocp`, `--dump-config`, device selection, `open_psu()` |
+| `protocol.py` | HID framing, register map, variant dispatch, init-handshake retry, `MSIPSU.get_sensors()`, per-register fallback (`read_register_sensors`), MFR_MODEL (`read_model`), IOUT_12+4 (`read_pin_currents`), fan/Zero Fan/buzzer/multirail/OCP-threshold writes, VIN, alert/black-box/OCP reads, `HIDDevice` + `flock` |
+| `monitor.py` | CLI: argument validation, three sensor formatters + three `--ocp`/`--pins` formatters, exit codes, fan/Zero Fan/buzzer/multirail/OCP-threshold writes, `--dump-thresholds`/`--ocp-set`/`--load-thresholds`, `--export`, `--show-log`, `--show-alert-log`, `--ocp`, `--pins`, `--dump-config`, device selection, `open_psu()` |
 | `state.py` | `MonitorState` (avg + energy integral), `state.json` atomic persistence, `daily-*.log` history, `alerts-*.log` audit trail, `latest.json` live cache, `--from`/`--columns`/`build_export` |
 | `daemon.py` | Resident sample loop: 1 s alerts, 30 s atomic prometheus incl. the OCP block (`msi_psu_ocp_*` on TS / `msi_psu_multirail_ocp` on MEG P; variant-gated, refreshed every write because C1h is a 5 s rolling average), the same file rewritten with `msi_psu_up 0` + reason on a failed read, 1 s `latest.json`, alert-log append, 60 s history, rescan after 5 failures |
 | `dashboard.py` | Loopback-only `http.server` reading the history/`latest.json` files; non-loopback Host → 421, CSP/Permissions-Policy on every response; charts are hand-drawn `<canvas>` JS |
@@ -25,7 +25,7 @@ runtime imports.
   (`CMD_TIMEOUT_MS`), 2-byte echo header stripped, NAK (`0xFE`) → `None`. On top of that,
   `0xC0` and `0xC1` are **overloaded addresses** (see Invariants) — the model gate, not the
   payload length, decides which command you are talking to.
-- Registers: `0x10-0x13` ident, `0x20` VIN (non-TS MSI-compatible extra), `0x22-0x42` sensors, `0x41` fan setting,
+- Registers: `0x10-0x13` ident (`0x11` MFR_MODEL is 12 ASCII bytes and is authoritative over the 11-byte handshake), `0x20` VIN (non-TS MSI-compatible extra), `0x22-0x42` sensors, `0x2C` IOUT_12+4 (24 bytes, 12 pins, 5 s averages), `0x41` fan setting,
   `0x42` fan duty, `0x43` Zero Fan enable (write-only), `0xC2` buzzer switch,
   `0xC0` multirail **or** 12V-2x6 OCP config (TS only),
   `0xC1` OCP state (InfoID 0) / alert log (InfoID 1-10), `0xD0/0xD1` control,
@@ -123,6 +123,22 @@ runtime imports.
   or unknown-model requests. CI only proves demo/mock behaviour -- bench acceptance is
   required. The separate 1-byte multirail switch is `--set-rail` (MEG P only, write +
   `F1h` + read-back); never merge the two C0 meanings.
+- **`--pins` is the read-only 0x2C view**: `MSIPSU.supports_pin_currents` (TS variants
+  only) guards `read_pin_currents()`; a MEG model gets the explanation and `EXIT_OK`.
+  REV6 defines 24 bytes = 12 LINEAR11 pin currents (12V5 pins 1-6, then 12V3 pins 7-12)
+  as **5-second averages**. Do not merge it with `--ocp`: 0x2C is the raw pin view,
+  0xC1 is the alert/black-box state. A supported model that NAKs 0x2C is a real read
+  failure (`EXIT_ERROR`).
+- **0x11 MFR_MODEL is the model source of truth**: `init()` reads the 12-byte block and
+  prefers it when it names a model containing `Ai`. The 0xFA51 handshake may be 11 bytes
+  and would truncate `MPG Ai1300TS` to `MPG Ai1300T`, which must never be decoded as a
+  MEG. If 0x11 also fails, the truncated name stays refused (`variant=None`).
+- **A failed 0xE0 read falls back to single registers**: `read_register_sensors()` reads
+  `0x24`-`0x2B`, `0x30`, `0x40` individually (plus `0x2C` on TS), merges only the
+  registers that answered, and sets `read_mode="registers"`. A short frame keeps
+  `payload_error` for diagnosis; the text format then prints a `NOTE` instead of hiding
+  the values, and Prometheus exports `msi_psu_register_fallback 1`. An unknown model
+  still refuses to parse (the byte order is model-dependent).
 - **VIN is an extra, not REV6**: `read_vin()` is tried on the non-TS models only and is
   omitted on NAK; `format_text` calls it `AC Input` and Prometheus exports
   `msi_psu_input_voltage`. Units are volts (`ValueCalc` direct), not millivolts.
@@ -147,7 +163,7 @@ runtime imports.
 ## Audit invariants (2026-10-22)
 
 - **`--once` is a mode, not a harmless extra**: it is rejected with
-  `--export/--show-log/--show-alert-log/--ocp/--dump-thresholds` (exit 2), because those
+  `--export/--show-log/--show-alert-log/--ocp/--pins/--dump-thresholds` (exit 2), because those
   modes would ignore it. Control/threshold writes may still carry `--once`.
 - **Config-derived defaults warn when a mode ignores them**: `[monitor] output/serial`
   on `--dashboard`, and `serial` on `--export`/`--show-alert-log`, log a warning; explicit

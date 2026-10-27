@@ -150,7 +150,7 @@ msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
                 [--export] [--from FROM_SPEC]
                 [--columns COLUMNS] [--dashboard] [--dashboard-text] [--menu] [--port PORT] [--show-log]
                 [--show-alert-log]
-                [--ocp] [--dump-thresholds] [--ocp-set ...]
+                [--ocp] [--pins] [--dump-thresholds] [--ocp-set ...]
                 [--load-thresholds FILE] [--no-alerts] [--config CONFIG]
                 [--dump-config] [--verbose] [--quiet] [--version] [menu]
 
@@ -163,7 +163,7 @@ corresponding `msi-psu-monitor` invocations.
                    interval, 2.0)
   -i, --interval   Polling interval in seconds (only valid with --watch)
   -o, --once       Read sensors once and exit (also the default; not with
-                   --export/--show-log/--show-alert-log/--ocp/--dump-thresholds)
+                   --export/--show-log/--show-alert-log/--ocp/--pins/--dump-thresholds)
   -O, --output     Write output to a file instead of stdout (with --watch the
                    frames are appended to that file; --dashboard has no output)
       --serial     Select one of several PSUs by serial number
@@ -187,7 +187,7 @@ corresponding `msi-psu-monitor` invocations.
                    files: --once/--serial/--format/-O do not apply)
       --dashboard-text  Live terminal dashboard: coloured bars in the console,
                    no browser; --once/--watch/--export/--format/-O do not apply
-      --menu       Full interactive menu over every action (22 entries grouped
+      --menu       Full interactive menu over every action (23 entries grouped
                    Monitor/History/Writes/System): arrows or digits select,
                    Enter runs, q/Esc quits; write entries prompt for their
                    parameters and ask for confirmation. The header shows the
@@ -199,6 +199,10 @@ corresponding `msi-psu-monitor` invocations.
       --show-alert-log  Print the local alerts-*.log (MSI AlertLog equivalent)
       --ocp        Show the OCP view (C0h/C1h): 12V-2x6 thresholds + state on
                    the MPG TS models, the multirail flag on the MEG P models
+      --pins       Read IOUT_12+4 (0x2C) directly: the 12 per-pin currents of
+                   both 12V-2x6 connectors as 5 s averages (MPG TS models);
+                   text, json or prometheus. A model without the register
+                   prints why and exits 0
       --dump-thresholds / --ocp-dump
                    Print the hardware 12V-2x6 OCP thresholds (C0h 8 bytes) as
                    text or JSON; read-only
@@ -234,6 +238,10 @@ sudo msi-psu-monitor --show-log
 
 # Read-only 12V-2x6 OCP limits and per-connector state
 sudo msi-psu-monitor --ocp
+
+# Per-pin currents straight from IOUT_12+4 (0x2C, 5 s averages, MPG TS)
+sudo msi-psu-monitor --pins
+sudo msi-psu-monitor --pins -f json
 
 # Fan control: set 75% and verify, then hand back to the PSU curve
 sudo msi-psu-monitor --fan-duty 75

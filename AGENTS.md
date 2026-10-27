@@ -16,6 +16,7 @@ uv run --group dev coverage run --branch -m pytest -q
 uv run --group dev coverage report --fail-under=90   # source statement floor
 MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --once      # full pipeline, no PSU attached
 MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --ocp       # 12V-2x6 OCP thresholds + state (read-only)
+MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --pins      # 0x2C per-pin currents (read-only, MPG TS)
 MSI_PSU_DEMO_MODEL=ai1300p MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --set-rail multi
 MSI_PSU_DEMO=1 .venv/bin/msi-psu-monitor --show-alert-log
 sudo msi-psu-monitor --once                          # one-shot; hidraw needs root (or the udev uaccess rule)
@@ -38,7 +39,7 @@ Agent progress and evidence for Product v2: `docs/agent-progress/`
 
 ## Gotchas (agent would miss these)
 
-- **契约收口 (2026-10-22)**: `--once` + `--export/--show-log/--show-alert-log/--ocp/--dump-thresholds`
+- **契约收口 (2026-10-22)**: `--once` + `--export/--show-log/--show-alert-log/--ocp/--pins/--dump-thresholds`
   is a usage error; config-sourced `output`/`serial` warn when a mode ignores them; C0h
   `enabled` other than 0/1 is a failed read. See `msi_psu_monitor/AGENTS.md` invariants.
 
@@ -120,6 +121,13 @@ Agent progress and evidence for Product v2: `docs/agent-progress/`
 - **`docs/protocol.md` now matches the code** for 0xE1 (alert status), 0xC1 (alert log
   + OCP state), 0x41/0x42 (fan), 0xC0 (OCP) and 0xF1 (save). Treat the code as truth where
   they differ again, but do not describe implemented registers as "unimplemented".
+- **REV6 0x11 / 0x2C / per-register fallback**: `read_model()` reads the 12-byte
+  MFR_MODEL and is authoritative over the 11-byte handshake (otherwise `MPG Ai1300TS`
+  loses its `S` and would decode as a MEG). `read_pin_currents()` reads 0x2C
+  (24 bytes, 12 LINEAR11 pin currents, 5 s averages, TS only) and backs `--pins`.
+  When 0xE0 is missing/short, `read_register_sensors()` fills 0x24-0x2B/0x30/0x40
+  and sets `read_mode="registers"`; never treat a partial fallback as a full sample,
+  and never let `format_text` hide those values behind `payload_error`.
 - **0xC0 is an overloaded register**: the same address is `MULTIRAIL_OCP` (1 byte, `==2`,
   MEG P models only) and `OCP12V2x6_CONFIG` (8 bytes, MPG TS models only), with
   complementary model gates and MEG Ai1600T answering neither (`CPSU.cs:823-832` vs

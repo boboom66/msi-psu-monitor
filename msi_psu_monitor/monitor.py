@@ -146,9 +146,14 @@ def format_text(sensors):
     lines.append(f'  FW: {sensors.get("fw_revision", "")}  Serial: {sensors.get("serial", "")}')
     lines.append('')
 
-    reason = sensors.get('error') or sensors.get('payload_error')
+    reason = sensors.get('error')
     if reason:
         lines.append(f'  ERROR   : {reason}')
+        return '\n'.join(lines)
+    if sensors.get('payload_error') and not has_readings(sensors):
+        # The bulk frame was short and no register fallback answered: this is a
+        # failed sample, not a healthy one with a note attached.
+        lines.append(f'  ERROR   : {sensors["payload_error"]}')
         return '\n'.join(lines)
 
     for key, label in _VOLTAGE_LABELS.items():
@@ -227,6 +232,10 @@ def format_text(sensors):
     if 'total_energy' in sensors:
         lines.append(f'  Total energy: {_value(sensors["total_energy"]):.1f} kWh')
 
+    if sensors.get('read_mode') == 'registers':
+        detail = sensors.get('payload_error') or 'the 0xE0 bulk read did not answer'
+        lines.append(f'  NOTE    : {detail}; values read from individual registers')
+
     return '\n'.join(lines)
 
 
@@ -266,6 +275,14 @@ def format_prometheus(sensors):
         lines.append('# HELP msi_psu_error_info Why the last sample carried no readings')
         lines.append('# TYPE msi_psu_error_info gauge')
         lines.append(f'msi_psu_error_info{{reason="{_label(_missing_payload(sensors))}"}} 1')
+    lines.append(
+        '# HELP msi_psu_register_fallback 1 when values came from individual registers '
+        'because the 0xE0 bulk read failed'
+    )
+    lines.append('# TYPE msi_psu_register_fallback gauge')
+    lines.append(
+        f'msi_psu_register_fallback{{}} {1 if sensors.get("read_mode") == "registers" else 0}'
+    )
     lines.append('# HELP msi_psu_info MSI PSU information')
     lines.append('# TYPE msi_psu_info gauge')
     lines.append(
@@ -496,6 +513,10 @@ OCP_UNSUPPORTED = (
 MULTIRAIL_UNSUPPORTED = (
     'Multirail OCP status is not available on this model '
     '(the 1-byte 0xC0 flag exists only on the MEG Ai1300P / MEG Ai1000P).'
+)
+PINS_UNSUPPORTED = (
+    '12V-2x6 per-pin currents are not available on this model '
+    '(0x2C exists only on the MPG Ai1600TS / MPG Ai1300TS).'
 )
 
 
@@ -874,6 +895,110 @@ MULTIRAIL_FORMATTERS = {
     'text': format_multirail_text,
     'json': format_multirail_json,
     'prometheus': format_multirail_prometheus,
+}
+
+
+def _pin_connector_rows(data):
+    """Yield (connector, rail, pins, total, min, max, imbalance) for 0x2C data.
+
+    REV6 orders IOUT_12+4 as 12V5 pins 1-6, then 12V3 pins 7-12. A missing or
+    malformed half yields an empty row instead of raising: the formatters must
+    not turn a partial device read into a traceback.
+    """
+    for index, (rail, key) in enumerate((('12V5', 'pins_1_6'), ('12V3', 'pins_7_12')), start=1):
+        raw = data.get(key) if isinstance(data, dict) else None
+        pins = list(raw) if isinstance(raw, (list, tuple)) else []
+        try:
+            values = [float(pin) for pin in pins]
+        except (TypeError, ValueError, OverflowError):
+            values = []
+        total = sum(values)
+        low = min(values) if values else 0.0
+        high = max(values) if values else 0.0
+        yield index, rail, values, total, low, high, high - low
+
+
+def format_pins_text(data, product):
+    """Format the 0x2C per-pin currents as text."""
+    lines = [f'MSI PSU: {product}' if product else 'MSI PSU']
+    lines.append('12V-2x6 per-pin currents (0x2C, 5 s averages):')
+    for index, rail, pins, total, low, high, spread in _pin_connector_rows(data):
+        values = '  '.join(f'{pin:6.2f}' for pin in pins)
+        lines.append(f'  Conn{index} ({rail}): {values} A')
+        lines.append(
+            f'    total {total:7.2f} A   min {low:6.2f} A   max {high:6.2f} A   '
+            f'imbalance {spread:5.2f} A'
+        )
+    return '\n'.join(lines)
+
+
+def format_pins_json(data, product):
+    """Format the 0x2C per-pin currents as JSON."""
+    connectors = []
+    all_pins = []
+    for index, rail, pins, total, low, high, spread in _pin_connector_rows(data):
+        all_pins.extend(pins)
+        connectors.append(
+            {
+                'connector': index,
+                'rail': rail,
+                'pins': pins,
+                'total_a': round(total, 3),
+                'min_a': round(low, 3),
+                'max_a': round(high, 3),
+                'imbalance_a': round(spread, 3),
+            }
+        )
+    return json.dumps(
+        {
+            'product': product,
+            'pin_currents': {
+                'register': '0x2C',
+                'average_seconds': 5,
+                'pins': all_pins,
+                'connectors': connectors,
+            },
+        },
+        indent=2,
+    )
+
+
+PINS_AVAILABLE_HELP = (
+    '# HELP msi_psu_pin_current_available 12V-2x6 per-pin current registers '
+    'exposed by this model (1) or not (0)'
+)
+
+
+def format_pins_prometheus(data, product):
+    """Format the 0x2C per-pin currents as prometheus text."""
+    lines = [
+        PINS_AVAILABLE_HELP,
+        '# TYPE msi_psu_pin_current_available gauge',
+        'msi_psu_pin_current_available{} 1',
+        '# HELP msi_psu_pin_current Per-pin current on 12V-2x6 connector in amps',
+        '# TYPE msi_psu_pin_current gauge',
+    ]
+    for index, _rail, pins, _total, _low, _high, _spread in _pin_connector_rows(data):
+        for pin_index, pin in enumerate(pins, start=1):
+            lines.append(f'msi_psu_pin_current{{connector="{index}",pin="{pin_index}"}} {pin}')
+    lines.append('# HELP msi_psu_connector_current Total current per 12V-2x6 connector in amps')
+    lines.append('# TYPE msi_psu_connector_current gauge')
+    for index, _rail, _pins, total, _low, _high, _spread in _pin_connector_rows(data):
+        lines.append(f'msi_psu_connector_current{{connector="{index}"}} {total}')
+    lines.append(
+        '# HELP msi_psu_connector_current_imbalance Pin current spread within a '
+        '12V-2x6 connector in amps'
+    )
+    lines.append('# TYPE msi_psu_connector_current_imbalance gauge')
+    for index, _rail, _pins, _total, _low, _high, spread in _pin_connector_rows(data):
+        lines.append(f'msi_psu_connector_current_imbalance{{connector="{index}"}} {spread}')
+    return '\n'.join(lines)
+
+
+PINS_FORMATTERS = {
+    'text': format_pins_text,
+    'json': format_pins_json,
+    'prometheus': format_pins_prometheus,
 }
 
 OCP_FORMATTERS = {
@@ -1802,6 +1927,52 @@ def run_write_controls(psu, args):
     return EXIT_OK
 
 
+def run_pins(psu, args):
+    """Show the 12V-2x6 per-pin currents (0x2C, read-only, MPG TS only).
+
+    The register is part of REV6's command table for the 12+4 models. A MEG
+    model gets the same "not available" explanation as the OCP view and still
+    exits 0, because an unsupported model is a fact rather than a failure. A
+    supported model that does not answer is a real read fault (exit 1).
+    """
+    product = getattr(psu, 'product', '') or ''
+    if not getattr(psu, 'supports_pin_currents', False):
+        return _emit_pins_unsupported(product, args)
+    data = psu.read_pin_currents()
+    if data is None:
+        logger.error('Error: the PSU did not answer the 0x2C pin-current read.')
+        return EXIT_ERROR
+    emit(PINS_FORMATTERS[args.format](data, product), args.output)
+    return EXIT_OK
+
+
+def _emit_pins_unsupported(product, args):
+    """Explain that this model has no 0x2C register, without failing the run."""
+    if args.format == 'json':
+        emit(
+            json.dumps(
+                {'product': product, 'supported': False, 'reason': PINS_UNSUPPORTED},
+                indent=2,
+            ),
+            args.output,
+        )
+    elif args.format == 'prometheus':
+        emit(
+            '\n'.join(
+                [
+                    PINS_AVAILABLE_HELP,
+                    '# TYPE msi_psu_pin_current_available gauge',
+                    'msi_psu_pin_current_available{} 0',
+                ]
+            ),
+            args.output,
+        )
+    else:
+        header = f'MSI PSU: {product}' if product else 'MSI PSU'
+        emit(f'{header}\n{PINS_UNSUPPORTED}', args.output)
+    return EXIT_OK
+
+
 def run_ocp(psu, args):
     """Show the OCP view for this model.
 
@@ -2018,8 +2189,10 @@ def build_parser():
         + """
 
 Notes:
-  - 12V-2x6 per-pin currents and the total 12V current are 5-second rolling averages.
-  - Efficiency comes from the 0xE0 bulk payload (offset 32), not a separate register.
+  - 12V-2x6 per-pin currents and the total 12V current are 5-second rolling averages;
+    --pins reads the 0x2C block directly.
+  - Efficiency normally comes from the 0xE0 bulk payload (offset 32), or its own
+    0x2B register when the bulk frame is missing or short.
   - Pin order is Conn1 pins 1-6, then Conn2 pins 1-6.
   - Local early-warning limits live in [alerts] (power_w, temp_c, pin_max_a,
     pin_imbalance_a, connector_a, rail_12v_a, rail_5v_a, rail_3v3_a; 0 disables one).
@@ -2052,7 +2225,13 @@ Notes:
         default=None,
         help='Polling interval in seconds (only valid together with --watch)',
     )
-    parser.add_argument('-o', '--once', action='store_true', help='Read sensors once and exit')
+    parser.add_argument(
+        '-o',
+        '--once',
+        action='store_true',
+        help='Read sensors once and exit (not with --export/--show-log/--show-alert-log/'
+        '--ocp/--pins/--dump-thresholds)',
+    )
     parser.add_argument(
         '-O',
         '--output',
@@ -2163,6 +2342,11 @@ Notes:
         'MPG TS models, the multirail mode flag on the MEG P models',
     )
     parser.add_argument(
+        '--pins',
+        action='store_true',
+        help='Show the 12V-2x6 per-pin currents (0x2C, 5 s averages; MPG TS models)',
+    )
+    parser.add_argument(
         '--dump-thresholds',
         '--ocp-dump',
         dest='dump_thresholds',
@@ -2224,6 +2408,48 @@ Notes:
 
 def _validate_args(parser, args):
     """Reject conflicting flag combinations before touching the device."""
+    if args.pins:
+        # A standalone read-only view: it already implies one device pass, so a
+        # cadence, a history mode, another register view or any write is a
+        # combination the user did not ask for.
+        conflicts = []
+        if args.once:
+            conflicts.append('--once')
+        if args.watch is not None:
+            conflicts.append('--watch')
+        if args.interval is not None:
+            conflicts.append('--interval')
+        if args.export:
+            conflicts.append('--export')
+        if args.show_log:
+            conflicts.append('--show-log')
+        if args.show_alert_log:
+            conflicts.append('--show-alert-log')
+        if args.ocp:
+            conflicts.append('--ocp')
+        if args.dump_thresholds:
+            conflicts.append('--dump-thresholds')
+        if args.dashboard:
+            conflicts.append('--dashboard')
+        if args.dashboard_text:
+            conflicts.append('--dashboard-text')
+        if args.menu:
+            conflicts.append('--menu')
+        if args.dump_config:
+            conflicts.append('--dump-config')
+        if args.ocp_set is not None or args.load_thresholds is not None:
+            conflicts.append('a threshold write')
+        if _write_requested(args):
+            conflicts.append('a control write')
+        if args.port is not None:
+            conflicts.append('--port')
+        if args.from_spec is not None or args.columns is not None:
+            conflicts.append('--from/--columns')
+        if conflicts:
+            parser.error(
+                '--pins is a read-only pin-current view: it cannot be combined with '
+                + ', '.join(conflicts)
+            )
     if args.dashboard_text:
         conflicts = []
         if args.once:
@@ -2807,6 +3033,8 @@ def _main():
             sys.exit(EXIT_OK)
         if args.ocp:
             sys.exit(run_ocp(psu, args))
+        if args.pins:
+            sys.exit(run_pins(psu, args))
         if args.watch is not None:
             if args.dashboard_text:
                 sys.exit(run_dashboard_text(psu, args, cfg, monitor_state, engine))

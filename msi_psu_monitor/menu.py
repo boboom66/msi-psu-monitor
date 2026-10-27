@@ -138,13 +138,21 @@ ITEMS = (
     Item(
         '11',
         'History',
+        'Pin currents',
+        'msi-psu-monitor --pins',
+        'per-pin 5 s averages (MPG TS)',
+        'pins',
+    ),
+    Item(
+        '12',
+        'History',
         'Thresholds',
         'msi-psu-monitor --dump-thresholds',
         'read-only C0h dump (MPG TS)',
         'thresholds',
     ),
     Item(
-        '12',
+        '13',
         'History',
         'Black box',
         'msi-psu-monitor --show-log',
@@ -152,7 +160,7 @@ ITEMS = (
         'log',
     ),
     Item(
-        '13',
+        '14',
         'History',
         'Alert log',
         'msi-psu-monitor --show-alert-log',
@@ -160,7 +168,7 @@ ITEMS = (
         'alerts',
     ),
     Item(
-        '14',
+        '15',
         'Writes',
         'Fan auto',
         'msi-psu-monitor --fan-mode auto',
@@ -168,7 +176,7 @@ ITEMS = (
         'fan_auto',
     ),
     Item(
-        '15',
+        '16',
         'Writes',
         'Fan duty',
         'msi-psu-monitor --fan-mode customized --fan-duty <0-100>',
@@ -176,7 +184,7 @@ ITEMS = (
         'fan_duty',
     ),
     Item(
-        '16',
+        '17',
         'Writes',
         'Zero Fan',
         'msi-psu-monitor --zero-fan on|off',
@@ -184,7 +192,7 @@ ITEMS = (
         'zero_fan',
     ),
     Item(
-        '17',
+        '18',
         'Writes',
         'Buzzer',
         'msi-psu-monitor --buzzer-toggle',
@@ -192,7 +200,7 @@ ITEMS = (
         'buzzer',
     ),
     Item(
-        '18',
+        '19',
         'Writes',
         'Rail mode',
         'msi-psu-monitor --set-rail multi|single',
@@ -200,7 +208,7 @@ ITEMS = (
         'rail',
     ),
     Item(
-        '19',
+        '20',
         'Writes',
         'OCP write',
         'msi-psu-monitor --ocp-set <5 values[,on|off]>',
@@ -208,7 +216,7 @@ ITEMS = (
         'ocp_write',
     ),
     Item(
-        '20',
+        '21',
         'Writes',
         'OCP load',
         'msi-psu-monitor --load-thresholds <file>',
@@ -216,7 +224,7 @@ ITEMS = (
         'ocp_load',
     ),
     Item(
-        '21',
+        '22',
         'System',
         'Config',
         'msi-psu-monitor --dump-config',
@@ -224,7 +232,7 @@ ITEMS = (
         'config',
     ),
     Item(
-        '22',
+        '23',
         'System',
         'Serial',
         'msi-psu-monitor --serial <serial>',
@@ -279,6 +287,14 @@ def _action_ocp(psu, args, cfg, monitor_state, engine):
     local.ocp = True
     local.format = 'text'
     return _paged(monitor.run_ocp, psu, local)
+
+
+def _action_pins(psu, args, cfg, monitor_state, engine):
+    local = copy.copy(args)
+    local.pins = True
+    local.format = 'text'
+    local.output = None
+    return _paged(monitor.run_pins, psu, local)
 
 
 def _action_thresholds(psu, args, cfg, monitor_state, engine):
@@ -487,6 +503,7 @@ ACTIONS = {
     'export': Action(needs_device=False, runner=_action_export),
     'export_custom': Action(needs_device=False, runner=_action_export_custom),
     'ocp': Action(needs_device=True, runner=_action_ocp),
+    'pins': Action(needs_device=True, runner=_action_pins),
     'thresholds': Action(needs_device=True, runner=_action_thresholds),
     'log': Action(needs_device=True, runner=_action_log),
     'alerts': Action(needs_device=False, runner=_action_alerts),

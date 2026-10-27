@@ -12,17 +12,24 @@ All notable changes to this project are documented here. The format follows
   with no arguments and passes any explicit arguments through unchanged
   (`psu --once` == `msi-psu-monitor --once`). Shipped by the source install,
   the tarball and both `.deb` packages.
+- **REV6 command coverage**: IOUT_12+4 (`0x2C`) is now read directly by
+  `--pins` (12 currents as 5 s averages, text/JSON/Prometheus, menu entry), and
+  `MFR_MODEL` (`0x11`, 12 ASCII bytes) repairs an 11-byte handshake that would
+  otherwise truncate "MPG Ai1600TS" to "MPG Ai1600T". When the 0xE0 bulk frame
+  is missing or short, the sample falls back to the individual
+  `0x24`-`0x2B`/`0x30`/`0x40` registers (plus `0x2C` on the 12+4 models) and
+  reports `read_mode=registers` instead of pretending the PSU measured nothing.
 - **The menu covers every action**: snapshot (text/JSON/Prometheus), live view
   (fixed or prompted interval), terminal and web dashboards, CSV export
-  (last hour or prompted window/columns), OCP view, threshold dump, black box,
-  alert log, fan auto/custom duty, Zero Fan, buzzer, rail mode, OCP write/load,
-  effective config, and the serial filter — 22 entries in four groups. Every
-  write prompts for its parameters and asks for explicit confirmation before
-  touching the PSU.
-- **Menu thresholds entry** (`6`): a read-only `--dump-thresholds` view joins
+  (last hour or prompted window/columns), OCP view, pin currents, threshold
+  dump, black box, alert log, fan auto/custom duty, Zero Fan, buzzer, rail
+  mode, OCP write/load, effective config, and the serial filter — 23 entries in
+  four groups. Every write prompts for its parameters and asks for explicit
+  confirmation before touching the PSU.
+- **Menu thresholds entry**: a read-only `--dump-thresholds` view joins
   the `--menu` command list, so the MPG TS 0xC0 configuration can be inspected
   from the menu like `--ocp`, without a write path anywhere near it.
-- **Menu alert-log entry** (`8`): `--show-alert-log` runs from `--menu` without
+- **Menu alert-log entry**: `--show-alert-log` runs from `--menu` without
   touching hidraw, so a running daemon keeps the device. The menu footer and
   the numbered prompt now follow the item count instead of a hard-coded `1-7`.
 - **Dashboard live badge**: the 1 s `/api/live` poll now drives a visible

@@ -80,8 +80,8 @@ frame of real measurements.
 
 | Register | Address | Size | Description |
 |----------|---------|------|-------------|
-| VENDOR_STRING | 0x10 | 16 bytes | Vendor name (ASCII) |
-| PRODUCT_STRING | 0x11 | 16 bytes | Product name (ASCII) |
+| VENDOR_STRING | 0x10 | 3 bytes | Manufacturer ID (ASCII `MSI`, REV6 MFR_ID) |
+| PRODUCT_STRING | 0x11 | 12 bytes | Model name (ASCII `MPG Ai1600TS` / `MPG Ai1300TS`, REV6 MFR_MODEL). Read independently of the 11-byte 0xFA51 handshake, which would truncate the trailing `S`; a reply naming a model is authoritative for variant dispatch. |
 | REVISION | 0x12 | 2 bytes | Firmware revision（冻结：设备只发 **2 个 ASCII 数字** `b"10"`，小数点由读取方插入 → `1.0`，对齐 `CPSU.cs:497-507` `GetString(...,2).Insert(1,".")`；非「两位数字」的载荷才原样透传；旧 `<I` 十进制拼法废弃） |
 | SERIAL | 0x13 | TS: 1-byte length + data; MEG: 24 bytes | Serial number（TS 按首字节长度切片，后面才是号码；MEG 按 MSI Center 固定读 24 字节，第 24 字节之后的报告内容不属于序列号） |
 | IN_VOLTS | 0x20 | 2 bytes | AC input voltage (LINEAR11, **volts**; MSI-compatible extra: `GET_VIN` refuses the MPG TS models and decodes `ValueCalc` directly, `CPSU.cs:540-549`). REV6 removed VIN from its command table. |
@@ -93,8 +93,9 @@ frame of real measurements.
 | IOUT_3V3 | 0x29 | 2 bytes | 3.3V rail current (LINEAR11, mA) |
 | TOTAL_WATTS | 0x2A | 2 bytes | Total output power (LINEAR11, uW) |
 | EFFICIENCY | 0x2B | 2 bytes | Efficiency (LINEAR11, x100) |
+| IOUT_12+4 | 0x2C | 24 bytes | Two 12V-2x6 pin sets: 12 × LINEAR11 mA, ordered 12V5 pins 1-6 then 12V3 pins 7-12 (`--pins`). REV6 revision 5 defines each value as a **5-second average**, not an instantaneous sample. Same words as E0 offsets 6-29. |
 | TEMP0 | 0x30 | 2 bytes | Internal temperature (LINEAR11, mC) |
-| FAN_RPM | 0x40 | 2 bytes | Fan speed (LINEAR11, unsigned) |
+| FAN_RPM | 0x40 | 4 bytes | Fan speed block; REV6 documents one LINEAR11 value, decoded from the first word (bytes 1-2). |
 | FAN_MODE | 0x41 | 3 bytes | Fan control mode + 自订占空比 `[mode, x, duty]`（1=auto，3=customized；一期读写，写走 `--fan-mode/--fan-duty` + F1h 保存） |
 | FAN_DUTY | 0x42 | 2 or 4 bytes | 前两字节全机型有效：`[实际占空比, MCU 算出的占空比]`。后两字节（`[软件设定值, ZeroFan==1]`）**只有 MPG TS 系有定义**——MSI Center 在 MEG 机型上读到第 2 个字节就返回（`CPSU.cs:810`），因此本实现对 MEG 报 `None`，不去解释参考实现拒绝解释的字节（只读；TS 的 ZeroFan 进 text 显示） |
 | MULTIRAIL / OCP12V2x6_CONFIG | 0xC0 | 1 or 8 bytes | **重载寄存器**，同一地址两条命令、机型门互补：MEG Ai1000P/Ai1300P 读 1 字节多轨开关（`==2` 为多轨，`CPSU.cs:823-832`）；MPG Ai1300TS/Ai1600TS 读 8 字节 12V-2x6 OCP 阈值（`CPSU.cs:840-856`）；MEG Ai1600T 两条都不支持。12V-2x6 载荷 `[enable, 单针A, 针差A, 触发s, 针差触发s, 警告s]`，前两个 A 值为 LINEAR11（exp -4，即 `value<<4` 低字节 + `0xE0` 高字节，12A→`0xE0C0`、5A→`0xE050`）；出厂 12A/5A/20s/20s/180s。读走 `--ocp`；写走 `--ocp-set`/`--load-thresholds`（8B + F1h + 读回校验，仅 MPG TS）。enable 仅定义 0/1；其他值视为读取失败，不猜成 disabled |
@@ -105,6 +106,13 @@ frame of real measurements.
 | TOTAL_UPTIME | 0xD1 | 4 bytes | Total lifetime uptime (seconds) |
 | SAVE_SETTING | 0xF1 | 0 bytes | Persist the preceding `0x50` write to NVRAM (`[0x50, 0xF1]`, REV6; the 64-byte report is zero-padded) |
 | READ_EVERYTHING | 0xE0 | varies | Bulk read of all sensor values |
+
+### MFR_MODEL (0x11)
+
+The 0xFA51 handshake is documented as an 11-byte reply, while `MFR_MODEL` is a
+12-byte ASCII block. `MSIPSU.init()` reads `0x11` and prefers it when it names a
+model containing `Ai`; this is what turns a truncated `MPG Ai1300T` back into
+`MPG Ai1300TS` instead of refusing the device or decoding it as a MEG model.
 
 ## Bulk Read (0xE0)
 
@@ -120,6 +128,18 @@ its own right:
 
 A shorter frame than the variant's `payload_size` is rejected outright rather
 than decoded from zero padding.
+
+### Per-register fallback
+
+Every scalar reading has its own REV6 command, so a missing/short `0xE0` frame
+does not have to mean "no measurement at all". `MSIPSU.read_register_sensors()`
+then reads `0x24`-`0x2B`, `0x30` and `0x40` individually and keeps only the
+registers that answered; `get_sensors()` merges them, adds the `0x2C` pins on
+the 12+4 models, and sets `read_mode = "registers"`. A per-rail MEG P array has
+no individual register and stays absent. The original `payload_error` is kept
+for diagnosis. This is a partial sample, not a fabricated one: `--once` still
+exits 1 if not even the core rails answered, and the Prometheus output carries
+`msi_psu_register_fallback 1` instead of hiding the degraded path.
 
 ### MPG Ai1600TS / Ai1300TS (44 bytes of data in a 62-byte frame)
 
@@ -207,10 +227,12 @@ use exponent −4 in the setter (`value << 4` with a `0xE0` high byte).
 
 The MPG Ai1600TS features GPU Safeguard+ which monitors current on each of the
 12 pins across both 12V-2x6 connectors. The 12 per-pin current values are
-located at offsets 6-29 of the 0xE0 bulk read payload.
+located at offsets 6-29 of the 0xE0 bulk read payload and are also available as
+the standalone `IOUT_12+4` block (`0x2C`, 24 bytes; `--pins`). REV6 revision 5
+defines each value as a **5-second average**.
 
 Each pin current is a 16-bit LINEAR11 value in milliamps. The pins are ordered
-sequentially: pins 1-6 on connector 1, then pins 1-6 on connector 2.
+sequentially: 12V5 pins 1-6 on connector 1, then 12V3 pins 7-12 on connector 2.
 
 The sum of all 12 pin currents should approximately equal the total +12V current
 minus current drawn through non-GPU 12V loads (e.g., CPU, motherboard).

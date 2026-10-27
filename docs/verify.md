@@ -69,7 +69,7 @@ uv run --group dev ruff format --check .
 | `tests/test_protocol.py` | `lin11_to_int` 的 8 条标度/符号向量（`test_unsigned_mode_keeps_high_bit`、`test_exponent_negative_shift`）；帧拼装与 NAK 覆盖在 `test_psu_sensors.py` |
 | `tests/test_protocol_discovery.py` | sysfs 发现、5 个 PID 全覆盖、演示模式不碰 sysfs（`test_detect_devices_never_returns_the_device_directory_name`）；解析器用真实实现（`test_resolve_device_uses_the_real_parser`） |
 | `tests/test_protocol_lin11.py` | LINEAR11 原始向量与 exp −4 / −7 边界（`test_negative_exponent`、`test_default_mantissa_is_unsigned_not_twos_complement`） |
-| `tests/test_psu_sensors.py` | 62 B / 40 B / 20 B 载荷解析、P 系五轨、帧/NAK（`test_a_meg_frame_whose_first_payload_byte_is_0xfe_is_still_decoded`）、告警位顺序、0xC1 状态/黑盒 |
+| `tests/test_psu_sensors.py` | 62 B / 40 B / 20 B 载荷解析、P 系五轨、帧/NAK（`test_a_meg_frame_whose_first_payload_byte_is_0xfe_is_still_decoded`）、告警位顺序、0xC1 状态/黑盒；0x11 修复截断型号（`test_the_model_register_repairs_a_truncated_handshake`）、0x2C 每针（`test_iout_12_4_decodes_both_pin_sets`）、0xE0 失败时的单寄存器回退（`test_register_fallback_replaces_a_missing_bulk_frame`） |
 | `tests/test_alerts.py` | 阈值判定、`consecutive_required` 去抖（`test_debounce_needs_two_consecutive_polls`）、严重度、`retain()` 换机清理 |
 | `tests/test_state.py` | 能量积分、原子写中断（`test_an_interrupted_save_keeps_the_previous_state_intact`）、strict load、历史追加/裁剪、`--export` 列 |
 | `tests/test_config.py` | INI 解析、`[daemon]`、`[fan]` 段与非法值回落；显式 `--config` 缺失/格式错误必须报错（`test_an_explicit_config_file_must_exist`）；越界 port 回落 |
@@ -79,8 +79,9 @@ uv run --group dev ruff format --check .
 | `tests/test_watch_console.py` | `--watch` 文本控制台：TTY 下 ANSI 重绘与光标恢复（`test_tty_redraw_is_ansi_and_never_calls_clear`）、管道/dumb/窄/矮终端降级、SIGTERM 映射为干净退出 |
 | `tests/test_dashboard_text.py` | 终端 Dashboard：彩色条形与门限色（`test_render_paints_an_overcurrent_pin_red`）、NO_COLOR、按可见宽度对齐边框与截断（`test_colour_does_not_shift_the_box`）、--dashboard-text 互斥 |
 | `tests/test_pty_watch.py` | 真 PTY 证据：`--watch` 原地重绘与光标恢复（`test_watch_redraws_in_place_and_restores_the_cursor`）、管道无转义码、`--dashboard-text` SIGINT 干净退出、8x8 窄 PTY 降级 |
-| `tests/test_menu.py` | 序号菜单：命令展示与执行（`test_the_menu_prints_each_command_and_runs_it`）、非法输入、EOF、--menu 互斥；交互重构——应用光标方向键（`test_application_cursor_arrow_keys_are_understood`）、Esc 语义（`test_escape_closes_the_help_overlay_before_quitting`）、头部状态行（`test_the_header_reports_a_nonzero_exit`）、备用屏进出（`test_the_alternate_screen_is_entered_and_restored`）、VGA 控制台不用 1049（`test_the_linux_console_keeps_the_main_screen`）、NO_COLOR、缩放重绘（`test_a_resize_redraws_at_the_new_width`）、只读阈值入口（`test_every_cli_action_is_reachable_from_the_menu`、`test_fan_duty_entry_prompts_and_writes`、`test_the_thresholds_entry_dumps_the_c0h_configuration`） |
+| `tests/test_menu.py` | 序号菜单：命令展示与执行（`test_the_menu_prints_each_command_and_runs_it`）、非法输入、EOF、--menu 互斥；交互重构——应用光标方向键（`test_application_cursor_arrow_keys_are_understood`）、Esc 语义（`test_escape_closes_the_help_overlay_before_quitting`）、头部状态行（`test_the_header_reports_a_nonzero_exit`）、备用屏进出（`test_the_alternate_screen_is_entered_and_restored`）、VGA 控制台不用 1049（`test_the_linux_console_keeps_the_main_screen`）、NO_COLOR、缩放重绘（`test_a_resize_redraws_at_the_new_width`）、只读阈值入口（`test_every_cli_action_is_reachable_from_the_menu`、`test_the_pins_entry_runs_the_read_only_2ch_view`、`test_fan_duty_entry_prompts_and_writes`、`test_the_thresholds_entry_dumps_the_c0h_configuration`） |
 | `tests/test_ocp.py` | 0xC0 阈值 / 0xC1 状态 / 单多轨标志的三格式输出与机型门（`test_run_ocp_on_a_meg_p_model_shows_the_multirail_flag`）；0xC0 阈值写的 MSI 字节编码与 F1h 保存（`test_set_ocp_thresholds_writes_msi_bytes_then_saves`） |
+| `tests/test_pins.py` | 0x2C 每针电流视图：两连接器/合计/不平衡（`test_run_pins_text_shows_both_connectors_and_their_summary`）、JSON 寄存器与 5 s 窗口（`test_run_pins_json_carries_the_register_and_average_window`）、Prometheus、机型门、读失败与互斥校验（`test_pins_rejects_other_modes`） |
 | `tests/test_daemon.py` | 采样节拍、原子写（`test_a_failed_prometheus_replace_keeps_the_previous_textfile`）、重扫、风扇 Profile 恢复、只答 ident 判读失败、OCP 块换机不继承旧阈值 |
 | `tests/test_dashboard.py` | HTTP 端点、损坏 state.json 的 503（`test_a_corrupt_state_file_is_a_503_while_history_still_serves`）、HEAD 与错误码一致、真实时间 x 轴 |
 | `tests/test_demo.py` | 合成电源、5 机型切换、告警位注入（`test_every_supported_variant_can_be_emulated`） |
@@ -163,6 +164,12 @@ done
 MSI_PSU_DEMO_MODEL=ai1300p .venv/bin/msi-psu-monitor --ocp
 # MEG Ai1600T：两个 0xC0 视图都不支持，打印原因且 exit 0
 MSI_PSU_DEMO_MODEL=meg_ai1600 .venv/bin/msi-psu-monitor --ocp; echo "exit=$?"
+
+# TS 系：--pins 直接读 0x2C，两连接器各 6 针（5 s 平均）
+.venv/bin/msi-psu-monitor --pins
+.venv/bin/msi-psu-monitor --pins -f json | python3 -m json.tool | head -18
+# 非 TS 机型：打印不支持原因且 exit 0（与 --ocp 同一约定）
+MSI_PSU_DEMO_MODEL=ai1300p .venv/bin/msi-psu-monitor --pins; echo "exit=$?"
 ```
 
 应看到 `MSI PSU: MPG Ai1600TS (demo)`、`12V-2x6 Status: Normal`、`POWER … (AVG …)`、
@@ -263,6 +270,11 @@ uv run --group dev pytest -q tests/test_ocp.py
 ```
 
 `--ocp` 与 `--once`/`--watch`/`--export`/`--show-log`/`--dashboard`/风扇写互斥（argparse 报错 exit 2）。
+
+`--pins` 是同一类只读硬件视图（0x2C），也要求独占一次设备访问：与 `--once`/`--watch`/
+`--export`/`--show-log`/`--show-alert-log`/`--ocp`/`--dump-thresholds`/`--dashboard`/
+`--menu`/任一控制写或阈值写互斥（exit 2）。文本/JSON/Prometheus 三格式均可；菜单第 11 项
+`Pin currents` 等价于 `--pins`。无硬件验证见 §2 的 demo 命令与 `tests/test_pins.py`。
 
 ### 2.2 OCP 阈值导出/写入/导入（MPG TS；真实保护写）
 
@@ -531,6 +543,15 @@ journalctl -u msi-psu-monitor -f
 
 1. `sudo msi-psu-monitor --once` 与 MSI Center / Afterburner 对照，误差 <1%；
 2. 44B/62B `0xE0` 抓包确认 `BULK_*` 偏移（对照 `docs/protocol.md`）；
+2b. `sudo msi-psu-monitor --pins` 在 MPG TS 上与 `--ocp` 的 C1h 针电流（同为 5 s 平均）
+   逐针一致（容差一个 LSB）；两连接器合计/不平衡与手算一致；JSON 的
+   `pin_currents.register == "0x2C"`、`average_seconds == 5`；
+2c. `--pins` 在 MEG P / Ai1600T 上打印「not available」并 exit 0，不产生 NAK 重试；
+2d. 0x11 `MFR_MODEL` 读出的 12 字节型号与机身/包装一致；TS 型号末尾的 `S` 不丢失，
+   且 `--once` 走 44 B TS 布局（不是 MEG 布局）；
+2e. 0xE0 失败回退：在实验台用可控 NAK/短帧夹具或协议分析仪让 E0h 不返回，确认
+   `--once` 仍打印 `0x24-0x2B/0x30/0x40` 读数并带 `NOTE`，Prometheus 的
+   `msi_psu_register_fallback` 为 1；**不要**靠拔插/损坏电源制造该场景；
 3. Ai1300TS（PID `0xAA6F`）能被扫到并正确判变体；
 4. `--fan-duty 0/50/100` 写后读回一致，`F1h` 保存后断电重启仍生效；
 4b. 配 `[fan] mode = customized` + `duty` 后重启 daemon，`journalctl` 出现

@@ -179,6 +179,13 @@ if [ -s "$EVIDENCE/05-output.json" ]; then pass "output file" ""; else fail "out
 
 printf "\n[2] queries (read-only)\n"
 run_capture 06-ocp "${MONITOR[@]}" --ocp || true
+run_capture 06b-pins "${MONITOR[@]}" --pins || true
+if grep -Fq 'per-pin currents' "$EVIDENCE/06b-pins.out" \
+    || grep -Fq 'not available' "$EVIDENCE/06b-pins.out"; then
+    pass "pins view" ""
+else
+    fail "pins view" "see 06b-pins.out"
+fi
 run_capture 07-show-log "${MONITOR[@]}" --show-log || true
 run_capture 08-show-alert-log "${MONITOR[@]}" --show-alert-log || true
 

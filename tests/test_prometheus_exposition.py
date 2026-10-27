@@ -174,6 +174,7 @@ def test_format_prometheus_passes_a_strict_exposition_parser():
         'msi_psu_threshold_alert',
         'msi_psu_alert',
         'msi_psu_pin_current',
+        'msi_psu_register_fallback',
         'msi_psu_status_12v_2x6',
     ):
         assert expected in families
@@ -181,6 +182,15 @@ def test_format_prometheus_passes_a_strict_exposition_parser():
 
 def test_error_and_ocp_exposition_are_valid_too():
     parse_exposition(monitor.format_prometheus({'product': 'Mystery', 'error': 'no payload'}))
+    parse_exposition(
+        monitor.format_pins_prometheus(
+            {
+                'pins_1_6': [8.0, 8.5, 9.0, 8.0, 7.5, 8.0],
+                'pins_7_12': [7.0, 7.5, 8.0, 7.0, 6.5, 7.0],
+            },
+            'MPG Ai1600TS',
+        )
+    )
     config = {
         'enabled': True,
         'point_a': 12.0,

@@ -132,6 +132,10 @@ class DemoPSU:
     def init(self):
         return self.product
 
+    def read_model(self):
+        """MFR_MODEL (0x11) without the demo suffix, as the register would send it."""
+        return MSIPSU.VARIANTS[self.variant]['name']
+
     # ---- synthetic load --------------------------------------------------
 
     def _load(self):
@@ -228,6 +232,21 @@ class DemoPSU:
         )
 
     # ---- 12V-2x6 OCP (C0h read-only + C1h state) ------------------------
+
+    @property
+    def supports_pin_currents(self):
+        return self.variant in MSIPSU.SEVEN_ZPU_VARIANTS
+
+    def read_pin_currents(self):
+        """IOUT_12+4 (0x2C): the same synthetic split ``get_sensors`` reports."""
+        if not self.supports_pin_currents:
+            return None
+        self.samples += 1
+        load, _ = self._load()
+        watts = 0.05 * self.watts_max + load * 0.45 * self.watts_max + self._wobble(0, 8.0)
+        volts_12v = 12.10 - 0.06 * load + self._wobble(1, 0.01)
+        pins = self._pin_currents((watts * 0.92) / volts_12v)
+        return {'pins_1_6': pins[:6], 'pins_7_12': pins[6:]}
 
     @property
     def supports_ocp_config(self):

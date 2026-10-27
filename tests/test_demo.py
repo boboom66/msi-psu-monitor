@@ -76,6 +76,19 @@ def test_pin_currents_track_the_12v_total():
     assert sum(pins) == pytest.approx(total, rel=0.15)
 
 
+def test_the_demo_answers_the_standalone_0x2c_read():
+    """--pins must work without hardware, with the same 12 pins as the snapshot."""
+    psu = demo.DemoPSU(clock=Clock(), variant='mpg_ai1600ts')
+    reading = psu.read_pin_currents()
+    assert len(reading['pins_1_6']) == 6
+    assert len(reading['pins_7_12']) == 6
+    assert all(value > 0 for value in reading['pins_1_6'])
+    assert psu.read_model() == 'MPG Ai1600TS'
+
+    meg = demo.DemoPSU(clock=Clock(), variant='ai1300p')
+    assert meg.read_pin_currents() is None
+
+
 def test_zero_fan_follows_the_load_cycle():
     clock = Clock()
     psu = demo.DemoPSU(clock=clock)

@@ -59,6 +59,11 @@ class StubPSU:
         self.multirail = multirail
         self.accept_rail = accept_rail
         self.supports_multirail_ocp = supports_multirail_ocp
+        self.supports_pin_currents = True
+        self.pin_currents = {
+            'pins_1_6': [8.0, 8.5, 9.0, 8.0, 7.5, 8.0],
+            'pins_7_12': [7.0, 7.5, 8.0, 7.0, 6.5, 7.0],
+        }
         self.rail_writes = []
         self.closed = False
 
@@ -97,6 +102,9 @@ class StubPSU:
 
     def read_multirail_ocp(self):
         return self.multirail if self.supports_multirail_ocp else None
+
+    def read_pin_currents(self):
+        return self.pin_currents
 
     def set_multirail_ocp(self, enabled):
         self.rail_writes.append(enabled)
@@ -518,6 +526,14 @@ def test_ocp_unsupported_keeps_both_lines_in_one_output_file(monkeypatch, capsys
     assert lines[0] == 'MSI PSU: MPG Ai1600TS'
     assert 'not available on this model' in lines[1]
     assert not (tmp_path / 'ocp.txt.tmp').exists()  # the write stayed atomic
+
+
+def test_pins_mode_is_dispatched_to_the_0x2c_view(monkeypatch, capsys):
+    stub = StubPSU(sensors())
+    code, captured = run_main(monkeypatch, capsys, stub, ['--pins'])
+    assert code == EXIT_OK
+    assert '12V-2x6 per-pin currents (0x2C, 5 s averages)' in captured.out
+    assert 'Conn1 (12V5):' in captured.out
 
 
 def test_serial_scan_reports_devices_it_cannot_open(monkeypatch, capsys):

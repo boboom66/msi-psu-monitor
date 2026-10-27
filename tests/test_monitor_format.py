@@ -97,6 +97,31 @@ def test_prometheus_shapes():
     assert 'msi_psu_fan_speed{} 2050' in out
 
 
+def test_text_shows_register_fallback_values_without_hiding_them():
+    sensors = {
+        'product': 'MPG Ai1600TS',
+        'vout_12v': (12.0, 'V'),
+        'power_total': (300.0, 'W'),
+        'payload_error': '0xE0 payload too short for mpg_ai1600ts: got 10 of 44 bytes',
+        'read_mode': 'registers',
+    }
+    out = format_text(sensors)
+    assert '+12V' in out and '12.000 V' in out
+    assert 'POWER' in out and '300.0 W' in out
+    assert 'NOTE' in out and 'got 10 of 44 bytes' in out
+    assert 'ERROR' not in out
+
+
+def test_prometheus_marks_the_register_fallback():
+    sensors = {
+        'product': 'MPG Ai1600TS',
+        'vout_12v': (12.0, 'V'),
+        'read_mode': 'registers',
+    }
+    assert 'msi_psu_register_fallback{} 1' in format_prometheus(sensors)
+    assert 'msi_psu_register_fallback{} 0' in format_prometheus(full_sensors())
+
+
 def test_vin_has_a_text_line_and_a_prometheus_metric():
     sensors = {'product': 'MEG Ai1300P', 'vout_12v': (12.1, 'V'), 'vin': (230.0, 'V')}
     text = format_text(sensors)

@@ -367,6 +367,22 @@ def test_the_thresholds_entry_is_a_read_only_device_dump():
     assert menu.ACTIONS[item.action].needs_device is True
 
 
+def test_the_pins_entry_runs_the_read_only_2ch_view(monkeypatch):
+    item = next(item for item in menu.ITEMS if item.action == 'pins')
+    assert '--pins' in item.command
+    assert menu.ACTIONS[item.action].needs_device is True
+
+    seen = []
+    monkeypatch.setattr(
+        monitor,
+        'run_pins',
+        lambda psu, args: seen.append((args.pins, args.format)) or monitor.EXIT_OK,
+    )
+    code = menu._run('pins', StubPSU(), _args(), {'retention_days': 30}, None, None)
+    assert code == monitor.EXIT_OK
+    assert seen == [(True, 'text')]
+
+
 def test_alert_log_entry_runs_the_local_viewer(monkeypatch):
     calls = []
     monkeypatch.setattr(
@@ -651,7 +667,7 @@ def test_every_cli_action_is_reachable_from_the_menu():
     reachable only by remembering a flag."""
     referenced = {item.action for item in menu.ITEMS}
     assert referenced == set(menu.ACTIONS)
-    assert len(menu.ITEMS) == 22
+    assert len(menu.ITEMS) == 23
     for action in (
         'once',
         'once_json',
@@ -663,6 +679,7 @@ def test_every_cli_action_is_reachable_from_the_menu():
         'export',
         'export_custom',
         'ocp',
+        'pins',
         'thresholds',
         'log',
         'alerts',

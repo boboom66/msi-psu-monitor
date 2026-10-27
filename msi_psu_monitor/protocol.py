@@ -449,6 +449,23 @@ class MSIPSU:
     MULTIRAIL_VARIANTS = ("ai1000p", "ai1300p")
     # Ai1000P/Ai1300P expose five discrete 12V rails plus a combined rail.
     RAIL_COUNT = 5
+    #: Individual scalar registers that duplicate the 0xE0 payload. Used as a
+    #: fallback when the bulk frame is missing or short: (key, register, scale,
+    #: decimal places, unit). REV6 defines each one as its own read, so this is
+    #: the documented path, not a guess. The fan register is a 4-byte block read
+    #: but its format table describes one LINEAR11 value, so only word 1 is used.
+    REGISTER_SENSORS = (
+        ("vout_12v", REG_VOUT_12V, 1000, 3, "V"),
+        ("iout_12v_total", REG_IOUT_12V, 1000, 3, "A"),
+        ("vout_5v", REG_VOUT_5V, 1000, 3, "V"),
+        ("iout_5v", REG_IOUT_5V, 1000, 3, "A"),
+        ("vout_3v3", REG_VOUT_3V, 1000, 3, "V"),
+        ("iout_3v3", REG_IOUT_3V, 1000, 3, "A"),
+        ("power_total", REG_TOTAL_WATTS, 1000000, 1, "W"),
+        ("efficiency", REG_EFFICIENCY, 100, 2, "%"),
+        ("temp", REG_TEMP0, 1000, 1, "\u00b0C"),
+        ("fan_rpm", REG_FAN_RPM, 1, 0, "RPM"),
+    )
 
     def __init__(self, hid_device=None):
         self.hid = hid_device or HIDDevice()
@@ -490,6 +507,13 @@ class MSIPSU:
             self.vendor = _clean_identity(
                 bytes(resp).rstrip(b"\x00").decode("ascii", errors="replace").strip()
             )
+
+        # Read MFR_MODEL (0x11, 12 ASCII bytes). The handshake is documented to
+        # return 11 bytes, which truncates "MPG Ai1300TS" to "MPG Ai1300T"; the
+        # model register is authoritative when it actually names a model.
+        model = self.read_model()
+        if model and "AI" in model.upper():
+            self.product = model
 
         # Read firmware revision (REV6 MFR_REVISION: two ASCII digits, "10" = 1.0).
         # MSI Center supplies the decimal point itself: CPSU.cs:497-507 reads two
@@ -561,6 +585,28 @@ class MSIPSU:
 
         return self.product
 
+    def read_model(self):
+        """Read MFR_MODEL (0x11, 12 ASCII bytes) independently of the handshake.
+
+        REV6 defines a 12-byte block read ("MPG Ai1600TS" / "MPG Ai1300TS"),
+        while the 0xFA51 handshake is documented to return 11 bytes. The
+        trailing "S" is exactly what that short read loses, so this register is
+        the authoritative source when it names a model.
+
+        Returns:
+            The cleaned model string, or None when the PSU NAKs the read.
+        """
+        data = self.hid.read_register(REG_PROD_STR)
+        if data is None:
+            return None
+        # Cap at the documented 12 bytes before decoding: a longer non-conforming
+        # reply must not leak into the product string used for dispatch/logging.
+        # A NUL ends the ASCII string; treating it as a separator would glue a
+        # second fragment into a model name the device never sent.
+        raw = bytes(data[:12]).split(b"\x00", 1)[0]
+        text = raw.decode("ascii", errors="replace").strip()
+        return _clean_identity(text) or None
+
     def get_sensors(self):
         """Read all sensor values and return as a dictionary.
 
@@ -606,6 +652,23 @@ class MSIPSU:
                     f"0xE0 payload too short for {self.variant}: "
                     f"got {len(bulk_data)} of {payload_size} bytes"
                 )
+            # REV6 defines every scalar reading as an individual register too.
+            # A failed bulk read therefore does not have to mean "no sample at
+            # all": fall back to 0x24-0x2B/0x30/0x40 and (on the 12+4 models)
+            # 0x2C, and say which path produced the values.
+            fallback = self.read_register_sensors()
+            if fallback:
+                sensors.update(fallback)
+                pins = self.read_pin_currents()
+                if pins:
+                    sensors["iout_pins"] = (
+                        pins["pins_1_6"] + pins["pins_7_12"],
+                        "A",
+                    )
+                sensors["read_mode"] = "registers"
+                vin = self.read_vin()
+                if vin is not None:
+                    sensors["vin"] = vin
             return sensors
 
         data = bulk_data[:BULK_FRAME_SIZE]
@@ -876,6 +939,69 @@ class MSIPSU:
             raw = struct.unpack("<H", bytes(data[off : off + 2]))[0]
             currents.append(round(lin11_to_int(raw, 1000, False) / 1000, 3))
         return currents
+
+    @property
+    def supports_pin_currents(self):
+        """True when the model answers IOUT_12+4 (0x2C).
+
+        Only the 12V-2x6 models have the two pin sets; the MEG units have five
+        discrete rails instead and must not be probed at that address.
+        """
+        return self.variant in MSIPSU.SEVEN_ZPU_VARIANTS
+
+    def read_pin_currents(self):
+        """Read IOUT_12+4 (0x2C, 24 bytes: 12 LINEAR11 pin currents).
+
+        REV6 orders the block as 12V5 pins 1-6, then 12V3 pins 7-12; revision 5
+        changed every value to a 5-second average. The same 12 words also sit in
+        the 0xE0 payload, but this individual read keeps the view available when
+        that bulk frame fails.
+
+        Returns:
+            ``{'pins_1_6': [...], 'pins_7_12': [...]}`` in amps, or None when the
+            model has no 12+4 connector or the read failed/was short.
+        """
+        if not self.supports_pin_currents:
+            return None
+        data = self.hid.read_register(REG_IOUT_PINS)
+        if data is None or len(data) < 24:
+            return None
+        body = bytes(data[:24])
+        return {
+            'pins_1_6': self._parse_pin_currents(body, 0),
+            'pins_7_12': self._parse_pin_currents(body, 12),
+        }
+
+    def read_register_sensors(self):
+        """Read the scalar sensor registers individually (0x24-0x2B, 0x30, 0x40).
+
+        This is the REV6 fallback for a missing or short 0xE0 frame: every
+        reading in ``REGISTER_SENSORS`` has its own read command, so a failed
+        bulk read no longer has to mean "no measurement at all". Registers that
+        NAK are omitted rather than guessed; the caller decides whether the
+        partial set is enough for its purpose.
+
+        The per-rail arrays of the MEG P models have no individual register and
+        are therefore absent here, exactly as they are absent from that model's
+        scalar map.
+
+        Returns:
+            dict of ``(value, unit)`` readings; empty for an unknown model.
+        """
+        if self.variant is None:
+            return {}
+        sensors = {}
+        for key, reg, scale, digits, unit in self.REGISTER_SENSORS:
+            data = self.hid.read_register(reg)
+            if data is None or len(data) < 2:
+                continue
+            raw = struct.unpack("<H", bytes(data[:2]))[0]
+            if key == "fan_rpm":
+                value = int(lin11_to_int(raw, 1, False))
+            else:
+                value = round(lin11_to_int(raw, scale, False) / scale, digits)
+            sensors[key] = (value, unit)
+        return sensors
 
     def read_ocp_state(self):
         """Read C1h real-time 12+4 alert state (InfoID 0x00, 42 bytes).
