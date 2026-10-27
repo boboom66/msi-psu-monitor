@@ -1,23 +1,23 @@
 # Release readiness — current assessment
 
-> Updated 2026-10-27 on `work/product-v2`. Latest recorded CI:
-> run `40441033415` on the T-022 code commit; the 3.10/3.12/3.13 matrix and
-> frozen-release job passed. Changes after that run are documentation-only.
-
-**Verdict: NOT READY for a production release.** The latest recorded CI run passes
-the software and packaging gates and collects **889 tests**. Release-critical
-hardware/platform evidence is still missing, the OCP threshold write has never
-touched a real PSU, and no official 1.0.1 release has been published. The published
-release remains v1.0.0.
+> Updated 2026-10-27 on `work/product-v2`. Latest recorded CI run:
+> `40461828331` on the audit code commit `7629f53`; the 3.10/3.12/3.13 matrix,
+> coverage, smoke, soak, `.deb` and frozen-release jobs passed with **905
+> tests**. Commits after that run are documentation-only.
+>
+> **Verdict: NOT READY for a production release.** The software and packaging
+> gates are green, but release-critical hardware/platform evidence is still
+> missing, the OCP threshold write has never touched a real PSU, and no official
+> 1.0.1 release has been published. The published release remains v1.0.0.
 
 ## 1. Evidence that is green
 
 | Gate | Evidence |
 |---|---|
-| Full test suite | **889 tests collected**; latest recorded CI run `40441033415` passed |
+| Full test suite | **905 tests collected**; latest recorded CI run `40461828331` passed |
 | Lint / format / types | Latest recorded CI run passed the configured checks |
 | Coverage | Latest recorded CI run passed the configured coverage gate (90% floor); see CI output for the measured percentage |
-| Smoke / accelerated soak | Latest recorded CI run passed the smoke and soak jobs; their exact current output is in CI run `40441033415` |
+| Smoke / accelerated soak | Latest recorded CI run passed the smoke and soak jobs; their exact current output is in CI run `40461828331` |
 | Strict exposition | `tests/test_prometheus_exposition.py` parses HELP/TYPE, labels, finite values, duplicate series and the canonical `metric{} value` form |
 | Local 1.0.1 freeze | Historical 2026-10-22 x86_64/glibc 2.39 smoke build; not an official release artifact |
 | Earlier local demo checks | Historical: 180 samples at 1 s and hardware-kit `acceptance.sh --demo` passed; these are not 24 h hardware evidence |
@@ -62,7 +62,10 @@ release remains v1.0.0.
 The code is materially better than the published `1.0.0`: the local threshold
 alerting, OCP threshold write/dump/load, handshake retry, canonical Prometheus
 exposition, live-dashboard contract, destructive output-path handling and several
-daemon/alert consistency bugs now have real regressions. That is still not a claim
-that no bugs remain. The dominant residual risks are (in order): the untested OCP
-protection write, untested real-device protocol behaviour, arm64 execution, the
-root/systemd/udev install path, and the absence of a 24 h soak.
+daemon/alert consistency bugs now have real regressions. The 2026-10-27 audit
+added eight more fixes with regressions (VIN sub-volt precision, energy
+integration at slow cadences, daemon discovery diagnostics, symlink special-file
+hang, undefined 0xC0 multirail byte, two CLI contract gaps). That is still not a
+claim that no bugs remain. The dominant residual risks are (in order): the
+untested OCP protection write, untested real-device protocol behaviour, arm64
+execution, the root/systemd/udev install path, and the absence of a 24 h soak.

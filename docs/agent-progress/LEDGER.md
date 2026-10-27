@@ -37,5 +37,5 @@ Append-only task table. `UNKNOWN` is not `PASS`.
 - Next: design cards for OCP dry-run/backup/restore, `--doctor`, `--list`;
   then G2.
 - Then implementation, one feature per ticket.
-| T-024 | Independent audit pass (2026-10-27) | G/F | **PASS** | `6d6391e` | `docs/agent-progress/AUDIT_2026-10-27.md`; DEF-036..043 | CI runs ci#41/#43/#44 | Full-tree read; 8 defects fixed with regressions; 889→903 tests; ruff/format/mypy/smoke/soak/deb/freeze green; hardware items remain BLOCKED |
-| T-025 | Documentation audit and consolidation (2026-10-27) | G | **DONE** | pending | `docs/README.md`; `docs/archive/`; D-016 | self-checked | Archived preview + Phase 5 snapshots, superseded notes on testing duplicates, fixed 9 inside-doc links, added maintenance rules; no link or gate regression |
+| T-024 | Independent audit pass (2026-10-27) | G/F | **PASS** | `7629f53` | `docs/agent-progress/AUDIT_2026-10-27.md`; DEF-036..043 | CI runs ci#41/#43/#45 | Full-tree read; 8 defects fixed with regressions; 889→905 tests; ruff/format/mypy/smoke/soak/deb/freeze green; hardware items remain BLOCKED |
+| T-025 | Documentation audit and consolidation (2026-10-27) | G | **DONE** | `69af9a9` | `docs/README.md`; `docs/archive/`; D-016 | self-checked | Archived preview + Phase 5 snapshots, superseded notes on testing duplicates, fixed 9 inside-doc links, added maintenance rules; no link or gate regression |
