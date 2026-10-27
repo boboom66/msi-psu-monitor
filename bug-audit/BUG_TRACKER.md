@@ -94,3 +94,8 @@ covered.
 | ID | Sev | Status | Files | Category | Trigger | Actual before fix | Root cause / fix | Regression test |
 |---|---|---|---|---|---|---|---|---|
 | DEF-042 | P2 | **VERIFIED** | `msi_psu_monitor/{monitor,daemon}.py` | statistics correctness | `--watch 600`, or `[daemon] sample_interval` above 300 s | `MAX_SAMPLE_GAP_S` (300 s, the suspend/outage guard) also capped the *normal* gap, so every sample was skipped and the kWh integral froze for the whole run while the AVG kept moving | callers pass a gap budget of `max(300, interval * 2)`; `apply_stats()` takes the caller's `ts` so the daemon's injected wall clock is used consistently (the mismatch was found by the new test) | `test_a_slow_cadence_integrates_with_a_wider_gap_guard`, `test_energy_integrates_at_a_slow_configured_cadence` |
+### Round 3 of the same pass (deep hardening vs the module's own invariant)
+
+| ID | Sev | Status | Files | Category | Trigger | Actual before fix | Root cause / fix | Regression test |
+|---|---|---|---|---|---|---|---|---|
+| DEF-043 | P2 | **VERIFIED** | `msi_psu_monitor/state.py` | special-file guard evasion | state directory containing a symlink aimed at a FIFO (or `/dev/zero`) | `Path.is_file()` follows symlinks, so every "reject special files" guard passed and the reader then blocked forever — daemon history write, dashboard history listing, alert-log viewer, `state.json`/`latest.json` load | `state.is_regular_file()` decides by lstat; six open sites use it | `test_symlinks_to_special_files_are_rejected_like_their_target` |
