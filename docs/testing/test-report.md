@@ -1,6 +1,6 @@
 # msi-psu-monitor 基线测试报告（第一阶段，历史归档）
 
-> **历史快照（2026-10-19/21）**。当前门禁为 **803 tests / 94% 分支覆盖率 / smoke 58 / soak 5000**；当前事实见 `docs/verify.md`、`bug-audit/FIX_LOG.md` 与 `bug-audit/RELEASE_READINESS.md`。
+> **历史快照（2026-10-19/21）**。本文结果只代表当时的测试轮次；当前发布状态见 [`bug-audit/RELEASE_READINESS.md`](../../bug-audit/RELEASE_READINESS.md)。
 
 - 执行时间：2026-10-19 10:01–10:05（Asia/Shanghai）
 - 提交：`650076a263d9f6126c58508c60963102116ec4f2`
@@ -60,7 +60,7 @@ exit 0
 
 补充：默认级别 `shellcheck scripts/*.sh` 退出 1，内容全是 info/style，包括
 `scripts/smoke.sh` 的 SC2015（A && B || C）和 SC2086（`$MONITOR` 未加引号）。
-CI 使用 `-S warning`，因此当前门禁通过；这些是 P3 测试脚本质量问题，不是产品故障。
+该轮 CI 使用 `-S warning`，因此当时门禁通过；这些是 P3 测试脚本质量问题，不是产品故障。
 
 ## 3. 覆盖率（一次性测量，不写回项目）
 

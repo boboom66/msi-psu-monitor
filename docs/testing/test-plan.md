@@ -1,8 +1,7 @@
 # msi-psu-monitor 全项目测试计划（第一阶段，历史快照）
 
-> **历史记录。** 当前测试数/覆盖率/发布判断见
-> [docs/testing/test-coverage.md](test-coverage.md) 与
-> [bug-audit/RELEASE_READINESS.md](../../bug-audit/RELEASE_READINESS.md)（803 tests、94%）。
+> **历史记录。** 当前测试与发布判断见
+> [bug-audit/RELEASE_READINESS.md](../../bug-audit/RELEASE_READINESS.md)；本计划中的统计仅为历史基线。
 
 > 状态：Phase 1 完成（项目结构调查、功能盘点、测试矩阵、基线执行）
 > 基线提交：`650076a`（2026-10-19）
@@ -77,7 +76,7 @@ Dashboard 链:
 | `demo.py` | 无硬件合成 PSU（仅 opt-in） |
 | `scripts/*` | 构建、安装、卸载、smoke、SBOM |
 | `systemd/*` | unit、udev、沙箱 |
-| `tests/*` | 当前 **803** 个自动化测试（Phase 3 基线 645） |
+| `tests/*` | 截至 2026-10-22 **803** 个自动化测试（Phase 3 基线 645） |
 
 ## 4. 功能清单（FUNC）
 
