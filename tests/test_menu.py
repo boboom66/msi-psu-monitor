@@ -834,16 +834,16 @@ def test_the_custom_watch_entry_prompts_for_the_interval(monkeypatch):
     assert seen == [2.5]
 
     monkeypatch.setattr(builtins, 'input', lambda *a: 'soon')
-    assert (
-        menu._run('watch_custom', StubPSU(), _menu_args(), {}, None, None)
-        == monitor.EXIT_ERROR
-    )
+    assert menu._run('watch_custom', StubPSU(), _menu_args(), {}, None, None) == monitor.EXIT_ERROR
 
 
 def test_the_web_dashboard_entry_starts_the_server(monkeypatch):
     seen = []
     monkeypatch.setattr(monitor, 'run_dashboard', lambda args, cfg: seen.append(args.port) or 0)
-    assert menu._run('dashboard_web', None, _menu_args(), {'port': 8899}, None, None) == monitor.EXIT_OK
+    assert (
+        menu._run('dashboard_web', None, _menu_args(), {'port': 8899}, None, None)
+        == monitor.EXIT_OK
+    )
     assert seen == [8899]
 
 
