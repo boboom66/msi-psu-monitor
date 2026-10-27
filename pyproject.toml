@@ -37,6 +37,7 @@ Repository = "https://github.com/HesiPullupTimbo/msi-psu-monitor"
 [project.scripts]
 msi-psu-monitor = "msi_psu_monitor.monitor:main"
 msi-psu-monitor-daemon = "msi_psu_monitor.daemon:main"
+psu = "msi_psu_monitor.psu:main"
 
 [tool.setuptools.packages.find]
 include = ["msi_psu_monitor*"]

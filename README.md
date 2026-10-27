@@ -152,7 +152,11 @@ msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
                 [--show-alert-log]
                 [--ocp] [--dump-thresholds] [--ocp-set ...]
                 [--load-thresholds FILE] [--no-alerts] [--config CONFIG]
-                [--dump-config] [--verbose] [--quiet] [--version]
+                [--dump-config] [--verbose] [--quiet] [--version] [menu]
+
+`psu` is the short front door installed next to the main command: a bare `psu`
+opens the menu, and `psu --once` / `psu --watch 1` behave exactly like the
+corresponding `msi-psu-monitor` invocations.
 
   -f, --format     Output format: text (default), json, prometheus
   -w, --watch      Watch mode; optional refresh seconds (default: [monitor]
@@ -183,12 +187,12 @@ msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
                    files: --once/--serial/--format/-O do not apply)
       --dashboard-text  Live terminal dashboard: coloured bars in the console,
                    no browser; --once/--watch/--export/--format/-O do not apply
-      --menu       Grouped interactive menu over the normal commands: arrows or
-                   digits select, Enter runs, q/Esc quits (snapshot, watch,
-                   dashboard, export, OCP, thresholds, log, alert log, config);
-                   the header shows the last action's result, pipes get a
-                   numbered prompt; 9 entries in Monitor/History/System groups.
-                   A bare `menu` is accepted as the same switch.
+      --menu       Full interactive menu over every action (22 entries grouped
+                   Monitor/History/Writes/System): arrows or digits select,
+                   Enter runs, q/Esc quits; write entries prompt for their
+                   parameters and ask for confirmation. The header shows the
+                   last result; pipes get a numbered prompt. A bare `menu` word
+                   is the same switch, and the installed `psu` command opens it.
       --port       Dashboard port (default 8899)
       --show-log   Dump the PSU black-box alert records (C1h; this format is
                    project-defined because MSI Center never reads that log)
@@ -220,6 +224,7 @@ or an argparse usage error (`2` is argparse's own convention and is not remapped
 # Headless console views: live coloured dashboard and the numbered menu
 sudo msi-psu-monitor --dashboard-text
 sudo msi-psu-monitor --menu
+psu                       # same menu via the short installed command
 
 # Machine-readable output for scripting
 sudo msi-psu-monitor -f json

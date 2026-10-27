@@ -8,6 +8,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`psu` front door**: the installed `psu` command opens the interactive menu
+  with no arguments and passes any explicit arguments through unchanged
+  (`psu --once` == `msi-psu-monitor --once`). Shipped by the source install,
+  the tarball and both `.deb` packages.
+- **The menu covers every action**: snapshot (text/JSON/Prometheus), live view
+  (fixed or prompted interval), terminal and web dashboards, CSV export
+  (last hour or prompted window/columns), OCP view, threshold dump, black box,
+  alert log, fan auto/custom duty, Zero Fan, buzzer, rail mode, OCP write/load,
+  effective config, and the serial filter — 22 entries in four groups. Every
+  write prompts for its parameters and asks for explicit confirmation before
+  touching the PSU.
 - **Menu thresholds entry** (`6`): a read-only `--dump-thresholds` view joins
   the `--menu` command list, so the MPG TS 0xC0 configuration can be inspected
   from the menu like `--ocp`, without a write path anywhere near it.

@@ -112,10 +112,20 @@ MSI_PSU_DEMO=1 MSI_PSU_STATE_DIR="$STATE" "$DIST/msi-psu-monitor" --show-alert-l
 MSI_PSU_DEMO=1 MSI_PSU_DEMO_MODEL=ai1300p MSI_PSU_STATE_DIR="$STATE" "$DIST/msi-psu-monitor" --once | grep -q 'AC Input' || die "frozen VIN/AC Input missing"
 
 install -m 755 "$DIST/msi-psu-monitor" "$DIST/msi-psu-monitor-daemon" "$ROOT/dist/bin/linux-$ARCH/"
+cat > "$ROOT/dist/bin/linux-$ARCH/psu" <<'EOF'
+#!/bin/sh
+exec "$(dirname "$0")/msi-psu-monitor" menu "$@"
+EOF
+chmod 755 "$ROOT/dist/bin/linux-$ARCH/psu"
 
 STAGE="$BUILD/release/msi-psu-monitor_${VERSION}_linux_${ARCH}"
 mkdir -p "$STAGE/docs"
 install -m 755 "$DIST/msi-psu-monitor" "$DIST/msi-psu-monitor-daemon" "$STAGE/"
+cat > "$STAGE/psu" <<'EOF'
+#!/bin/sh
+exec "$(dirname "$0")/msi-psu-monitor" menu "$@"
+EOF
+chmod 755 "$STAGE/psu"
 install -m 755 "$ROOT/scripts/install_binary.sh" "$STAGE/install.sh"
 install -m 755 "$ROOT/scripts/uninstall_binary.sh" "$STAGE/uninstall.sh"
 install -m 644 "$ROOT/systemd/99-msi-psu.rules" "$ROOT/systemd/msi-psu-monitor.service" "$STAGE/"
@@ -127,7 +137,7 @@ install -m 644 "$ROOT/docs/protocol.md" "$ROOT/docs/verify.md" "$ROOT/docs/relea
 printf 'version=%s\narch=%s\ndeb_arch=%s\nbuild_glibc=%s\n' "$VERSION" "$ARCH" "$DEB_ARCH" "$GLIBC" > "$STAGE/BUILD-INFO"
 (
     cd "$STAGE"
-    sha256sum msi-psu-monitor msi-psu-monitor-daemon install.sh uninstall.sh > SHA256SUMS
+    sha256sum msi-psu-monitor msi-psu-monitor-daemon psu install.sh uninstall.sh > SHA256SUMS
 )
 
 OUT="$ROOT/dist/msi-psu-monitor_${VERSION}_linux_${ARCH}.tar.gz"

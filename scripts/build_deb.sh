@@ -60,15 +60,15 @@ install -m 644 "$ROOT/docs/copyright" "$STAGE/usr/share/doc/$PKG/copyright"
 install -m 644 "$ROOT/docs/msi-psu-monitor.conf.example" \
     "$STAGE/etc/msi-psu-monitor.conf"
 
-for entry in monitor daemon; do
-    name="msi-psu-monitor"
-    [ "$entry" = daemon ] && name="msi-psu-monitor-daemon"
+for spec in "msi-psu-monitor:monitor" "msi-psu-monitor-daemon:daemon" "psu:psu"; do
+    name=${spec%%:*}
+    module=${spec##*:}
     cat > "$STAGE/usr/bin/$name" <<EOF
 #!/usr/bin/python3
 # Generated console script for $PKG.
 import re
 import sys
-from msi_psu_monitor.$entry import main
+from msi_psu_monitor.$module import main
 if __name__ == '__main__':
     sys.argv[0] = re.sub(r'(-script\\.pyw|\\.exe)?\$', '', sys.argv[0])
     sys.exit(main())

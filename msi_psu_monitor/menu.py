@@ -3,7 +3,7 @@
 Interaction model follows mature MIT terminal menus (simple-term-menu,
 console-menu, pick, PyTermGUI — all four licence files were verified against
 the sdist before this design was fixed): arrow keys move a highlighted
-selection, Enter runs it, digits jump to an entry, ``q``/``Esc`` quit, ``?``
+selection, Enter runs it, digits 1-9 jump to an entry, ``q``/``Esc`` quit, ``?``
 toggles the key legend, the list scrolls when the terminal is short, the
 screen is cleared between actions and the last action's result stays visible
 in the header.
@@ -19,9 +19,11 @@ Non-interactive stdout/stdin (pipes, tests, ``TERM=dumb``) falls back to the
 numbered line prompt, which is also what the automated tests drive.
 """
 
+import argparse
 import contextlib
 import copy
 import io
+import math
 import os
 import pydoc
 import select
@@ -61,32 +63,80 @@ class Item:
     action: str
 
 
-# The numbers match the on-screen order exactly (Monitor block, then History,
-# then System).  They used to drift (the alert log sat at ``8`` while ``7``
-# rendered first), which broke the digit-jump contract for anyone reading
-# top-down.
+# The numbers match the on-screen order exactly, group by group.  They used to
+# drift (the alert log sat at ``8`` while ``7`` rendered first), which broke the
+# digit-jump contract for anyone reading top-down.  Every CLI action has an
+# entry: the read-only views first, then the control writes (which ask for their
+# parameters and a confirmation before touching the PSU), then system helpers.
 ITEMS = (
     Item('1', 'Monitor', 'Snapshot', 'msi-psu-monitor --once', 'single snapshot', 'once'),
-    Item('2', 'Monitor', 'Live view', 'msi-psu-monitor --watch 1', 'refresh 1s (Ctrl-C)', 'watch'),
+    Item(
+        '2',
+        'Monitor',
+        'Snapshot JSON',
+        'msi-psu-monitor --once -f json',
+        'machine-readable snapshot',
+        'once_json',
+    ),
     Item(
         '3',
         'Monitor',
-        'Dashboard',
+        'Snapshot Prom',
+        'msi-psu-monitor --once -f prometheus',
+        'textfile-collector format',
+        'once_prometheus',
+    ),
+    Item(
+        '4',
+        'Monitor',
+        'Live 1 s',
+        'msi-psu-monitor --watch 1',
+        'refresh 1s (Ctrl-C)',
+        'watch',
+    ),
+    Item(
+        '5',
+        'Monitor',
+        'Live custom',
+        'msi-psu-monitor --watch <seconds>',
+        'prompt for the interval (Ctrl-C)',
+        'watch_custom',
+    ),
+    Item(
+        '6',
+        'Monitor',
+        'Term dashboard',
         'msi-psu-monitor --dashboard-text',
         'coloured terminal view (Ctrl-C)',
         'dashboard',
     ),
     Item(
-        '4',
+        '7',
+        'Monitor',
+        'Web dashboard',
+        'msi-psu-monitor --dashboard',
+        'browser on 127.0.0.1 (Ctrl-C)',
+        'dashboard_web',
+    ),
+    Item(
+        '8',
         'History',
-        'Export CSV',
+        'Export 1 h',
         'msi-psu-monitor --export --from 1h',
         'last hour of history',
         'export',
     ),
-    Item('5', 'History', 'OCP', 'msi-psu-monitor --ocp', 'thresholds + state (TS)', 'ocp'),
     Item(
-        '6',
+        '9',
+        'History',
+        'Export custom',
+        'msi-psu-monitor --export --from <window> --columns <cols>',
+        'prompt window and columns',
+        'export_custom',
+    ),
+    Item('10', 'History', 'OCP', 'msi-psu-monitor --ocp', 'thresholds + state (TS)', 'ocp'),
+    Item(
+        '11',
         'History',
         'Thresholds',
         'msi-psu-monitor --dump-thresholds',
@@ -94,7 +144,7 @@ ITEMS = (
         'thresholds',
     ),
     Item(
-        '7',
+        '12',
         'History',
         'Black box',
         'msi-psu-monitor --show-log',
@@ -102,7 +152,7 @@ ITEMS = (
         'log',
     ),
     Item(
-        '8',
+        '13',
         'History',
         'Alert log',
         'msi-psu-monitor --show-alert-log',
@@ -110,15 +160,79 @@ ITEMS = (
         'alerts',
     ),
     Item(
-        '9',
+        '14',
+        'Writes',
+        'Fan auto',
+        'msi-psu-monitor --fan-mode auto',
+        'PSU curve (41h + F1h)',
+        'fan_auto',
+    ),
+    Item(
+        '15',
+        'Writes',
+        'Fan duty',
+        'msi-psu-monitor --fan-mode customized --fan-duty <0-100>',
+        'prompt the duty, then write + verify',
+        'fan_duty',
+    ),
+    Item(
+        '16',
+        'Writes',
+        'Zero Fan',
+        'msi-psu-monitor --zero-fan on|off',
+        '43h + F1h (12+4 models)',
+        'zero_fan',
+    ),
+    Item(
+        '17',
+        'Writes',
+        'Buzzer',
+        'msi-psu-monitor --buzzer-toggle',
+        'C2h switch, no read-back',
+        'buzzer',
+    ),
+    Item(
+        '18',
+        'Writes',
+        'Rail mode',
+        'msi-psu-monitor --set-rail multi|single',
+        '0xC0 1 byte + F1h (MEG P)',
+        'rail',
+    ),
+    Item(
+        '19',
+        'Writes',
+        'OCP write',
+        'msi-psu-monitor --ocp-set <5 values[,on|off]>',
+        'C0h + F1h, verified read-back',
+        'ocp_write',
+    ),
+    Item(
+        '20',
+        'Writes',
+        'OCP load',
+        'msi-psu-monitor --load-thresholds <file>',
+        'write values from a JSON dump',
+        'ocp_load',
+    ),
+    Item(
+        '21',
         'System',
         'Config',
         'msi-psu-monitor --dump-config',
         'effective configuration',
         'config',
     ),
+    Item(
+        '22',
+        'System',
+        'Serial',
+        'msi-psu-monitor --serial <serial>',
+        'filter later actions to one PSU',
+        'serial',
+    ),
 )
-GROUPS = ('Monitor', 'History', 'System')
+GROUPS = ('Monitor', 'History', 'Writes', 'System')
 
 
 class Action(NamedTuple):
@@ -195,26 +309,204 @@ def _action_alerts(psu, args, cfg, monitor_state, engine):
     return _paged(monitor.run_show_alert_log, local, cfg)
 
 
+# ---- read-only variants -------------------------------------------------
+
+
+def _action_once_json(psu, args, cfg, monitor_state, engine):
+    local = copy.copy(args)
+    local.format = 'json'
+    return _paged(monitor.run_once, psu, local, cfg, monitor_state, engine)
+
+
+def _action_once_prometheus(psu, args, cfg, monitor_state, engine):
+    local = copy.copy(args)
+    local.format = 'prometheus'
+    return _paged(monitor.run_once, psu, local, cfg, monitor_state, engine)
+
+
+def _action_watch_custom(psu, args, cfg, monitor_state, engine):
+    raw = _ask('Refresh interval in seconds (e.g. 2): ')
+    try:
+        interval = float(raw) if raw is not None else None
+    except ValueError:
+        interval = None
+    if interval is None or not math.isfinite(interval) or interval <= 0:
+        print('Error: the interval must be a positive number.')
+        return monitor.EXIT_ERROR
+    local = copy.copy(args)
+    local.watch = interval
+    local.interval = None
+    local.dashboard_text = False
+    local.output = None
+    return monitor.run_watch(psu, local, cfg, monitor_state, engine)
+
+
+def _action_dashboard_web(psu, args, cfg, monitor_state, engine):
+    """Serve the browser page; reads history files, never touches hidraw."""
+    local = copy.copy(args)
+    local.port = local.port or cfg.get('port')
+    return monitor.run_dashboard(local, cfg)
+
+
+def _action_export_custom(psu, args, cfg, monitor_state, engine):
+    window = _ask('Window (e.g. 30m, 2h, 7d; empty = 1h): ') or '1h'
+    columns = _ask('Columns (e.g. cpu,gpu,temp; empty = all): ')
+    local = copy.copy(args)
+    local.export = True
+    local.format = 'text'
+    local.from_spec = window
+    local.columns = columns or None
+    local.output = None
+    return _paged(monitor.run_export, local, cfg)
+
+
+# ---- control writes (parameter prompts + explicit confirmation) ---------
+
+
+def _action_fan_auto(psu, args, cfg, monitor_state, engine):
+    if not _confirm('Write fan mode auto/performance (41h + F1h)'):
+        print('Cancelled.')
+        return monitor.EXIT_OK
+    local = copy.copy(args)
+    local.fan_mode = monitor.FAN_MODE_AUTO
+    local.fan_duty = None
+    return monitor.run_write_controls(psu, local)
+
+
+def _action_fan_duty(psu, args, cfg, monitor_state, engine):
+    raw = _ask('Fan duty in percent (0-100): ')
+    try:
+        duty = int(raw) if raw is not None else -1
+    except ValueError:
+        duty = -1
+    if not 0 <= duty <= 100:
+        print('Error: the duty must be an integer between 0 and 100.')
+        return monitor.EXIT_ERROR
+    if not _confirm(f'Write fan mode customized with duty {duty}% (41h + F1h)'):
+        print('Cancelled.')
+        return monitor.EXIT_OK
+    local = copy.copy(args)
+    local.fan_mode = monitor.FAN_MODE_CUSTOMIZED
+    local.fan_duty = duty
+    return monitor.run_write_controls(psu, local)
+
+
+def _action_zero_fan(psu, args, cfg, monitor_state, engine):
+    raw = (_ask('Zero Fan state (on/off): ') or '').lower()
+    if raw not in ('on', 'off'):
+        print('Error: choose on or off.')
+        return monitor.EXIT_ERROR
+    if not _confirm(f'Write Zero Fan {raw} (43h + F1h)'):
+        print('Cancelled.')
+        return monitor.EXIT_OK
+    local = copy.copy(args)
+    local.zero_fan = raw
+    return monitor.run_write_controls(psu, local)
+
+
+def _action_buzzer(psu, args, cfg, monitor_state, engine):
+    if not _confirm('Toggle the C2h buzzer switch (no read-back)'):
+        print('Cancelled.')
+        return monitor.EXIT_OK
+    local = copy.copy(args)
+    local.buzzer_off = True
+    return monitor.run_write_controls(psu, local)
+
+
+def _action_rail(psu, args, cfg, monitor_state, engine):
+    raw = (_ask('Rail protection mode (multi/single): ') or '').lower()
+    if raw not in (monitor.RAIL_MODE_MULTI, monitor.RAIL_MODE_SINGLE):
+        print('Error: choose multi or single.')
+        return monitor.EXIT_ERROR
+    if not _confirm(f'Write rail mode {raw} (0xC0 + F1h, read-back verified)'):
+        print('Cancelled.')
+        return monitor.EXIT_OK
+    local = copy.copy(args)
+    local.set_rail = raw
+    return monitor.run_write_controls(psu, local)
+
+
+def _action_ocp_write(psu, args, cfg, monitor_state, engine):
+    raw = _ask('POINT_A,DIFF_A,TRIGGER_S,DIFF_TRIGGER_S,WARNING_S[,on|off]: ')
+    if not raw:
+        print('Error: five values are required (see --help for the ranges).')
+        return monitor.EXIT_ERROR
+    try:
+        parsed = monitor._ocp_setting(raw)
+    except argparse.ArgumentTypeError as exc:
+        print(f'Error: {exc}')
+        return monitor.EXIT_ERROR
+    if not _confirm('Write OCP thresholds (C0h + F1h, read-back verified)'):
+        print('Cancelled.')
+        return monitor.EXIT_OK
+    local = copy.copy(args)
+    local.dump_thresholds = False
+    local.ocp_set = parsed
+    local.load_thresholds = None
+    local.format = 'text'
+    local.output = None
+    return monitor.run_ocp_thresholds(psu, local)
+
+
+def _action_ocp_load(psu, args, cfg, monitor_state, engine):
+    path = _ask('JSON file with the thresholds (dump -f json output): ')
+    if not path:
+        print('Error: a file path is required.')
+        return monitor.EXIT_ERROR
+    if not _confirm(f'Write the thresholds from {path} (C0h + F1h, read-back verified)'):
+        print('Cancelled.')
+        return monitor.EXIT_OK
+    local = copy.copy(args)
+    local.dump_thresholds = False
+    local.ocp_set = None
+    local.load_thresholds = path
+    local.format = 'text'
+    local.output = None
+    return monitor.run_ocp_thresholds(psu, local)
+
+
+def _action_serial(psu, args, cfg, monitor_state, engine):
+    """Set the serial filter used by later device actions in this session."""
+    raw = _ask('PSU serial (empty = first attached PSU): ')
+    args.serial = raw or None
+    print(f'Serial filter: {args.serial or "first attached PSU"}')
+    return monitor.EXIT_OK
+
+
 #: Action name -> spec.  Adding a menu command means one Item above, one
 #: entry here and nothing else; the footer, the prompt range and the device
 #: set are all derived.
 ACTIONS = {
     'once': Action(needs_device=True, runner=_action_once),
+    'once_json': Action(needs_device=True, runner=_action_once_json),
+    'once_prometheus': Action(needs_device=True, runner=_action_once_prometheus),
     'watch': Action(needs_device=True, runner=_action_watch),
+    'watch_custom': Action(needs_device=True, runner=_action_watch_custom),
     'dashboard': Action(needs_device=True, runner=_action_dashboard),
+    'dashboard_web': Action(needs_device=False, runner=_action_dashboard_web),
     'export': Action(needs_device=False, runner=_action_export),
+    'export_custom': Action(needs_device=False, runner=_action_export_custom),
     'ocp': Action(needs_device=True, runner=_action_ocp),
     'thresholds': Action(needs_device=True, runner=_action_thresholds),
     'log': Action(needs_device=True, runner=_action_log),
-    'config': Action(needs_device=False, runner=_action_config),
     'alerts': Action(needs_device=False, runner=_action_alerts),
+    'fan_auto': Action(needs_device=True, runner=_action_fan_auto),
+    'fan_duty': Action(needs_device=True, runner=_action_fan_duty),
+    'zero_fan': Action(needs_device=True, runner=_action_zero_fan),
+    'buzzer': Action(needs_device=True, runner=_action_buzzer),
+    'rail': Action(needs_device=True, runner=_action_rail),
+    'ocp_write': Action(needs_device=True, runner=_action_ocp_write),
+    'ocp_load': Action(needs_device=True, runner=_action_ocp_load),
+    'config': Action(needs_device=False, runner=_action_config),
+    'serial': Action(needs_device=False, runner=_action_serial),
 }
 _DEVICE_ACTIONS = frozenset(name for name, action in ACTIONS.items() if action.needs_device)
 
 
 def _footer_text():
-    """Key legend; the jump range follows the item count."""
-    return f'Up/Down move   Enter run   1-{len(ITEMS)} jump   q/Esc quit   ? keys'
+    """Key legend; the digit-jump range covers the single-key numbers only."""
+    jump = min(len(ITEMS), 9)
+    return f'Up/Down move   Enter run   1-{jump} jump   q/Esc quit   ? keys'
 
 
 MIN_WIDTH = 40
@@ -484,6 +776,20 @@ def _paged(action, *args):
     if text:
         _page(text.rstrip('\n'))
     return code
+
+
+def _ask(prompt):
+    """Read one line for a parameter prompt; None on EOF / Ctrl-C."""
+    try:
+        return input(prompt).strip()
+    except (EOFError, KeyboardInterrupt):
+        return None
+
+
+def _confirm(label):
+    """Explicit yes/no before a PSU write; anything but 'y' cancels."""
+    answer = _ask(f'{label}? [y/N] ')
+    return bool(answer) and answer.lower() in ('y', 'yes')
 
 
 def _run(action, psu, args, cfg, monitor_state, engine):

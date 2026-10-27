@@ -22,13 +22,13 @@ warn() { echo "[WARN] $*"; }
 die()  { echo "[ERROR] $*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "run as root: sudo ./install.sh"
-for tool in msi-psu-monitor msi-psu-monitor-daemon; do
+for tool in msi-psu-monitor msi-psu-monitor-daemon psu; do
     [ -x "$SRC/$tool" ] || die "$tool is missing next to install.sh"
 done
 
 info "Installing the executables into $PREFIX/bin"
 install -d "$PREFIX/bin"
-install -m 755 "$SRC/msi-psu-monitor" "$SRC/msi-psu-monitor-daemon" "$PREFIX/bin/"
+install -m 755 "$SRC/msi-psu-monitor" "$SRC/msi-psu-monitor-daemon" "$SRC/psu" "$PREFIX/bin/"
 
 if command -v udevadm >/dev/null 2>&1; then
     info "Installing the udev rule"

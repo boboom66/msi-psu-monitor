@@ -55,6 +55,11 @@ chmod 755 "$STAGE"
 
 install -d "$STAGE/DEBIAN" "$STAGE/usr/bin" "$STAGE/lib/systemd/system" "$STAGE/lib/udev/rules.d" "$STAGE/etc" "$STAGE/usr/share/doc/$PKG"
 install -m 755 "$BIN_DIR/msi-psu-monitor" "$BIN_DIR/msi-psu-monitor-daemon" "$STAGE/usr/bin/"
+cat > "$STAGE/usr/bin/psu" <<'EOF'
+#!/bin/sh
+exec /usr/bin/msi-psu-monitor menu "$@"
+EOF
+chmod 755 "$STAGE/usr/bin/psu"
 install -m 644 "$ROOT/systemd/msi-psu-monitor.service" "$STAGE/lib/systemd/system/"
 install -m 644 "$ROOT/systemd/99-msi-psu.rules" "$STAGE/lib/udev/rules.d/"
 install -m 644 "$ROOT/docs/msi-psu-monitor.conf.example" "$STAGE/etc/msi-psu-monitor.conf"

@@ -355,7 +355,7 @@ def test_item_numbers_are_dense_and_match_the_visual_order():
     # The alert log reads local state files; opening hidraw for it would steal
     # the device from a running daemon just to print a file.
     assert alerts.action not in menu._DEVICE_ACTIONS
-    assert f'1-{len(menu.ITEMS)} jump' in menu._footer_text()
+    assert f'1-{min(len(menu.ITEMS), 9)} jump' in menu._footer_text()
 
 
 def test_the_thresholds_entry_is_a_read_only_device_dump():
@@ -644,3 +644,167 @@ def test_the_word_menu_is_a_shorthand_for_the_flag(monkeypatch):
 def test_the_word_menu_still_rejects_a_conflicting_mode(monkeypatch, capsys):
     assert _run_main(monkeypatch, ['menu', '--once']) == 2
     assert '--menu' in capsys.readouterr().err
+
+
+def test_every_cli_action_is_reachable_from_the_menu():
+    """The menu is the product's front door for hardware work: no action may be
+    reachable only by remembering a flag."""
+    referenced = {item.action for item in menu.ITEMS}
+    assert referenced == set(menu.ACTIONS)
+    assert len(menu.ITEMS) == 22
+    for action in (
+        'once',
+        'once_json',
+        'once_prometheus',
+        'watch',
+        'watch_custom',
+        'dashboard',
+        'dashboard_web',
+        'export',
+        'export_custom',
+        'ocp',
+        'thresholds',
+        'log',
+        'alerts',
+        'fan_auto',
+        'fan_duty',
+        'zero_fan',
+        'buzzer',
+        'rail',
+        'ocp_write',
+        'ocp_load',
+        'config',
+        'serial',
+    ):
+        assert action in referenced, action
+
+
+def test_fan_duty_entry_prompts_and_writes(monkeypatch):
+    answers = iter(['55', 'y'])
+    monkeypatch.setattr(builtins, 'input', lambda *a: next(answers))
+    written = []
+    monkeypatch.setattr(
+        monitor,
+        'run_write_controls',
+        lambda psu, args: written.append(args) or monitor.EXIT_OK,
+    )
+    code = menu._run(
+        'fan_duty',
+        StubPSU(),
+        monitor.build_parser().parse_args([]),
+        {'retention_days': 30},
+        None,
+        None,
+    )
+    assert code == monitor.EXIT_OK
+    assert written[0].fan_mode == monitor.FAN_MODE_CUSTOMIZED
+    assert written[0].fan_duty == 55
+
+
+def test_a_write_entry_is_cancelled_without_confirmation(monkeypatch, capsys):
+    answers = iter(['55', 'n'])
+    monkeypatch.setattr(builtins, 'input', lambda *a: next(answers))
+
+    def bomb(*_a):
+        raise AssertionError('a cancelled write must not run')
+
+    monkeypatch.setattr(monitor, 'run_write_controls', bomb)
+    code = menu._run(
+        'fan_duty',
+        StubPSU(),
+        monitor.build_parser().parse_args([]),
+        {'retention_days': 30},
+        None,
+        None,
+    )
+    assert code == monitor.EXIT_OK
+    assert 'Cancelled.' in capsys.readouterr().out
+
+
+def test_buzzer_entry_writes_after_confirmation(monkeypatch):
+    monkeypatch.setattr(builtins, 'input', lambda *a: 'y')
+    written = []
+    monkeypatch.setattr(
+        monitor,
+        'run_write_controls',
+        lambda psu, args: written.append(args) or monitor.EXIT_OK,
+    )
+    assert (
+        menu._run(
+            'buzzer',
+            StubPSU(),
+            monitor.build_parser().parse_args([]),
+            {'retention_days': 30},
+            None,
+            None,
+        )
+        == monitor.EXIT_OK
+    )
+    assert written[0].buzzer_off is True
+
+
+def test_ocp_write_entry_validates_then_confirms(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(
+        monitor,
+        'run_ocp_thresholds',
+        lambda psu, args: calls.append(args) or monitor.EXIT_OK,
+    )
+    answers = iter(['1,2,3,4,5'])
+    monkeypatch.setattr(builtins, 'input', lambda *a: next(answers))
+    assert (
+        menu._run(
+            'ocp_write',
+            StubPSU(),
+            monitor.build_parser().parse_args([]),
+            {'retention_days': 30},
+            None,
+            None,
+        )
+        == monitor.EXIT_ERROR
+    )
+    assert calls == []
+    assert 'Error:' in capsys.readouterr().out
+
+    answers = iter(['12,5,20,20,180,on', 'y'])
+    monkeypatch.setattr(builtins, 'input', lambda *a: next(answers))
+    assert (
+        menu._run(
+            'ocp_write',
+            StubPSU(),
+            monitor.build_parser().parse_args([]),
+            {'retention_days': 30},
+            None,
+            None,
+        )
+        == monitor.EXIT_OK
+    )
+    assert calls[0].ocp_set['point_a'] == 12
+    assert calls[0].ocp_set['enabled'] is True
+
+
+def test_serial_entry_sets_the_filter(monkeypatch):
+    args = monitor.build_parser().parse_args([])
+    monkeypatch.setattr(builtins, 'input', lambda *a: 'SN-42')
+    assert menu._run('serial', None, args, {'retention_days': 30}, None, None) == monitor.EXIT_OK
+    assert args.serial == 'SN-42'
+
+
+def test_the_psu_command_defaults_to_the_menu(monkeypatch):
+    from msi_psu_monitor import psu
+
+    seen = []
+    monkeypatch.setattr(psu.monitor, 'main', lambda: seen.append(list(sys.argv)))
+    monkeypatch.setattr(sys, 'argv', ['psu'])
+    psu.main()
+    assert seen == [['psu', 'menu']]
+
+
+def test_the_psu_command_passes_explicit_arguments_through(monkeypatch):
+    from msi_psu_monitor import psu
+
+    seen = []
+    monkeypatch.setattr(psu.monitor, 'main', lambda: seen.append(list(sys.argv)))
+    monkeypatch.setattr(sys, 'argv', ['psu', '--version'])
+    psu.main()
+    assert seen == [['psu', '--version']]

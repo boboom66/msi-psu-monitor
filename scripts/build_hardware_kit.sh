@@ -14,6 +14,7 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE/bin" "$STAGE/source" "$STAGE/systemd" "$STAGE/docs"
 
 cp "$BIN_DIR/msi-psu-monitor" "$BIN_DIR/msi-psu-monitor-daemon" "$STAGE/bin/"
+if [ -f "$BIN_DIR/psu" ]; then cp "$BIN_DIR/psu" "$STAGE/bin/"; fi
 chmod 755 "$STAGE/bin/"*
 cp -a msi_psu_monitor "$STAGE/source/"
 rm -rf "$STAGE/source/msi_psu_monitor/__pycache__"

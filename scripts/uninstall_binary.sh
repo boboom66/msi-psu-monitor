@@ -25,7 +25,7 @@ if [ -d /run/systemd/system ] && [ -e "$UNIT" ]; then
 fi
 
 info "Removing the executables"
-rm -f "$PREFIX/bin/msi-psu-monitor" "$PREFIX/bin/msi-psu-monitor-daemon"
+rm -f "$PREFIX/bin/msi-psu-monitor" "$PREFIX/bin/msi-psu-monitor-daemon" "$PREFIX/bin/psu"
 
 if [ -e "$UNIT" ]; then
     rm -f "$UNIT"
