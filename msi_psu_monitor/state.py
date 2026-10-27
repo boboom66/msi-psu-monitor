@@ -22,6 +22,7 @@ import logging
 import math
 import os
 import re
+import stat
 import time
 from collections import deque
 from datetime import date, datetime
@@ -153,6 +154,21 @@ def fsync_directory(directory):
         pass
     finally:
         os.close(fd)
+
+
+def is_regular_file(path):
+    """lstat-based regular-file test for data files in the state directory.
+
+    ``Path.is_file()`` *follows symlinks*, so a symlink aimed at a FIFO or at
+    ``/dev/zero`` passed every "reject special files" guard below and then
+    blocked the reader forever — the exact hang those guards exist to prevent
+    (the daemon's history write, the dashboard's history listing, the alert-log
+    viewer and ``state.json``/``latest.json`` loads all open these paths).
+    """
+    try:
+        return stat.S_ISREG(os.lstat(path).st_mode)
+    except OSError:
+        return False
 
 
 def atomic_write_text(path, text):
@@ -395,7 +411,7 @@ class MonitorState:
         if not target.exists():
             # The normal first-run case: no state yet, nothing to warn about.
             return cls()
-        if not target.is_file():
+        if not is_regular_file(target):
             # A FIFO, a device node or a directory named state.json: read_text()
             # on /dev/zero returns bytes forever (until MemoryError), and the
             # reader's contract is that a damaged file cannot wedge the process.
@@ -502,7 +518,7 @@ def append_history(state_dir, sensors, ts=None):
     ts = time.time() if ts is None else float(ts)
     path = history_path(state_dir, date.fromtimestamp(ts))
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists() and not path.is_file():
+    if path.exists() and not is_regular_file(path):
         # A FIFO here would block the daemon in open('a') forever. A directory
         # is just as unappendable; fail like any other I/O error.
         raise OSError(f'{path} is not a regular file')
@@ -616,7 +632,7 @@ def iter_history(state_dir, since_ts=None):
     positionally whenever the header is not the canonical one.
     """
     for path in sorted(Path(state_dir).glob(f'{HISTORY_PREFIX}*{HISTORY_SUFFIX}')):
-        if not path.is_file():
+        if not is_regular_file(path):
             # The glob matches a directory, a FIFO or a symlink to /dev/zero too;
             # reading one of those never returns (an unbounded read until
             # MemoryError), which would wedge the thread that serves the page.
@@ -715,7 +731,7 @@ def append_alert_log(state_dir, message, ts=None):
         path.parent.mkdir(parents=True, exist_ok=True)
     except OSError:
         pass
-    if path.exists() and not path.is_file():
+    if path.exists() and not is_regular_file(path):
         # Must be checked outside the rotation except: swallowing this OSError
         # used to fall through to open('a') on the FIFO, which blocks forever.
         logger.warning(f'Cannot write the alert log {path}: not a regular file')
@@ -749,7 +765,9 @@ def iter_alert_log(state_dir, limit=None):
         return []
     paths = []
     for path in Path(state_dir).glob(f'{ALERT_LOG_PREFIX}*'):
-        if path.is_file() and path.name.endswith((ALERT_LOG_SUFFIX, ALERT_LOG_SUFFIX + '.1')):
+        if is_regular_file(path) and path.name.endswith(
+            (ALERT_LOG_SUFFIX, ALERT_LOG_SUFFIX + '.1')
+        ):
             paths.append(path)
     # alerts-YYYYMMDD.log.1 is older than alerts-YYYYMMDD.log; sort rotated first
     # within a day and days in filename order.
@@ -863,7 +881,7 @@ def read_live_snapshot(state_dir, max_age=LIVE_MAX_AGE_S, now=None):
     """Return the latest sample when it is fresh, else None."""
     now = time.time() if now is None else float(now)
     target = live_path(state_dir)
-    if not target.is_file():
+    if not is_regular_file(target):
         # A FIFO/device named latest.json would block read_text() forever (and
         # wedge the dashboard thread); only a regular file is a snapshot.
         return None

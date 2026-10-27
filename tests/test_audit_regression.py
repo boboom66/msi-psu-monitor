@@ -1064,3 +1064,45 @@ def test_once_is_rejected_with_a_mode_that_would_ignore_it(argv):
     with pytest.raises(SystemExit) as exc:
         monitor._validate_args(parser, args)
     assert exc.value.code == 2
+
+
+def test_symlinks_to_special_files_are_rejected_like_their_target(tmp_path):
+    """Path.is_file() follows symlinks: a symlink to a FIFO passed every guard.
+
+    The data-file guards exist so a hostile/accidental state directory can never
+    wedge a reader; a symlink aimed at a FIFO (or /dev/zero) evaded all of them
+    and then blocked the open forever. lstat decides now.
+    """
+    import os
+    import time
+
+    from msi_psu_monitor import state
+
+    now = time.time()
+    day = state.date.fromtimestamp(now)
+    paths = {
+        'state': tmp_path / 'state.json',
+        'history': state.history_path(tmp_path, day),
+        'alert': state.alert_log_path(tmp_path, day),
+        'live': state.live_path(tmp_path),
+    }
+    for path in paths.values():
+        target = path.with_name(path.name + '.target')
+        try:
+            os.mkfifo(target)
+        except (AttributeError, OSError):  # pragma: no cover - non-POSIX
+            pytest.skip('mkfifo is unavailable')
+        path.symlink_to(target)
+
+    # Reads must answer fast (empty/None), never hang on the FIFO.
+    assert state.MonitorState.load(paths['state']).count == 0
+    with pytest.raises(state.StateError):
+        state.MonitorState.load(paths['state'], strict=True)
+    assert state.read_live_snapshot(tmp_path, now=now + 1) is None
+    assert list(state.iter_history(tmp_path)) == []
+    assert list(state.iter_alert_log(tmp_path, limit=10)) == []
+
+    # Appends must fail like any other unappendable path, not block.
+    with pytest.raises(OSError):
+        state.append_history(tmp_path, {'temp': (30.0, 'C')}, ts=now)
+    assert state.append_alert_log(tmp_path, 'x', ts=now) is None

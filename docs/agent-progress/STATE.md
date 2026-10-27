@@ -6,7 +6,7 @@
 - HEAD: `git log -1` on `work/product-v2` (last code-green commit: `047e2d3`)
 - Baseline tag: `baseline-2026-10-26-r2`
 - Package version: `1.0.1`
-- Tests: **898 tests / 33 test modules**, per the latest recorded CI run
+- Tests: **903 tests / 33 test modules**, per the latest recorded CI run
 - Last code gates: CI run `40458242818` (ci#43) on `047e2d3` — **PASS** (898
   tests; coverage/smoke/soak/deb on 3.10/3.12/3.13 + freeze). The audit's first
   batch was green in ci#41 (`71fd135`, 896 tests); T-022 code was green in

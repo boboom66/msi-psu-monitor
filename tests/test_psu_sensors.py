@@ -858,6 +858,30 @@ def test_read_vin_is_refused_on_a_ts_model():
     assert psu.read_vin() is None
 
 
+def test_read_alert_status_refuses_a_truncated_bitmap():
+    """A partial E1h reply must not label a prefix of the alert list as truth.
+
+    Returning None keeps the caller's status at Unknown instead of reporting the
+    first bytes as the whole answer.
+    """
+    psu = _psu_1300ts()
+    psu.hid = RecordingHID(registers={0xE1: bytes(17)})
+    assert psu.read_alert_status() is None
+    psu.hid = RecordingHID(registers={0xE1: bytes(18)})
+    status = psu.read_alert_status()
+    assert len(status) == 18
+    assert not any(status.values())
+
+
+def test_read_alert_status_accepts_the_ai1600t_13_byte_bitmap():
+    """The Ai1600T sends 13 bytes for its 13 names — not the TS's 18."""
+    psu = _psu_1600t()
+    psu.hid = RecordingHID(registers={0xE1: bytes(13)})
+    status = psu.read_alert_status()
+    assert len(status) == 13
+    assert not any(status.values())
+
+
 def test_get_sensors_includes_vin_on_a_non_ts_model():
     psu = _psu_1300ts(commands={(0xFA, 0x51): b'MEG Ai1300P' + bytes([0])})
     psu.hid = RecordingHID(registers={0x20: bytes([0x73, 0x08])})

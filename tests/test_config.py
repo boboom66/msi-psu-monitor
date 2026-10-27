@@ -332,3 +332,87 @@ def test_unparsable_threshold_keeps_the_safe_default(tmp_path):
     conf.write_text('[alerts]\ntemp_c = soon\n', encoding='utf-8')
     cfg = load_config(str(conf))
     assert cfg['temp_c'] == 70.0
+
+
+def _base_conf(tmp_path):
+    conf = tmp_path / 'base.conf'
+    conf.write_text(
+        '[monitor]\n'
+        'interval = 3.5\n'
+        'output = /tmp/from-config\n'
+        'verbose = yes\n'
+        'serial = SN-1\n'
+        '[alerts]\n'
+        'consecutive_required = 3\n'
+        'power_w = 900\n'
+        'rail_12v_a = 100\n'
+        '[daemon]\n'
+        'state_dir = /tmp/st\n'
+        'prom_path = /tmp/p.prom\n'
+        'port = 9001\n'
+        'retention_days = 14\n'
+        'alert_log = no\n'
+        '[fan]\n'
+        'mode = customized\n'
+        'duty = 60\n'
+        'zero_fan = off\n',
+        encoding='utf-8',
+    )
+    return conf
+
+
+def test_dump_config_ini_round_trips_every_section(tmp_path):
+    """--dump-config text output must be a usable config file.
+
+    It is the documented way to snapshot an installation's effective settings;
+    a value that did not survive a reload would make that snapshot a lie.
+    """
+    import configparser
+
+    from msi_psu_monitor import monitor
+
+    cfg = load_config(str(_base_conf(tmp_path)))
+    dumped = monitor._dump_effective_config(cfg, 'text')
+    # The dump must also stay INI-parseable with the strict default parser.
+    configparser.ConfigParser().read_string(dumped)
+    round_trip = tmp_path / 'round.conf'
+    round_trip.write_text(dumped + '\n', encoding='utf-8')
+    reloaded = load_config(str(round_trip))
+    checked = (
+        'interval',
+        'output',
+        'verbose',
+        'serial',
+        'consecutive_required',
+        'power_w',
+        'rail_12v_a',
+        'state_dir',
+        'prom_path',
+        'port',
+        'retention_days',
+        'alert_log',
+        'fan_mode',
+        'fan_duty',
+        'fan_zero_fan',
+    )
+    for key in checked:
+        assert reloaded[key] == cfg[key], key
+
+
+def test_dump_config_json_round_trips(tmp_path):
+    import json
+
+    from msi_psu_monitor import monitor
+
+    cfg = load_config(str(_base_conf(tmp_path)))
+    dumped = json.loads(monitor._dump_effective_config(cfg, 'json'))
+    assert dumped['interval'] == 3.5
+    assert dumped['output'] == '/tmp/from-config'
+    assert dumped['consecutive_required'] == 3
+    assert dumped['power_w'] == 900.0
+    assert dumped['port'] == 9001
+    assert dumped['retention_days'] == 14
+    assert dumped['alert_log'] is False
+    assert dumped['fan_mode'] == 'customized'
+    assert dumped['fan_duty'] == 60
+    assert dumped['fan_zero_fan'] is False
