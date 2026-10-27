@@ -22,6 +22,9 @@ Append-only task table. `UNKNOWN` is not `PASS`.
 | T-016 | termdash: colour-width box + safe truncation | F | **DONE** | `ffb158f` | `termdash.py`, 4 new tests | CI run `40294017182` PASS | Box aligned by visible width; header/rows cut without splitting escapes |
 | T-017 | menu: `?` help, `0` quit, alert-log entry, dynamic footer | F | **DONE** | `ffb158f` | `menu.py`, 5 new tests | CI run `40294017182` PASS | `?` was decoded but ignored; alert log runs locally (no hidraw) |
 | T-018 | Intermediate CI failures fixed | F | **DONE** | `41a31a3`→`ffb158f` | runs `40293264056`, `40293672414` | CI | ruff format + stale doc count 861→870 + wrong header-line assertion |
+| T-019 | Web dashboard live badge | F | **DONE** | `ac33e89` | `dashboard.py` + harness test | CI run `40425289154` PASS | `● live` / `○ not updating` after 10 missed 1s polls; history keeps serving |
+| T-020 | PTY evidence for `--watch`/`--dashboard-text` | F | **DONE** | `195c7d8` | `tests/test_pty_watch.py` | CI run `40425289154` PASS | 4 PTY tests on Linux; SIGTERM path; found+fixed a real cursor-restore gap (`e453c3f`) |
+| T-021 | Naming/units matrix | G | **DONE** | `ac33e89` | `NAMING_MATRIX.md` | self-checked | No blocking inconsistency; 5 gaps recorded for G2 |
 
 ## Next (user-feature polish, continuing)
 

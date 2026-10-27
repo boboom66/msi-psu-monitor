@@ -36,6 +36,14 @@ All notable changes to this project are documented here. The format follows
 - **Menu `?` key**: it was decoded as "help" but silently ignored; it now
   toggles the key legend, and `0` quits the arrow-key menu like the numbered
   prompt always did.
+- **Cursor not restored when a live view is interrupted**: `run_watch` and
+  `run_dashboard_text` restored the cursor on their own paths, but an
+  interruption that escaped the loop's `finally` (a signal arriving between
+  frames) could leave the cursor hidden for the rest of the terminal session.
+  The process exit path now restores it unconditionally on a TTY.
+- **Dashboard live badge**: a stopped daemon kept the page looking live until
+  the history poll caught up; the 1 s `/api/live` poll now drives a visible
+  `● live` / `○ not updating` badge (10 missed polls turn it amber).
 
 ## [1.0.1] - 2026-10-21
 

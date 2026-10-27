@@ -21,8 +21,8 @@ gates green; full feature matrix AMBER.
 | F-02 | Device discovery | Pick the right PSU | `--serial` only | **Improve** | P1 | `--list` table, `--device`, safe default |
 | F-03 | One-shot text | Read the PSU at a glance | Smoke passes | **Keep** | P1 | Golden-output polish only |
 | F-04 | JSON | Script the readings | Smoke passes | **Keep** | P2 | Add schema version, keep keys |
-| F-05 | Watch | Watch live in a terminal | Automated pass; TTY capture missing | **Improve** | P1 | Cursor restore, JSONL decision, PTY test |
-| F-08 | Web dashboard | See history/trends in a browser | HTTP smoke passes; visual states missing | **Improve** | P1 | Empty/stale/error banner, time range, responsive |
+| F-05 | Watch | Watch live in a terminal | **DONE**: PTY evidence; real cursor-restore gap found & fixed | **Improve — DONE** | P1 | JSONL decision deferred to G2 |
+| F-08 | Web dashboard | See history/trends in a browser | **Partial DONE**: live badge added; banners/responsive next | **Improve** | P1 | Empty/stale banner text, 320px check |
 | F-09 | Export CSV | Report/share data | Smoke covers export | **Improve** | P1 | `--to`, `-O -`, timezone, column validation |
 | F-10 | Alerts | Understand and act on a warning | Alert paths pass | **Improve** | P1 | measured vs limit, source, next command, recovery |
 | F-11 | Local thresholds | Early warning before hardware trip | Config/alerts tests pass | **Keep + Improve** | P1 | Units/defaults docs, validation, `--doctor` |
