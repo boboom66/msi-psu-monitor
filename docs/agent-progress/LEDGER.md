@@ -37,3 +37,4 @@ Append-only task table. `UNKNOWN` is not `PASS`.
 - Next: design cards for OCP dry-run/backup/restore, `--doctor`, `--list`;
   then G2.
 - Then implementation, one feature per ticket.
+| T-024 | Independent audit pass (2026-10-27) | G/F | **PASS** | `047e2d3` | `docs/agent-progress/AUDIT_2026-10-27.md`; DEF-036..042 | CI `40458242818` + ci#41 | Full-tree read, 7 defects fixed with regressions; 889→898 tests; ruff/format/mypy/smoke/soak/deb/freeze green; hardware items remain BLOCKED |
