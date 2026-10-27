@@ -26,6 +26,7 @@ Append-only task table. `UNKNOWN` is not `PASS`.
 | T-020 | PTY evidence for `--watch`/`--dashboard-text` | F | **DONE** | `195c7d8` | `tests/test_pty_watch.py` | CI run `40425289154` PASS | 4 PTY tests on Linux; SIGTERM path; found+fixed a real cursor-restore gap (`e453c3f`) |
 | T-021 | Naming/units matrix | G | **DONE** | `ac33e89` | `NAMING_MATRIX.md` | self-checked | No blocking inconsistency; 5 gaps recorded for G2 |
 | T-022 | menu: grouped interactive rework | F | **DONE** | `e0f2929` | `menu.py`, `test_menu.py` (+15), README/verify/CHANGELOG/ledgers; CI run `40441033415` **PASS** | CI | App-cursor arrows (ESC O), Esc/help semantics, header status line, alt-screen lifecycle, NO_COLOR, scroll+resize, thresholds entry, lazy device open. MIT audit: simple-term-menu/console-menu/pick/PyTermGUI licence files verified; prompt_toolkit (BSD-3) and urwid (LGPL-2.1) excluded; route A+ — stdlib-only refactor, no runtime dep. 889 collected confirmed by the docs-consistency gate. Two Linux-only test bugs found and fixed on the way (`8cd1dfe`, `e0f2929`): a closed-StringIO getvalue() in the shared pty helper, and a resize sequence short one size |
+| T-023 | Organize documentation and remove stale current-status claims | G | **DONE** | `4b16f32`–`26b42ce` | docs indexes; release readiness; dated test/audit snapshots | links + `git diff --check` | Added topic indexes, made release readiness the single current status source, and labelled older test/audit counts as historical; documentation only |
 
 ## Next (user-feature polish, continuing)
 
