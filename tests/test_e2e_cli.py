@@ -145,3 +145,41 @@ def test_output_to_dev_stdout_follows_the_symlink(tmp_path):
     assert result.returncode == 0, result.stderr
     assert 'MSI PSU:' in target.read_text(encoding='utf-8')
     assert Path('/dev/stdout').is_symlink(), 'the system /dev/stdout symlink was replaced'
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='POSIX signal semantics')
+def test_daemon_stops_cleanly_on_sigterm(tmp_path):
+    """systemd stop sends SIGTERM: the resident loop must exit 0 and persist.
+
+    Unit tests call tick() directly; this drives the real entry point in a
+    subprocess, which is what the installed unit runs.
+    """
+    import signal
+    import time
+
+    env = os.environ.copy()
+    env['MSI_PSU_STATE_DIR'] = str(tmp_path)
+    env['MSI_PSU_DEMO'] = '1'
+    proc = subprocess.Popen(
+        [sys.executable, '-m', 'msi_psu_monitor.daemon', '--state-dir', str(tmp_path)],
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            if (tmp_path / 'latest.json').exists():
+                break
+            time.sleep(0.05)
+        proc.send_signal(signal.SIGTERM)
+        output, _ = proc.communicate(timeout=15)
+    finally:
+        if proc.poll() is None:  # pragma: no cover - only on a hung daemon
+            proc.kill()
+            proc.communicate()
+    assert proc.returncode == 0, output
+    assert 'Stopped after' in output
+    assert (tmp_path / 'state.json').is_file()
