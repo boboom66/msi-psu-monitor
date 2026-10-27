@@ -320,7 +320,9 @@ class MonitorDaemon:
             # engine's recovery buffer would grow for the life of the daemon.
             self._record_alerts(fired, self.engine.take_cleared())
         try:
-            monitor.apply_stats(sensors, self.state, max_gap_s=self.state_gap_s)
+            monitor.apply_stats(
+                sensors, self.state, max_gap_s=self.state_gap_s, ts=self.wall_clock()
+            )
         except Exception as exc:
             # A malformed reading must not kill the resident daemon either.
             logger.warning(f'Unexpected error while enriching the sample: {exc}')

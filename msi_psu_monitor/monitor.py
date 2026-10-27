@@ -1113,23 +1113,31 @@ def _valid_sample(sensors):
     return watts, eff
 
 
-def apply_stats(sensors, monitor_state, max_gap_s=None):
+def apply_stats(sensors, monitor_state, max_gap_s=None, ts=None):
     """Fold the sample into the cumulative stats and expose the derived values.
 
     ``max_gap_s`` must cover the caller's real cadence: the 300 s default is the
     guard against a suspend/outage, not a cap on a legitimately slow poll. A
     ``--watch 600`` or ``[daemon] sample_interval = 600`` used to exceed it on
     every single sample, so the kWh integral silently stopped for the whole run.
+
+    ``ts`` is the caller's own wall clock. The daemon injects ``wall_clock`` for
+    every other timestamp (history rows, live snapshot, alert log); letting the
+    energy integral read ``time.time()`` directly made the state file disagree
+    with the history it was written next to, and made the energy path impossible
+    to test deterministically.
     """
     if monitor_state is None:
         return
     monitor_state.note_identity(sensors)
     sample = _valid_sample(sensors)
     if sample is not None:
-        if max_gap_s is None:
-            monitor_state.update(*sample)
-        else:
-            monitor_state.update(*sample, max_gap_s=max_gap_s)
+        monitor_state.update(
+            sample[0],
+            sample[1],
+            ts=ts,
+            max_gap_s=stats.MAX_SAMPLE_GAP_S if max_gap_s is None else max_gap_s,
+        )
     sensors['power_avg'] = (round(monitor_state.power_avg, 2), 'W')
     sensors['efficiency_avg'] = (round(monitor_state.efficiency_avg, 2), '%')
     sensors['total_energy'] = (round(monitor_state.total_energy_kwh, 3), 'kWh')

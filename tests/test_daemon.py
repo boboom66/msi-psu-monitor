@@ -936,7 +936,7 @@ def test_an_unexpected_parser_exception_is_a_counted_read_failure(tmp_path, capl
 def test_an_unexpected_enrichment_error_is_a_counted_failure(tmp_path, monkeypatch, caplog):
     daemon = make_daemon(tmp_path, StubPSU(clean_sensors()))
 
-    def explode(_sensors, _state):
+    def explode(_sensors, _state, **_kwargs):
         raise ValueError('enrichment bug')
 
     monkeypatch.setattr(monitor, 'apply_stats', explode)
