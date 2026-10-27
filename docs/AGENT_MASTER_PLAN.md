@@ -361,7 +361,7 @@ The authoritative environment is a **clean Ubuntu VM**, not WSL:
   hardware acceptance run here. Pass the PSU through as a **USB 3.0/xHCI** device
   (see `machine-setup.md`).
 - **Windows host** — editing only. `ruff`/`mypy` and the 246-case POSIX-free subset
-  run here; the 21 test modules that import `fcntl`/`termios` cannot.
+  run here; the modules that import `fcntl`/`termios` cannot.
 - **Fork GitHub Actions** — unattended runner for the same Linux gates.
 
 **WSL is not supported**: USB passthrough is unreliable (hidraw appears and
