@@ -1,7 +1,7 @@
 # 测试覆盖与限制（历史快照：2026-10-22）
 
 > 本文件只写**本轮实际跑过**的结论；没有真机/浏览器环境的项目明确标 NOT RUN / BLOCKED。
-> 本轮统计已冻结；当前 CI 测试和发布状态见 [`bug-audit/RELEASE_READINESS.md`](../../bug-audit/RELEASE_READINESS.md)。
+> 本轮统计已冻结；当前 CI 测试和发布状态见 [`bug-audit/RELEASE_READINESS.md`](../../../bug-audit/RELEASE_READINESS.md)。
 
 - 自动化测试：**803 passed**（2026-10-22 全项目审计后）。实际执行环境：当前 venv
   Python 3.10.21、Python 3.12.3、裸 Python 3.13.15 各 **803 passed**；CI 矩阵仍配置

@@ -17,7 +17,7 @@
 | 实屏 | `05_截图/images/01..10` | 总览/曲线/导出/风扇：UI 语义 |
 
 当前实现：本仓库 2026-10-22 审计提交（对比时工作树 clean；803 tests，覆盖率 94%，smoke 58/58），详见
-[bug-audit/TEST_REPORT.md](../archive/audit/TEST_REPORT.md)。
+[bug-audit/TEST_REPORT.md](../audit/TEST_REPORT.md)。
 
 ## 1. 结论摘要
 
@@ -36,7 +36,7 @@
    MEG 序列号按整包读取而非 MSI 的固定 24 字节。
 4. **发布阻塞项没变**：真实 PSU 验收、arm64 运行、真实 root/systemd/udev、
    桌面浏览器、24h/72h 仍未验证（硬件到货后按
-   [hardware-acceptance.md](../hardware-acceptance.md) 执行）。
+   [hardware-acceptance.md](../../hardware-acceptance.md) 执行）。
 
 ## 2. 技术评估矩阵 F-01..F-22 复核
 
@@ -154,7 +154,7 @@ stderr+exit 2/`alerts-*.log`，但名字独立（`power_high`/`temp_high`/`rail_
 
 ## 8. 建议的下一步
 
-1. 样机到位：按 [hardware-acceptance.md](../hardware-acceptance.md) 跑 kit，重点验证
+1. 样机到位：按 [hardware-acceptance.md](../../hardware-acceptance.md) 跑 kit，重点验证
    §2 状态行 / §5 OCP / §10-11 风扇/ZeroFan/buzzer（含"第二次 toggle"行为）/
    §12-13 set-rail 幂等与 OCP 行为。
 2. 真机 bench：OCP 阈值写必须先在样机上导出原值、写入、断电保持验证，再恢复；

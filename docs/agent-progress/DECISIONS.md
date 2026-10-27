@@ -39,7 +39,7 @@ ADR-style log. Context → Decision → Consequence.
 
 ## D-004 — Docs counts: current docs avoid hard-coding, history stays history
 
-- Context: current docs claimed 803 and 859 tests; `docs/testing/` contains a
+- Context: current docs claimed 803 and 859 tests; `docs/archive/testing/` contains a
   645-test historical snapshot. The real count cannot be measured until G0.
 - Decision: current verification instructions say "run `pytest -q` for the
   current count"; the 2026-10-22 release-readiness snapshot keeps 803 with an
@@ -196,3 +196,24 @@ ADR-style log. Context → Decision → Consequence.
 - Consequence: no document is both historical and untagged; nothing was deleted
   without a duplicate/archive record; links were re-checked with a local
   markdown link scan (0 dangling). Future snapshots have a defined home.
+
+## D-017 — Archive the whole dated test-record folder
+
+- Context: D-016 kept `docs/testing/` in place as a labelled historical folder.
+  The owner asked for the cleanest possible tree, and the same repository's
+  `master` line already archived its test records. Live references (verify.md,
+  bug-audit, BASELINE) pointed into that folder, so the move had to be
+  link-complete rather than a rename.
+- Decision: move `docs/testing/` to `docs/archive/testing/` wholesale, keep its
+  own README as the historical index, and update every path in current documents
+  (verify.md, bug-audit README/BUG_TRACKER/FIX_LOG, docs/README, BASELINE,
+  DECISIONS, review playbook). No test evidence was deleted.
+- Consequence: `docs/` now contains only current product/operations documents
+  plus the process folder `agent-progress/`; every dated snapshot lives under
+  `docs/archive/`. A local markdown link scan reports zero dangling links.
+- Addendum (same pass): the two process documents that sat next to product docs
+  (`AGENT_MASTER_PLAN.md`, `agent-product-review-playbook.md`) moved into
+  `docs/agent-progress/`, so `docs/` now holds only product/operations documents,
+  process state lives in `agent-progress/`, and dated snapshots live in
+  `archive/`. Both remain referenced (README index, APPROVALS gates, plan read
+  order) with their new paths.

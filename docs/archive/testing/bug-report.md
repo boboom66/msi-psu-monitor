@@ -1,6 +1,6 @@
 # msi-psu-monitor 缺陷与风险登记（第一阶段）
 
-> **历史缺陷台账（2026-10-19）**。其中 NR-002/NR-003 已在 2026-10-22 修复；当前缺陷和发布状态分别见 [`bug-audit/BUG_TRACKER.md`](../../bug-audit/BUG_TRACKER.md) 与 [`bug-audit/RELEASE_READINESS.md`](../../bug-audit/RELEASE_READINESS.md)。
+> **历史缺陷台账（2026-10-19）**。其中 NR-002/NR-003 已在 2026-10-22 修复；当前缺陷和发布状态分别见 [`bug-audit/BUG_TRACKER.md`](../../../bug-audit/BUG_TRACKER.md) 与 [`bug-audit/RELEASE_READINESS.md`](../../../bug-audit/RELEASE_READINESS.md)。
 
 - 基线：`650076a`；执行时间：2026-10-19。
 - 本文件区分“确认缺陷”和“测试缺口/发布风险”；未执行的测试不写成通过。
@@ -102,7 +102,7 @@ Phase 2 会把上表映射为 TEST-xxx，并在 `test-cases.md` 中记录前置�
 
 ## 10. 2026-10-19 第五轮：全项目深度审计（DEF-022..031）
 
-完整台账（含根因/复现/证据）：[bug-audit/BUG_TRACKER.md](../../bug-audit/BUG_TRACKER.md)。
+完整台账（含根因/复现/证据）：[bug-audit/BUG_TRACKER.md](../../../bug-audit/BUG_TRACKER.md)。
 
 | ID | 严重度 | 状态 | 描述 | 证据（回归测试） | 影响 | 处理 |
 |---|---|---|---|---|---|---|
@@ -118,7 +118,7 @@ Phase 2 会把上表映射为 TEST-xxx，并在 `test-cases.md` 中记录前置�
 | DEF-031 | P3 | 已修复/已验证 | 无 state 目录时未知 `/api/typo` 返回 503 而不是 404 | `test_an_unknown_api_route_is_404_even_without_a_state_dir` | 客户端拼写错误被误诊为服务端故障 | 目录检查只作用于 4 个真实 API 路由 |
 
 回归：659 passed；ruff/format/mypy、smoke 58、coverage 92% 全绿（命令与输出见
-[bug-audit/TEST_REPORT.md](../archive/audit/TEST_REPORT.md)）。`DEF-002` 与 NR-001..006
+[bug-audit/TEST_REPORT.md](../audit/TEST_REPORT.md)）。`DEF-002` 与 NR-001..006
 仍未关闭，硬件/arm64/真实 systemd/桌面浏览器/24h 仍 BLOCKED。
 
 ## 11. 2026-10-19 第六轮：psu-file 需求资料对比（DEF-032..035）
@@ -135,7 +135,7 @@ PSU-7ZPU 草案 REQ-1..19）、`04_MSI-Center源码`、`03_参考实现`、`05_�
 | DEF-035 | P3 | 已修复/已验证 | MEG 序列号取 0x13 整包，依赖 24 字节后的报告为零；非零尾部会进入日志/Prometheus 标签 | `CPSU.cs:515-528`（MEG 固定 24 字节；TS 长度前缀） | 按机型分支读取：TS 长度前缀 / MEG 固定 24 字节 / 未知机型旧启发式 |
 
 回归：661 passed，coverage 92%，smoke 58/58；完整命令见
-[bug-audit/TEST_REPORT.md](../archive/audit/TEST_REPORT.md)。
+[bug-audit/TEST_REPORT.md](../audit/TEST_REPORT.md)。
 
 ## 12. 2026-10-19 功能补齐：本地阈值与告警（FEAT-01，非缺陷）
 

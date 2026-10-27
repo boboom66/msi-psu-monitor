@@ -1,6 +1,6 @@
 # APPROVALS
 
-Human gates from `docs/AGENT_MASTER_PLAN.md` §9.
+Human gates from `docs/agent-progress/AGENT_MASTER_PLAN.md` §9.
 
 ## G0 — Baseline and environment — **SATISFIED for automated gates via CI**
 

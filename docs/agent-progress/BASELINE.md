@@ -52,7 +52,7 @@ the index and the content diff is 21 files.
 | `AGENTS.md` (before edit) | 859 | Current instruction |
 | `msi_psu_monitor/AGENTS.md` (before edit) | 859 | Current instruction |
 | `bug-audit/RELEASE_READINESS.md` | 803 | 2026-10-22 audit snapshot |
-| `docs/testing/release-readiness.md` | 645 | Historical Phase 3 snapshot |
+| `docs/archive/testing/release-readiness.md` | 645 | Historical Phase 3 snapshot |
 | `docs/verify.md` | 859 | Historical run note |
 
 The current tree's count is **unverified** because no Linux environment is

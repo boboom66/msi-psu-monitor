@@ -18,7 +18,7 @@ The first candidate (`d0d8d91`, tag `baseline-2026-10-26`) failed
 `tests/test_docs_consistency.py::test_quoted_test_counts_are_accurate`:
 
 ```text
-docs/AGENT_MASTER_PLAN.md: says 645, actual 859
+docs/agent-progress/AGENT_MASTER_PLAN.md: says 645, actual 859
 ```
 
 The new planning document quoted a historical 645-test count as if it were

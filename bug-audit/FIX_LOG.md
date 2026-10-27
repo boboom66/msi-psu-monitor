@@ -35,8 +35,8 @@ udevadm verify                   Success: 1 / Fail: 0
 - `tests/test_docs_consistency.py`: new guard against literal release-artifact versions in shell scripts.
 - `AGENTS.md` / `msi_psu_monitor/AGENTS.md`: recorded the output-path rule, live-view contract,
   guarded housekeeping, and the single version source.
-- `docs/testing/bug-report.md§10`, `docs/testing/fix-log.md§Phase 5`, `docs/testing/test-cases.md`,
-  `docs/testing/test-report.md§11`: Phase 5 evidence.
+- `docs/archive/testing/bug-report.md§10`, `docs/archive/testing/fix-log.md§Phase 5`, `docs/archive/testing/test-cases.md`,
+  `docs/archive/testing/test-report.md§11`: Phase 5 evidence.
 - `bug-audit/`: this ledger, test report, code audit, release readiness.
 ## psu-file 对比轮（DEF-032..035）
 

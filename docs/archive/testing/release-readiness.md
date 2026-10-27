@@ -1,7 +1,7 @@
 # Release readiness（Phase 3，历史快照）
 
 > **历史记录，不是当前结论。** 当前发布判断见
-> [bug-audit/RELEASE_READINESS.md](../../bug-audit/RELEASE_READINESS.md)。本文件中的
+> [bug-audit/RELEASE_READINESS.md](../../../bug-audit/RELEASE_READINESS.md)。本文件中的
 > 测试数、覆盖率和浏览器结论均是 Phase 3 历史记录，不代表当前状态。
 
 - 日期：2026-10-19

@@ -22,6 +22,7 @@
 | `新增功能指令与预览.md` | v1.0.0 时代的命令输出预览（原 `docs/`；标题即声明为历史快照） |
 | `audit/CODE_AUDIT.md` | Phase 5 代码审计快照（原 `bug-audit/`） |
 | `audit/TEST_REPORT.md` | Phase 5 审计测试报告快照（原 `bug-audit/`） |
+| `testing/` | 2026-10 各阶段测试计划、用例、报告、差距分析与发布快照（原 `docs/testing/`） |
 
 ## 整理说明（2026-10-27）
 
@@ -33,3 +34,6 @@
   修复记录在 [`../../bug-audit/BUG_TRACKER.md`](../../bug-audit/BUG_TRACKER.md) 与
   [`../../bug-audit/FIX_LOG.md`](../../bug-audit/FIX_LOG.md)。
 - 归档文件保留原内容与相对链接（链接已按新位置修正），不随当前代码更新。
+- `docs/testing/` 已整体移入本目录（原样保留其内部索引与证据文件）；现行测试与发布结论以
+  [`../verify.md`](../verify.md) 与
+  [`../../bug-audit/RELEASE_READINESS.md`](../../bug-audit/RELEASE_READINESS.md) 为准。

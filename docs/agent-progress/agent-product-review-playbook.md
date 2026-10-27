@@ -80,7 +80,7 @@
 1. 当前 commit 的代码与测试
 2. 实际 `--help`、示例输出、截图、错误信息
 3. README / docs/verify.md / docs/protocol.md
-4. 历史文档（DEV_PROGRESS、docs/testing/*）只作线索，不得当作当前事实
+4. 历史文档（DEV_PROGRESS、docs/archive/testing/*）只作线索，不得当作当前事实
 
 # 必须覆盖的功能
 - 采集：--once（text/json）、--watch、--format、--output、--serial
@@ -461,7 +461,7 @@ SHIP / SHIP WITH KNOWN ISSUES / NOT READY
    - `--dashboard-text` 80x24 / 120x40
    - `--menu` 主菜单 / 二级菜单 / 非 TTY
    - dashboard 320/768/1920，正常/空/daemon 停止/`latest.json` 删除
-   把证据目录与索引写进本轮评审报告，并在 `docs/testing/` 下留档，供评审复核。
+   把证据目录与索引写进本轮评审报告，并在 `docs/archive/testing/` 下留档，供评审复核。
 
 ---
 

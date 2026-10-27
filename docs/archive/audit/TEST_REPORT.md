@@ -71,7 +71,7 @@ x86_64, Python 3.12.3 in `.venv`). Nothing below is inferred from reading code.
 | browser execution | still BLOCKED (headless shell missing `libnspr4.so`); Node DOM harness covers the page JS |
 
 Reference comparison itself is documented in
-[docs/testing/psu-file-gap-analysis.md](../../testing/psu-file-gap-analysis.md).
+[docs/testing/psu-file-gap-analysis.md](../testing/psu-file-gap-analysis.md).
 ## 7. Threshold/alert completion (2026-10-19)
 
 | Command | Result |

@@ -2,8 +2,8 @@
 
 > **状态：Phase 2 执行计划，仍定义 G0–G5 门禁与工作方式。**
 > 当前进度、门禁结果与未决事项以
-> [`agent-progress/STATE.md`](agent-progress/STATE.md)、
-> [`LEDGER.md`](agent-progress/LEDGER.md) 和 [`DECISIONS.md`](agent-progress/DECISIONS.md) 为准；
+> [`agent-progress/STATE.md`](STATE.md)、
+> [`LEDGER.md`](LEDGER.md) 和 [`DECISIONS.md`](DECISIONS.md) 为准；
 > 本文 §0–§6 中带日期的启动期记录（G0 请求、基线步骤）属于历史，不要当成当前状态。
 > 若与 `AGENTS.md` 冲突，以 AGENTS.md 为准。
 
@@ -22,7 +22,7 @@
 1. This file.
 2. `AGENTS.md`
 3. `msi_psu_monitor/AGENTS.md`
-4. `docs/agent-product-review-playbook.md`
+4. `docs/agent-progress/agent-product-review-playbook.md`
 5. `README.md`
 6. `docs/verify.md`
 7. `docs/protocol.md`
@@ -163,7 +163,7 @@ Correctness, safety, usability, reliability, security, compatibility, maintainab
 
 ### 2.3 Starting hypotheses (verify, do not assume)
 
-Full list in `docs/agent-product-review-playbook.md` §8. Top 10:
+Full list in `docs/agent-progress/agent-product-review-playbook.md` §8. Top 10:
 
 1. Flat flags make `--help` hard to scan.
 2. `--buzzer-off` is a toggle; the name misleads.
@@ -957,7 +957,7 @@ Notes:
 
 ## 11. Prompt library
 
-Detailed P0–P6 prompts: `docs/agent-product-review-playbook.md`. Use these wrappers.
+Detailed P0–P6 prompts: `docs/agent-progress/agent-product-review-playbook.md`. Use these wrappers.
 
 ### 11.1 Orchestrator system prompt
 

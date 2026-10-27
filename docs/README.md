@@ -30,11 +30,16 @@ records are snapshots, not a second source of current status.
 | Topic | Canonical location |
 |---|---|
 | Open defects, fixes, and current release blockers | [`bug-audit/`](../bug-audit/README.md) |
-| Test plans, test cases, and dated test reports | [`testing/`](testing/README.md) |
 | Product v2 task status, decisions, approvals, and evidence | [`agent-progress/`](agent-progress/README.md) |
-| Product review process and feature decisions | [Review playbook](agent-product-review-playbook.md) |
-| Product v2 execution plan | [Master plan](AGENT_MASTER_PLAN.md) |
+| Product review process and feature decisions | [Review playbook](agent-progress/agent-product-review-playbook.md) |
+| Product v2 execution plan (gate definitions) | [Master plan](agent-progress/AGENT_MASTER_PLAN.md) |
+
+## Historical snapshots (not current facts)
+
+| Topic | Location |
+|---|---|
 | Historical audit and development snapshots | [`archive/`](archive/README.md) |
+| Dated test plans, cases and Phase 3/5 reports | [`archive/testing/`](archive/testing/README.md) |
 | Historical command/output preview (not a current CLI reference) | [Feature preview](archive/新增功能指令与预览.md) |
 
 ## Source and research material
@@ -58,7 +63,7 @@ Keep this small; a rule that is not followed is worse than no rule.
    `requirements-traceability.md` only when it maps to a requirement; update
    `verify.md` when a new check/entry point appears.
 3. **Dated evidence** (test reports, phase reports, screenshots, previews) goes to
-   `docs/archive/` (or `docs/testing/` for test records) and is never edited to
+   `docs/archive/` (or `docs/archive/testing/` for test records) and is never edited to
    look current; it carries a "historical snapshot" banner instead.
 4. **Unresolved question** → `DECISIONS.md` (or an `OPEN` row in `BUG_TRACKER.md`),
    never silently written as fact in a current document.

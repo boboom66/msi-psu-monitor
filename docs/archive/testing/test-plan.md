@@ -1,7 +1,7 @@
 # msi-psu-monitor 全项目测试计划（第一阶段，历史快照）
 
 > **历史记录。** 当前测试与发布判断见
-> [bug-audit/RELEASE_READINESS.md](../../bug-audit/RELEASE_READINESS.md)；本计划中的统计仅为历史基线。
+> [bug-audit/RELEASE_READINESS.md](../../../bug-audit/RELEASE_READINESS.md)；本计划中的统计仅为历史基线。
 
 > 状态：Phase 1 完成（项目结构调查、功能盘点、测试矩阵、基线执行）
 > 基线提交：`650076a`（2026-10-19）

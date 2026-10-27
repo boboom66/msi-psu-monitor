@@ -1,13 +1,13 @@
 # 修复台账（Fix Log）
 
 > **历史快照（截至 2026-10-22），不是当前台账。**
-> 当前缺陷与修复记录见 [`bug-audit/FIX_LOG.md`](../../bug-audit/FIX_LOG.md) 与
-> [`bug-audit/BUG_TRACKER.md`](../../bug-audit/BUG_TRACKER.md)。
+> 当前缺陷与修复记录见 [`bug-audit/FIX_LOG.md`](../../../bug-audit/FIX_LOG.md) 与
+> [`bug-audit/BUG_TRACKER.md`](../../../bug-audit/BUG_TRACKER.md)。
 
 - 项目：msi-psu-monitor
 - 记录截至：2026-10-22（2026-10-19 起的分轮修复记录）
 - 本轮快照：803 passed；分支覆盖率 94%；smoke 58/58。当前发布状态见
-  [`bug-audit/RELEASE_READINESS.md`](../../bug-audit/RELEASE_READINESS.md)。
+  [`bug-audit/RELEASE_READINESS.md`](../../../bug-audit/RELEASE_READINESS.md)。
 - 约定：只有真实执行并通过的回归测试才记为“已验证”。
 
 ## 已修复缺陷
@@ -64,7 +64,7 @@
 | DEF-031 | `msi_psu_monitor/dashboard.py` | `test_an_unknown_api_route_is_404_even_without_a_state_dir` |
 
 全部 659 tests / ruff / format / mypy / smoke 58 / coverage 92% / shellcheck / systemd-analyze /
-udevadm verify 均通过；详细命令与未执行项见 [bug-audit/TEST_REPORT.md](../archive/audit/TEST_REPORT.md)。
+udevadm verify 均通过；详细命令与未执行项见 [bug-audit/TEST_REPORT.md](../audit/TEST_REPORT.md)。
 
 ## 第六轮追加（2026-10-19，psu-file 对比）
 
@@ -109,7 +109,7 @@ udevadm verify 均通过；详细命令与未执行项见 [bug-audit/TEST_REPORT
 ## 全项目审计第二轮（2026-10-22）
 
 基线 736 → 803 passed，分支覆盖率 94%，smoke 58/58，soak 5000 PASS；详细缺陷表与回归测试名见
-[`bug-audit/FIX_LOG.md§全项目审计第二轮`](../../bug-audit/FIX_LOG.md)。本轮覆盖 live JSON 非有限值、
+[`bug-audit/FIX_LOG.md§全项目审计第二轮`](../../../bug-audit/FIX_LOG.md)。本轮覆盖 live JSON 非有限值、
 深层 JSON RecursionError、FIFO 阻塞、原子写权限、告警 NaN、HID fd/帧边界、daemon 非 dict 返回、
 dashboard Host/503、`--dump-config` fan 段与输出错误、demo 非 TS Zero Fan、release sidecar/SBOM
 顺序、soak 零轮询假通过、`--quiet` 配置 warning 泄漏等。真机写 ACK 语义与全部硬件验收仍为 BLOCKED。

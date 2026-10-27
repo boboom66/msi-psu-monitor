@@ -14,4 +14,4 @@ Phase 5 snapshots moved to the archive when the ledger was consolidated:
 [docs/archive/audit/CODE_AUDIT.md](../docs/archive/audit/CODE_AUDIT.md) and
 [docs/archive/audit/TEST_REPORT.md](../docs/archive/audit/TEST_REPORT.md).
 
-Detailed dated test plans and reports live in [`docs/testing/`](../docs/testing/README.md).
+Detailed dated test plans and reports live in [`docs/archive/testing/`](../docs/archive/testing/README.md).

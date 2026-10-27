@@ -1,6 +1,6 @@
 # Ubuntu 22.04 chroot 构建（本地复现）
 
-> **历史构建证据（2026-10-19，v1.0.0）**。本文件不证明当前版本的构建结果；测试基线 803/94% 也仅为历史数据。当前发布状态见 [`bug-audit/RELEASE_READINESS.md`](../../bug-audit/RELEASE_READINESS.md)。本文步骤可复用。
+> **历史构建证据（2026-10-19，v1.0.0）**。本文件不证明当前版本的构建结果；测试基线 803/94% 也仅为历史数据。当前发布状态见 [`bug-audit/RELEASE_READINESS.md`](../../../bug-audit/RELEASE_READINESS.md)。本文步骤可复用。
 
 目的：在本机 24.04/glibc 2.39 上生成并验证 **22.04/glibc 2.35** 的 PyInstaller 产物。
 不修改宿主 `/etc`，只在用户命名空间 chroot 内操作。

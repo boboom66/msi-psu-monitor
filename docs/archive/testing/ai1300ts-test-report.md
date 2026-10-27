@@ -1,6 +1,6 @@
 # Ai1300TS 严格测试报告（历史快照）
 
-> **历史快照（2026-10-19/21）**。本文结果只代表当时的 demo 测试；当前发布状态见 [`bug-audit/RELEASE_READINESS.md`](../../bug-audit/RELEASE_READINESS.md)。
+> **历史快照（2026-10-19/21）**。本文结果只代表当时的 demo 测试；当前发布状态见 [`bug-audit/RELEASE_READINESS.md`](../../../bug-audit/RELEASE_READINESS.md)。
 
 - 日期：2026-10-21
 - 对象：MSI MPG Ai1300TS，USB PID 0xAA6F，内部 variant mpg_ai1300ts
@@ -80,4 +80,4 @@ MSI_PSU_DEMO_MODEL=mpg_ai1300ts bash scripts/soak.sh 5000
 - 风扇/Zero Fan/蜂鸣器的实际动作
 - 24h/72h 长稳、arm64、真实 root/systemd/udev、桌面浏览器
 
-这些项目在 demo 中通过不等于真机 PASS；样机到位后按 [hardware-acceptance.md](../hardware-acceptance.md) 和 [verify.md](../verify.md) §8 执行。
+这些项目在 demo 中通过不等于真机 PASS；样机到位后按 [hardware-acceptance.md](../../hardware-acceptance.md) 和 [verify.md](../../verify.md) §8 执行。
