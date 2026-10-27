@@ -1,10 +1,9 @@
 # 无硬件自检手册
 
-> 没有真机也能验证 CLI、告警、daemon、历史落盘、prometheus 与 dashboard 全链路。
-> 下面每条命令都已在 `.venv`（Python 3.12.3）实跑通过；完整测试套件另在裸
-> Python 3.13.15 与 Python 3.10.21（uv 下载）各复核通过（历史快照记录的通过数已
-> 过时；当前树以本次 `pytest -q` 输出为准）。
-> `smoke.sh` → 58 项（Python 3.12 环境跑过）。3.10 已实跑，同时保留静态门禁——ruff `target-version = "py310"`、mypy
+> 没有真机也能验证 CLI、告警、daemon、历史落盘、Prometheus 与 dashboard 全链路。
+> 本手册给出可复现的命令；历史执行结果不代表当前分支。最新已记录的测试与 CI
+> 结果见 [`bug-audit/RELEASE_READINESS.md`](../bug-audit/RELEASE_READINESS.md)。
+> `smoke.sh` 的检查项数量由脚本校验；Python 3.10 兼容性还由静态门禁保证——ruff `target-version = "py310"`、mypy
 > `python_version = "3.10"`（按 3.10 typeshed 分析）、smoke 里对每个 `.py` 的
 > `ast.parse(feature_version=(3, 10))`；CI 矩阵另在 3.10 / 3.12 / 3.13 上执行。
 > 需要真机的部分集中在最后一节，交付样机后再做。

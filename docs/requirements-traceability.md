@@ -10,7 +10,7 @@
 | 🟡 部分/待放行 | 软件链路已实现并测试，但关键动作仍需真机 bench 或产品决策后才能放行 |
 | ⏸ 冻结 | 明确留待后续批准批次，本轮不做 |
 
-> 最新记录：CI run `40441033415` 执行 **889 passed**；本机 Windows
+> 最新记录：CI run `40441033415` 执行 **889 passed**（33 个测试模块）；本机 Windows
 > 环境不支持 POSIX 专用模块，完整测试以 Linux CI 结果为准。当前发布状态见
 > [`bug-audit/RELEASE_READINESS.md`](../bug-audit/RELEASE_READINESS.md)。
 > 无硬件全链路自检见 [`verify.md`](verify.md)。

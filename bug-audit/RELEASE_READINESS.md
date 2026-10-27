@@ -1,8 +1,8 @@
 # Release readiness — current assessment
 
-> Updated 2026-10-27 for `work/product-v2` at `c908816`. Latest recorded CI:
+> Updated 2026-10-27 on `work/product-v2`. Latest recorded CI:
 > run `40441033415` on the T-022 code commit; the 3.10/3.12/3.13 matrix and
-> frozen-release job passed. The working tree change here is documentation-only.
+> frozen-release job passed. Changes after that run are documentation-only.
 
 **Verdict: NOT READY for a production release.** The latest recorded CI run passes
 the software and packaging gates and collects **889 tests**. Release-critical
@@ -30,15 +30,15 @@ release remains v1.0.0.
 
 | Blocker | Status |
 |---|---|
-| Real MSI PSU acceptance (5 models, alerts, writes, VIN, black box, OCP, multirail, unplug/reconnect) | **BLOCKED** — no hardware attached |
+| Real MSI PSU acceptance (5 models, alerts, writes, VIN, black box, OCP, multirail, unplug/reconnect) | **BLOCKED** — no hardware acceptance evidence recorded |
 | **OCP threshold write on real hardware** (write, read-back, power-cycle persistence, restore from dump) | **BLOCKED** — demo/mock only; a protection write must be bench-validated before release use |
 | arm64 binary execution (only x86_64 runner in this environment) | **BLOCKED** |
-| Root/systemd/udev install + daemon start/stop on a real host | **BLOCKED** — no passwordless root |
-| Desktop browser verification of the dashboard | **BLOCKED** — headless shell missing system libs; Node harness used instead |
+| Root/systemd/udev install + daemon start/stop on a real host | **BLOCKED** — no real-host acceptance evidence recorded |
+| Desktop browser verification of the dashboard | **BLOCKED** — no real-browser acceptance evidence recorded; earlier checks used a Node harness |
 | 24 h / 72 h soak | **NOT RUN**; earlier short/accelerated demo runs do not satisfy this check |
 | Official v1.0.1 22.04 / arm64 artifacts | **NO** — the CI freeze job passed, but no v1.0.1 release artifacts have been published; v1.0.0 is the published release |
 | Published artifacts contain the latest fixes | **NO** — `v1.0.0` predates the audit; the local 1.0.1 x86_64 build is not tagged or published |
-| Prometheus naming policy | **OPEN DECISION** — 8 naming-policy warnings from current `promtool`; no parse errors, but renaming affects the REQ-8 dual energy export |
+| Prometheus naming policy | **OPEN DECISION** — a historical `promtool` run found 8 naming-policy warnings and no parse errors; rerun before release, since renaming affects the REQ-8 dual energy export |
 
 ## 3. What a release would require
 
@@ -53,8 +53,8 @@ release remains v1.0.0.
    read-back and power-cycle, then restore with `--load-thresholds`. Return
    `/var/log/msi-psu-acceptance/<timestamp>.tar.gz`; never mark hardware checks PASS
    before they run.
-4. Resolve the 8 Prometheus naming-policy warnings or record them as accepted
-   compatibility debt; the metric syntax already passes `promtool`.
+4. Re-run `promtool` on the release candidate; resolve any naming-policy warnings or
+   record them as accepted compatibility debt.
 5. Optional but recommended: a real desktop-browser pass and 24 h soak.
 
 ## 4. Risk statement
