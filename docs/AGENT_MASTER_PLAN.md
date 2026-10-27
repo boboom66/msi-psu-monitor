@@ -30,7 +30,8 @@ Do **not** dump the whole repository into one context. Read by slice.
 1. `git status --short`, `git branch --show-current`, `git log -1 --format='%H %ad %s' --date=short`.
 2. `git remote -v` — confirm `origin` is upstream and `fork` is `boboom66/msi-psu-monitor`.
 3. `gh auth status` — if not logged in, this is a **Gate G0** prerequisite.
-4. `wsl.exe -l -v`, `docker --version`, `uv --version` — determine the Linux execution path.
+4. Confirm the Linux execution path: the **clean Ubuntu VM** (see §4.1) and/or
+   `gh auth status` for fork GitHub Actions. WSL is not an option.
 5. Create `docs/agent-progress/` with `STATE.md`, `LEDGER.md`, `DECISIONS.md`, `APPROVALS.md`, `EVIDENCE/`.
 6. Save the current dirty-tree evidence: `git status --porcelain`, `git diff --stat`, `git diff > docs/agent-progress/baseline.patch`.
 7. Preserve the user's uncommitted work exactly as described in §4.2. Do not discard it.
