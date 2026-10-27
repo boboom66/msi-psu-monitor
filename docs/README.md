@@ -1,0 +1,46 @@
+# Documentation index
+
+Use the documents below by topic. **Current product behavior** is described by
+the project README and checked against code/tests; dated audits and development
+records are snapshots, not a second source of current status.
+
+## Start here
+
+| Need | Document |
+|---|---|
+| Install, features, commands, and examples | [Project README](../README.md) |
+| No-hardware checks and hardware acceptance checklist | [Verification guide](verify.md) |
+| Current release verdict and evidence | [Release readiness](../bug-audit/RELEASE_READINESS.md) |
+| Find support information | [Support policy](support.md) |
+
+## Product and operation
+
+| Topic | Document |
+|---|---|
+| HID protocol, registers, payload layouts | [Protocol reference](protocol.md) |
+| Requirements mapped to implementation and tests | [Requirements traceability](requirements-traceability.md) |
+| Machine setup and permissions | [Machine setup](machine-setup.md) |
+| Hardware test procedure and evidence | [Hardware acceptance](hardware-acceptance.md) |
+| Incident handling and recovery | [Incident response](incident-response.md) |
+| Release builds and artifact contract | [Release guide](release.md) |
+| Prometheus alert rules | [Prometheus rules](prometheus-rules.yml) |
+
+## Quality, defects, and development records
+
+| Topic | Canonical location |
+|---|---|
+| Open defects, fixes, and current release blockers | [`bug-audit/`](../bug-audit/README.md) |
+| Test plans, test cases, and dated test reports | [`testing/`](testing/README.md) |
+| Product v2 task status, decisions, approvals, and evidence | [`agent-progress/`](agent-progress/README.md) |
+| Product review process and feature decisions | [Review playbook](agent-product-review-playbook.md) |
+| Product v2 execution plan | [Master plan](AGENT_MASTER_PLAN.md) |
+| Historical audit and development snapshots | [`archive/`](archive/README.md) |
+| Historical command/output preview (not a current CLI reference) | [Feature preview](新增功能指令与预览.md) |
+
+## Source and research material
+
+The sibling [`psu-file` reference archive](../../psu-file/README_文件索引.md)
+contains source specifications, MSI Center reference code, screenshots, and
+original requirements. It is background evidence; current runtime behavior is
+defined by this repository's code, tests, [protocol reference](protocol.md),
+and [release-readiness record](../bug-audit/RELEASE_READINESS.md).

@@ -1,33 +1,30 @@
 # Release readiness — current assessment
 
-> **Snapshot note:** the counts below are from the 2026-10-22 audit. Re-run
-> `uv run --group dev pytest -q` on the current tree; do not quote 803 as the
-> current count without measuring it.
+> Updated 2026-10-27 for `work/product-v2` at `c908816`. Latest recorded CI:
+> run `40441033415` on the T-022 code commit; the 3.10/3.12/3.13 matrix and
+> frozen-release job passed. The working tree change here is documentation-only.
 
-**Verdict: NOT READY for a production release.** The software and packaging gates
-are green (803 tests, 94% branch coverage, smoke, soak, static security checks), and a
-local x86_64 1.0.1 freeze now exists with clean-env and kit checks. The
-release-critical hardware/platform evidence is still missing, the OCP threshold
-write has never touched a real PSU, and no official 22.04/arm64 artifact has been
-built or published.
+**Verdict: NOT READY for a production release.** The latest recorded CI run passes
+the software and packaging gates and collects **889 tests**. Release-critical
+hardware/platform evidence is still missing, the OCP threshold write has never
+touched a real PSU, and no official 1.0.1 release has been published. The published
+release remains v1.0.0.
 
 ## 1. Evidence that is green
 
 | Gate | Evidence |
 |---|---|
-| Full test suite | **803 passed** (`pytest -q`) |
-| Lint / format / types | ruff check + format clean, mypy clean (10 files) |
-| Coverage | **94%** branch coverage (3166 stmts / 183 missed / 1174 branches, floor 90%) |
-| Smoke (demo PSU, no hardware) | **58/58** passed, including daemon→prometheus→history→dashboard |
-| Accelerated soak | `scripts/soak.sh 5000`: exit 0, peak RSS 18 436 KB, fd=3, state/latest/prom/daily written and non-empty |
+| Full test suite | **889 tests collected**; latest recorded CI run `40441033415` passed |
+| Lint / format / types | Latest recorded CI run passed the configured checks |
+| Coverage | Latest recorded CI run passed the configured coverage gate (90% floor); see CI output for the measured percentage |
+| Smoke / accelerated soak | Latest recorded CI run passed the smoke and soak jobs; their exact current output is in CI run `40441033415` |
 | Strict exposition | `tests/test_prometheus_exposition.py` parses HELP/TYPE, labels, finite values, duplicate series and the canonical `metric{} value` form |
-| Local 1.0.1 freeze | 2026-10-22 audit build: tar/deb/kit built on x86_64/glibc 2.39 (smoke only); tar SHA256SUMS and clean-env `--once` pass; extracted `.deb` runs; deb is `Depends: libc6 (>= 2.35), zlib1g`, no Python |
-| Real-time demo soak | 180 samples at 1 s: exit 0, peak RSS 18 000 KB, fd=3, state dir 16 KiB (not 24 h) |
-| Hardware-kit self-test | extracted `acceptance.sh --demo`: 30 PASS / 0 FAIL / 3 MANUAL / 2 SKIP |
-| Official promtool | 2.45.3 on current daemon textfile: metrics exit 3 with 8 naming-policy warnings, **no syntax errors**; `check rules docs/prometheus-rules.yml` → SUCCESS (5 rules) |
-| Static infra checks | shellcheck, systemd-analyze verify, udevadm verify, offline security analysis (exposure 3.3 OK) |
+| Local 1.0.1 freeze | Historical 2026-10-22 x86_64/glibc 2.39 smoke build; not an official release artifact |
+| Earlier local demo checks | Historical: 180 samples at 1 s and hardware-kit `acceptance.sh --demo` passed; these are not 24 h hardware evidence |
+| Official promtool | Historical 2.45.3 check: no syntax errors, 8 naming-policy warnings; rules check found 5 rules. Re-run against the release candidate before publishing |
+| Static infra checks | Historical local run: shellcheck, systemd-analyze verify, udevadm verify, offline security analysis (exposure 3.3 OK) |
 | Packaging logic | source .deb under umask 077; binary/kit scripts derive the version; no Python dependency in the binary .deb |
-| Fuzz/robustness | 400 random 0xE0 payloads × 5 variants, 120 random config files, 120 random --ocp-set specs: no tracebacks, no NaN/inf escape |
+| Robustness tests | Included in the latest passing CI suite; the exact randomized counts below are from the historical audit |
 
 ## 2. Release blockers / open decisions
 
@@ -38,14 +35,14 @@ built or published.
 | arm64 binary execution (only x86_64 runner in this environment) | **BLOCKED** |
 | Root/systemd/udev install + daemon start/stop on a real host | **BLOCKED** — no passwordless root |
 | Desktop browser verification of the dashboard | **BLOCKED** — headless shell missing system libs; Node harness used instead |
-| 24 h / 72 h soak | **NOT RUN** (180 s real-time plus accelerated 5k and 50k soaks pass) |
-| Official 22.04 / arm64 release artifacts | **NO** — only a local x86_64/glibc 2.39 smoke build exists; the arm64 and 22.04 artifacts must come from CI |
+| 24 h / 72 h soak | **NOT RUN**; earlier short/accelerated demo runs do not satisfy this check |
+| Official v1.0.1 22.04 / arm64 artifacts | **NO** — the CI freeze job passed, but no v1.0.1 release artifacts have been published; v1.0.0 is the published release |
 | Published artifacts contain the latest fixes | **NO** — `v1.0.0` predates the audit; the local 1.0.1 x86_64 build is not tagged or published |
 | Prometheus naming policy | **OPEN DECISION** — 8 naming-policy warnings from current `promtool`; no parse errors, but renaming affects the REQ-8 dual energy export |
 
 ## 3. What a release would require
 
-1. Owner approval to tag/push `v1.0.1` (the version and CHANGELOG are already at
+1. Owner approval to tag/publish `v1.0.1` (the version and CHANGELOG are already at
    1.0.1; create the tag only after confirming the tree is clean).
 2. CI release run on Ubuntu 22.04 / arm64; verify x86_64/arm64 assets, SBOMs, hardware
    kits, `SHA256SUMS` coverage, and that no source `_all.deb` is published (DEF-013

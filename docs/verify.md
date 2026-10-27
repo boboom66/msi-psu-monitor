@@ -124,8 +124,9 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。历史审计快照（2026-10-22）：803 个用例通过、`ruff check` 全过、`mypy` 10 个文件无问题；
-分支覆盖率 **90%**（CI 门限 90%）。当前树以本次运行输出为准（数字随用例增长漂移，勿引用快照）。
+三条全绿即通过。历史审计快照（2026-10-22）：803 个用例通过、`ruff check` 全过、`mypy` 10 个文件无问题，
+分支覆盖率 **94%**。这些数字只代表当时的快照；当前测试数和 CI 证据见
+[`bug-audit/RELEASE_READINESS.md`](../bug-audit/RELEASE_READINESS.md)。
 
 > `ruff format --check .` **可以全仓跑**（CI 也跑）：`protocol.py`/`__init__.py`/`__main__.py`/
 > `tests/test_monitor.py` 这四个历史文件混用引号风格，已由 `[tool.ruff.format] exclude` +

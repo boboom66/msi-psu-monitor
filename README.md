@@ -8,11 +8,11 @@ MEG Ai1600(T), MEG Ai1300P, and MEG Ai1000P models.
 
 Python standard library only — no third-party runtime dependencies.
 
-> **Project status (2026-10-27):** the no-hardware gates are green (889 tests,
-> 90% branch coverage, smoke 58/58, soak 5000), but this release is **not
-> hardware accepted** yet. Real-PSU reads/writes, the 12V-2x6 OCP threshold
+> **Project status (2026-10-27):** the latest recorded CI run passes the
+> no-hardware gates, but this release is **not hardware accepted** yet.
+> Real-PSU reads/writes, the 12V-2x6 OCP threshold
 > write, arm64 execution, a root/systemd/udev install, a desktop browser and a
-> 24 h / 72 h soak are still outstanding; see
+> 24 h / 72 h soak are still outstanding. See the
 > [bug-audit/RELEASE_READINESS.md](bug-audit/RELEASE_READINESS.md). The 1.0.1
 > tag and artifacts have not been published — v1.0.0 is the published release.
 
@@ -475,6 +475,8 @@ the user-space tool**; there is no kernel module to build today.
 
 See [`docs/protocol.md`](docs/protocol.md) for full protocol documentation, including
 the 62-byte `0xE0` bulk read layout and the register map.
+
+The categorized documentation index is [`docs/README.md`](docs/README.md).
 
 A Chinese walkthrough of the major features added on top of the upstream tool —
 what each one does, how it is implemented, and which parts still need real hardware

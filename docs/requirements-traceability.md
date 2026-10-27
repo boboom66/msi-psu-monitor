@@ -10,7 +10,9 @@
 | 🟡 部分/待放行 | 软件链路已实现并测试，但关键动作仍需真机 bench 或产品决策后才能放行 |
 | ⏸ 冻结 | 明确留待后续批准批次，本轮不做 |
 
-> 回归命令：`uv run --group dev pytest -q` → **889 passed**（29 个测试模块）。
+> 最新记录：CI run `40441033415` 执行 **889 passed**；本机 Windows
+> 环境不支持 POSIX 专用模块，完整测试以 Linux CI 结果为准。当前发布状态见
+> [`bug-audit/RELEASE_READINESS.md`](../bug-audit/RELEASE_READINESS.md)。
 > 无硬件全链路自检见 [`verify.md`](verify.md)。
 
 ---
@@ -136,4 +138,3 @@
 | 交付物 | 状态 | 说明 |
 | --- | --- | --- |
 | `kernel/msi-psu-ai1600ts.patch` | ⏸ 草稿，不可构建 | 未编译过、不对应任何已复核的上游版本；文件头已列出致命 hunk（文件作用域的枚举常量、无 `t` 的函数里用 `t`、switch 外的 `case`、第二个 `default:`、未定义的 `iout_pins_fops`、无代码填充 62B 结构体）。README/`install.sh` 不再声称可用；用户态工具才是受支持路径 |
-
