@@ -8,7 +8,7 @@ MEG Ai1600(T), MEG Ai1300P, and MEG Ai1000P models.
 
 Python standard library only — no third-party runtime dependencies.
 
-> **Project status (2026-10-26):** the no-hardware gates are green (874 tests,
+> **Project status (2026-10-27):** the no-hardware gates are green (889 tests,
 > 90% branch coverage, smoke 58/58, soak 5000), but this release is **not
 > hardware accepted** yet. Real-PSU reads/writes, the 12V-2x6 OCP threshold
 > write, arm64 execution, a root/systemd/udev install, a desktop browser and a
@@ -184,8 +184,9 @@ msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
       --dashboard-text  Live terminal dashboard: coloured bars in the console,
                    no browser; --once/--watch/--export/--format/-O do not apply
       --menu       Grouped interactive menu over the normal commands: arrows or
-                   digits select, Enter runs, q quits (snapshot, watch, dashboard,
-                   export, OCP, log, config); pipes get a numbered prompt
+                   digits select, Enter runs, q/Esc quits (snapshot, watch,
+                   dashboard, export, OCP, thresholds, log, config); the header
+                   shows the last action's result, pipes get a numbered prompt
       --port       Dashboard port (default 8899)
       --show-log   Dump the PSU black-box alert records (C1h; this format is
                    project-defined because MSI Center never reads that log)
@@ -494,8 +495,10 @@ This tree is a fork of [HesiPullupTimbo/msi-psu-monitor](https://github.com/Hesi
 device discovery, the HID transport and the original sensor parsing come from there.
 Everything added on top — the variant-aware 0xE0 parsing, the E1h alert engine, the
 black-box reader, the OCP views, the daemon, the dashboard, the packaging and the
-tests — is described in [`DEV_PROGRESS.md`](DEV_PROGRESS.md) and
-[`docs/requirements-traceability.md`](docs/requirements-traceability.md).
+tests — is described in [`CHANGELOG.md`](CHANGELOG.md) and
+[`docs/requirements-traceability.md`](docs/requirements-traceability.md); the
+historical development log is archived in
+[`docs/archive/DEV_PROGRESS.md`](docs/archive/DEV_PROGRESS.md).
 
 The protocol details were cross-checked against the CWT REV6 USB command
 specification that ships with the PSU and against MSI Center's own reading

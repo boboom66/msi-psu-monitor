@@ -339,16 +339,32 @@ def test_zero_quits_in_the_interactive_keymap():
     assert menu._decode_key(b'0') == 'quit'
 
 
-def test_item_numbers_are_dense_and_the_alert_log_entry_is_local():
+def test_item_numbers_are_dense_and_match_the_visual_order():
     numbers = [item.number for item in menu.ITEMS]
     assert numbers == [str(n) for n in range(1, len(menu.ITEMS) + 1)]
-    item = menu.ITEMS[-1]
-    assert item.action == 'alerts'
-    assert '--show-alert-log' in item.command
+    # The number is the jump key, so the printed order must agree with it.
+    # The alert log used to sit at 8 while 7 (Config) rendered first.
+    printed = []
+    for group in menu.GROUPS:
+        for item in menu.ITEMS:
+            if item.group == group:
+                printed.append(int(item.number))
+    assert printed == sorted(printed)
+    alerts = next(item for item in menu.ITEMS if item.action == 'alerts')
+    assert '--show-alert-log' in alerts.command
     # The alert log reads local state files; opening hidraw for it would steal
     # the device from a running daemon just to print a file.
-    assert item.action not in menu._DEVICE_ACTIONS
+    assert alerts.action not in menu._DEVICE_ACTIONS
     assert f'1-{len(menu.ITEMS)} jump' in menu._footer_text()
+
+
+def test_the_thresholds_entry_is_a_read_only_device_dump():
+    item = next(item for item in menu.ITEMS if item.action == 'thresholds')
+    assert '--dump-thresholds' in item.command
+    # The C0h dump answers from the PSU, not from a local file: it must open
+    # the device like the other hardware views, never silently read a cache.
+    assert item.action in menu._DEVICE_ACTIONS
+    assert menu.ACTIONS[item.action].needs_device is True
 
 
 def test_alert_log_entry_runs_the_local_viewer(monkeypatch):
@@ -371,7 +387,7 @@ def test_help_toggle_renders_the_key_legend():
     assert 'returns to the list' not in plain
     frame, _ = menu.render_menu(menu.ITEMS, 0, 0, 80, 24, color=False, help_mode=True)
     assert 'Up/Down move' in frame
-    assert 'q quit' in frame
+    assert 'q/Esc quit' in frame
     assert 'returns to the list' in frame
 
 
@@ -388,3 +404,182 @@ def test_line_prompt_range_follows_the_item_count(monkeypatch, capsys):
     assert code == monitor.EXIT_OK
     assert prompts == [menu._line_prompt()]
     assert prompts[0] == f'[1-{len(menu.ITEMS)}, ?=menu, 0=quit] choice: '
+
+
+def test_application_cursor_arrow_keys_are_understood():
+    """tmux/vim leftovers leave the terminal in application cursor mode."""
+    assert menu._decode_key(b'\x1bOA') == 'up'
+    assert menu._decode_key(b'\x1bOB') == 'down'
+    assert menu._decode_key(b'\x1bOH') == 'home'
+    assert menu._decode_key(b'\x1bOF') == 'end'
+    # Right/left are consumed so they cannot garble the next key, but the
+    # single-level menu has no horizontal movement to bind them to.
+    assert menu._decode_key(b'\x1bOC') is None
+    assert menu._decode_key(b'\x1bOD') is None
+
+
+def test_an_arrow_does_not_swallow_the_next_key_in_application_mode():
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(write_fd, b'\x1bOBq')
+        assert menu._read_key(read_fd, timeout=0.1) == 'down'
+        assert menu._read_key(read_fd, timeout=0.05) == 'quit'
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
+
+
+def test_a_lone_escape_is_the_escape_action():
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(write_fd, b'\x1b')
+        assert menu._read_key(read_fd, timeout=0.1) == 'escape'
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
+
+
+def _drive_interactive(monkeypatch, keys, run=None, size=(80, 24), env=None):
+    """Drive the interactive loop over a pty; returns (stdout text, exit code).
+
+    ``size`` may be a single (width, height) pair or a list of pairs, one per
+    redraw cycle, to drive the resize path.
+    """
+    master, slave = pty.openpty()
+    stdin = os.fdopen(os.dup(slave), 'r', encoding='utf-8', buffering=1)
+    stdout = FakeIO(True)
+    monkeypatch.setattr(menu.sys, 'stdin', stdin)
+    monkeypatch.setattr(menu.sys, 'stdout', stdout)
+    monkeypatch.setenv('TERM', (env or {}).get('TERM', 'xterm'))
+    if env and 'NO_COLOR' in env:
+        monkeypatch.setenv('NO_COLOR', env['NO_COLOR'])
+    else:
+        monkeypatch.delenv('NO_COLOR', raising=False)
+    sizes = iter(size if isinstance(size, list) else [size])
+    final_size = size[-1] if isinstance(size, list) else size
+    monkeypatch.setattr(menu, '_size', lambda fd=None: next(sizes, final_size))
+    key_stream = iter(keys)
+    monkeypatch.setattr(menu, '_read_key', lambda fd: next(key_stream))
+    monkeypatch.setattr(menu, '_run', run or (lambda action, *args: monitor.EXIT_OK))
+    monkeypatch.setattr(menu, '_pause', lambda: None)
+    try:
+        code = menu.run_menu(
+            StubPSU(), _args(), {'retention_days': 30, 'interval': 1.0}, None, None
+        )
+    finally:
+        stdin.close()
+        stdout.close()
+        os.close(master)
+        os.close(slave)
+    return stdout.getvalue(), code
+
+
+def test_escape_closes_the_help_overlay_before_quitting(monkeypatch):
+    out, code = _drive_interactive(monkeypatch, ('?', 'escape', 'quit'))
+    assert code == monitor.EXIT_OK
+    assert out.count('returns to the list') == 1
+
+
+def test_escape_quits_the_menu_when_help_is_closed(monkeypatch):
+    calls = []
+
+    def run(action, *args):
+        calls.append(action)
+        return monitor.EXIT_OK
+
+    out, code = _drive_interactive(monkeypatch, ('escape',), run=run)
+    assert code == monitor.EXIT_OK
+    assert calls == []
+    assert '$ ' not in out
+
+
+def test_the_header_reports_the_last_action_as_ok(monkeypatch):
+    out, code = _drive_interactive(monkeypatch, ('enter', 'quit'))
+    assert code == monitor.EXIT_OK
+    assert 'last: Snapshot ok' in out
+
+
+def test_the_header_reports_a_nonzero_exit(monkeypatch):
+    out, code = _drive_interactive(
+        monkeypatch, ('enter', 'quit'), run=lambda action, *a: monitor.EXIT_ALERT
+    )
+    assert code == monitor.EXIT_OK  # the menu itself still exits cleanly
+    assert 'last: Snapshot exit 2' in out
+
+
+def test_an_interrupted_action_is_reported_as_stopped(monkeypatch):
+    def interrupted(action, *args):
+        raise KeyboardInterrupt
+
+    out, code = _drive_interactive(monkeypatch, ('enter', 'quit'), run=interrupted)
+    assert code == monitor.EXIT_OK
+    assert 'last: Snapshot stopped' in out
+
+
+def test_the_alternate_screen_is_entered_and_restored(monkeypatch):
+    out, code = _drive_interactive(monkeypatch, ('enter', 'quit'))
+    assert code == monitor.EXIT_OK
+    # One enter/exit pair around the whole menu, one pair around the action,
+    # so the action output survives on the normal screen after quitting.
+    assert out.count('\x1b[?1049h') == 2
+    assert out.count('\x1b[?1049l') == 2
+
+
+def test_the_linux_console_keeps_the_main_screen(monkeypatch):
+    """The VGA console never supported 1049 reliably; stay on the main screen."""
+    out, code = _drive_interactive(monkeypatch, ('quit',), env={'TERM': 'linux'})
+    assert code == monitor.EXIT_OK
+    assert '\x1b[?1049' not in out
+
+
+def test_no_color_removes_the_selection_bar(monkeypatch):
+    out, code = _drive_interactive(monkeypatch, ('quit',), env={'NO_COLOR': '1'})
+    assert code == monitor.EXIT_OK
+    assert menu._REVERSE not in out
+    assert menu._BOLD not in out
+
+
+def test_a_resize_redraws_at_the_new_width(monkeypatch):
+    out, code = _drive_interactive(monkeypatch, (None, 'quit'), size=[(80, 24), (46, 12)])
+    assert code == monitor.EXIT_OK
+    assert '-' * 80 in out
+    assert '-' * 46 in out
+
+
+def test_the_thresholds_entry_dumps_the_c0h_configuration(monkeypatch, capsys):
+    seen = {}
+
+    def fake_run_ocp_thresholds(psu, args):
+        seen['dump_thresholds'] = args.dump_thresholds
+        seen['format'] = args.format
+        seen['output'] = args.output
+        print('OCP thresholds: point 12.0 A')
+        return monitor.EXIT_OK
+
+    monkeypatch.setattr(monitor, 'run_ocp_thresholds', fake_run_ocp_thresholds)
+    code = menu._run('thresholds', StubPSU(), _args(), {'retention_days': 30}, None, None)
+    assert code == monitor.EXIT_OK
+    assert seen == {'dump_thresholds': True, 'format': 'text', 'output': None}
+    assert 'OCP thresholds' in capsys.readouterr().out
+
+
+def test_the_thresholds_entry_opens_the_device_lazily(monkeypatch):
+    class ClosablePSU(StubPSU):
+        def __init__(self):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    psu = ClosablePSU()
+    opened = []
+    monkeypatch.setattr(monitor, 'run_ocp_thresholds', lambda p, a: monitor.EXIT_OK)
+
+    def factory():
+        opened.append(True)
+        return psu
+
+    code = menu._execute('thresholds', None, _args(), {'retention_days': 30}, None, None, factory)
+    assert code == monitor.EXIT_OK
+    assert opened == [True]
+    assert psu.closed is True

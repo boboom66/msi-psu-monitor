@@ -1,13 +1,14 @@
 # STATE
 
 - Phase: **Phase 2 — user-added feature polish (TUI/menu/dashboard/watch)**
-- Task: **T-021 done — G2 review next**
+- Task: **T-022 done — G2 review next**
 - Branch: `work/product-v2`
 - HEAD: `git log -1` on `work/product-v2` (green run: `195c7d8`)
 - Baseline tag: `baseline-2026-10-26-r2`
 - Baseline branch: `baseline/pre-product-v2-r2`
 - Package version: `1.0.1`
-- Tests: **874 collected** (859 at baseline; +2 buzzer, +9 TUI/menu, +4 PTY)
+- Tests: **889 collected** (859 at baseline; +2 buzzer, +9 TUI/menu, +4 PTY,
+  +15 menu rework)
 - Last gates: CI run `40425289154` — **PASS** (3.10/3.12/3.13 + freeze).
   Earlier: `40291862435` (buzzer rename), `40294017182` (termdash/menu).
 - Master: `ca8a6d5` (clean; original worktree)
@@ -25,4 +26,7 @@
     logs still require auth for deep debugging.
   - B-103: hardware evidence (5 models, OCP write, root install, arm64, 24h)
     remains with the human at G3/G5.
-- Updated: 2026-10-26
+- Note (2026-10-27): T-022 (menu interactive rework) is committed locally;
+  local Windows gates are green (ruff/format/mypy + collectable subset), the
+  Linux gates (pytest/coverage/smoke/soak/freeze) await the fork CI run.
+- Updated: 2026-10-27

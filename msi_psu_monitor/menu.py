@@ -1,12 +1,19 @@
 """Numbered CLI menu (``msi-psu-monitor --menu``).
 
 Interaction model follows mature MIT terminal menus (simple-term-menu,
-console-menu): arrow keys move a highlighted selection, Enter runs it, digits
-jump to an entry, ``q`` quits, the list scrolls when the terminal is short and
-the screen is cleared between actions.  The implementation here is original
-stdlib-only code -- no third-party menu library is vendored or required -- so
-the project keeps its zero-runtime-dependency promise and its MIT-only
-compliance is unchanged.
+console-menu, pick, PyTermGUI — all four licence files were verified against
+the sdist before this design was fixed): arrow keys move a highlighted
+selection, Enter runs it, digits jump to an entry, ``q``/``Esc`` quit, ``?``
+toggles the key legend, the list scrolls when the terminal is short, the
+screen is cleared between actions and the last action's result stays visible
+in the header.
+
+The implementation here is original stdlib-only code — no third-party menu
+library is vendored or required — so the project keeps its
+zero-runtime-dependency promise and its MIT-only compliance is unchanged.
+The candidate libraries were ruled out on architecture, not licence: each one
+is a runtime dependency, which this project forbids (tests/test_stdlib_only.py,
+self-contained release binaries).
 
 Non-interactive stdout/stdin (pipes, tests, ``TERM=dumb``) falls back to the
 numbered line prompt, which is also what the automated tests drive.
@@ -23,8 +30,9 @@ import subprocess
 import sys
 import termios
 from dataclasses import dataclass
+from typing import Callable, NamedTuple, Optional
 
-from msi_psu_monitor import monitor
+from msi_psu_monitor import monitor, termdash
 
 #: ANSI home + erase-screen.  Only emitted on a real terminal; pipes and tests
 #: keep printable output (the same rule --watch follows).
@@ -33,6 +41,14 @@ _REVERSE = '\x1b[7m'
 _BOLD = '\x1b[1m'
 _DIM = '\x1b[2m'
 _RESET = '\x1b[0m'
+
+#: xterm-style alternate screen buffer.  The menu is resident, so it draws on
+#: the alternate screen and restores the shell's view on exit (what
+#: dialog/whiptail do).  Skipped on the VGA console (``TERM=linux``), which
+#: never supported 1049 reliably — the same terminal termdash treats specially.
+_ALT_ENTER = '\x1b[?1049h'
+_ALT_EXIT = '\x1b[?1049l'
+_ALT_UNSUPPORTED_TERMS = frozenset({'', 'dumb', 'linux'})
 
 
 @dataclass(frozen=True)
@@ -45,6 +61,10 @@ class Item:
     action: str
 
 
+# The numbers match the on-screen order exactly (Monitor block, then History,
+# then System).  They used to drift (the alert log sat at ``8`` while ``7``
+# rendered first), which broke the digit-jump contract for anyone reading
+# top-down.
 ITEMS = (
     Item('1', 'Monitor', 'Snapshot', 'msi-psu-monitor --once', 'single snapshot', 'once'),
     Item('2', 'Monitor', 'Live view', 'msi-psu-monitor --watch 1', 'refresh 1s (Ctrl-C)', 'watch'),
@@ -66,15 +86,20 @@ ITEMS = (
     ),
     Item('5', 'History', 'OCP', 'msi-psu-monitor --ocp', 'thresholds + state (TS)', 'ocp'),
     Item(
-        '6', 'History', 'Black box', 'msi-psu-monitor --show-log', 'trip log, newest first', 'log'
+        '6',
+        'History',
+        'Thresholds',
+        'msi-psu-monitor --dump-thresholds',
+        'read-only C0h dump (MPG TS)',
+        'thresholds',
     ),
     Item(
         '7',
-        'System',
-        'Config',
-        'msi-psu-monitor --dump-config',
-        'effective configuration',
-        'config',
+        'History',
+        'Black box',
+        'msi-psu-monitor --show-log',
+        'trip log, newest first',
+        'log',
     ),
     Item(
         '8',
@@ -84,13 +109,112 @@ ITEMS = (
         'local alert audit trail (no PSU needed)',
         'alerts',
     ),
+    Item(
+        '9',
+        'System',
+        'Config',
+        'msi-psu-monitor --dump-config',
+        'effective configuration',
+        'config',
+    ),
 )
 GROUPS = ('Monitor', 'History', 'System')
 
 
+class Action(NamedTuple):
+    """One dispatchable menu command: whether it opens hidraw and how it runs."""
+
+    needs_device: bool
+    runner: Callable
+
+
+def _action_once(psu, args, cfg, monitor_state, engine):
+    return _paged(monitor.run_once, psu, copy.copy(args), cfg, monitor_state, engine)
+
+
+def _action_watch(psu, args, cfg, monitor_state, engine):
+    local = copy.copy(args)
+    local.watch = 1
+    local.interval = None
+    local.dashboard_text = False
+    local.output = None
+    return monitor.run_watch(psu, local, cfg, monitor_state, engine)
+
+
+def _action_dashboard(psu, args, cfg, monitor_state, engine):
+    local = copy.copy(args)
+    local.watch = monitor.WATCH_FROM_CONFIG
+    local.interval = 1.0
+    local.dashboard_text = True
+    local.output = None
+    return monitor.run_dashboard_text(psu, local, cfg, monitor_state, engine)
+
+
+def _action_export(psu, args, cfg, monitor_state, engine):
+    local = copy.copy(args)
+    local.export = True
+    local.format = 'text'
+    local.from_spec = '1h'
+    local.columns = None
+    local.output = None
+    return _paged(monitor.run_export, local, cfg)
+
+
+def _action_ocp(psu, args, cfg, monitor_state, engine):
+    local = copy.copy(args)
+    local.ocp = True
+    local.format = 'text'
+    return _paged(monitor.run_ocp, psu, local)
+
+
+def _action_thresholds(psu, args, cfg, monitor_state, engine):
+    # Read-only C0h dump; on a MEG this reports why the model does not answer
+    # that register, exactly like the CLI does.
+    local = copy.copy(args)
+    local.dump_thresholds = True
+    local.format = 'text'
+    local.output = None
+    return _paged(monitor.run_ocp_thresholds, psu, local)
+
+
+def _action_log(psu, args, cfg, monitor_state, engine):
+    _paged(lambda: monitor.emit(monitor.format_blackbox(psu.read_blackbox()), None))
+    return monitor.EXIT_OK
+
+
+def _action_config(psu, args, cfg, monitor_state, engine):
+    _paged(lambda: monitor.emit(monitor._dump_effective_config(cfg, 'text'), None))
+    return monitor.EXIT_OK
+
+
+def _action_alerts(psu, args, cfg, monitor_state, engine):
+    local = copy.copy(args)
+    local.show_alert_log = True
+    local.format = 'text'
+    local.output = None
+    return _paged(monitor.run_show_alert_log, local, cfg)
+
+
+#: Action name -> spec.  Adding a menu command means one Item above, one
+#: entry here and nothing else; the footer, the prompt range and the device
+#: set are all derived.
+ACTIONS = {
+    'once': Action(needs_device=True, runner=_action_once),
+    'watch': Action(needs_device=True, runner=_action_watch),
+    'dashboard': Action(needs_device=True, runner=_action_dashboard),
+    'export': Action(needs_device=False, runner=_action_export),
+    'ocp': Action(needs_device=True, runner=_action_ocp),
+    'thresholds': Action(needs_device=True, runner=_action_thresholds),
+    'log': Action(needs_device=True, runner=_action_log),
+    'config': Action(needs_device=False, runner=_action_config),
+    'alerts': Action(needs_device=False, runner=_action_alerts),
+}
+_DEVICE_ACTIONS = frozenset(name for name, action in ACTIONS.items() if action.needs_device)
+
+
 def _footer_text():
     """Key legend; the jump range follows the item count."""
-    return f'Up/Down move   Enter run   1-{len(ITEMS)} jump   q quit   ? keys'
+    return f'Up/Down move   Enter run   1-{len(ITEMS)} jump   q/Esc quit   ? keys'
 
 
 MIN_WIDTH = 40
@@ -118,11 +242,23 @@ def _clear():
         return
     if os.environ.get('TERM', '').strip().lower() in ('', 'dumb'):
         return
+    _write(_CLEAR)
+
+
+def _write(text):
+    """Best-effort terminal write: a closed stdout must not kill the menu."""
     try:
-        sys.stdout.write(_CLEAR)
+        sys.stdout.write(text)
         sys.stdout.flush()
     except OSError:
         pass
+
+
+def _alt_screen():
+    """Alternate-screen buffer on real terminals, except the VGA console."""
+    if not _is_tty(sys.stdout):
+        return False
+    return os.environ.get('TERM', '').strip().lower() not in _ALT_UNSUPPORTED_TERMS
 
 
 def _size(fd=None):
@@ -146,13 +282,17 @@ def _truncate(text, width):
     return text[: width - 2] + '..'
 
 
+def _paint(text, code, enabled):
+    return f'{code}{text}{_RESET}' if enabled else text
+
+
 def _line_for(item, width, selected, color):
     marker = '>' if selected else ' '
     head = f'{marker} {item.number}) {item.label:11s}'
     tail = f'  {item.command}'
     text = _truncate(head + tail, width)
     if selected and color:
-        return _REVERSE + text + _RESET
+        return _paint(text, _REVERSE, True)
     return text
 
 
@@ -172,10 +312,14 @@ def _body_lines(items, selected, width, color):
     return lines, selected_line
 
 
-def render_menu(items, selected, offset, width, height, *, color=True, help_mode=False):
+def render_menu(
+    items, selected, offset, width, height, *, color=True, help_mode=False, status=None
+):
     """Pure renderer: returns (frame, new_offset) for tests and the loop."""
     inner = max(MIN_WIDTH, min(width, 100))
     header = ' MSI PSU Monitor - menu'
+    if status:
+        header = _truncate(f'{header}   last: {status}', inner)
     rule = '-' * inner
     body, selected_line = _body_lines(items, selected, inner, color)
 
@@ -191,7 +335,7 @@ def render_menu(items, selected, offset, width, height, *, color=True, help_mode
         # The detail slot is the most readable place for the key legend; the
         # footer keeps its usual shape so the frame height never changes.
         detail = ' ' + _truncate(_footer_text(), inner - 1)
-        footer = ' ' + _truncate('? returns to the list', inner - 1)
+        footer = ' ' + _truncate('Esc or ? returns to the list', inner - 1)
     else:
         detail = ' ' + _truncate(f'{item.label}: {item.purpose}', inner - 1)
         footer = ' ' + _truncate(_footer_text(), inner - 1)
@@ -201,6 +345,10 @@ def render_menu(items, selected, offset, width, height, *, color=True, help_mode
 
 #: Complete escape sequences; reading stops as soon as one matches so a key
 #: pressed immediately after an arrow is not swallowed into the same read.
+#: The ``ESC O`` forms arrive when a terminal is left in application cursor
+#: mode (tmux/vim leftovers); both spellings are accepted instead of flipping
+#: the terminal into smkx, which would also switch the numpad into
+#: application mode and break the digit jump.
 _SEQUENCE_KEYS = frozenset(
     {
         b'\x1b[A',
@@ -211,6 +359,12 @@ _SEQUENCE_KEYS = frozenset(
         b'\x1b[4~',
         b'\x1b[5~',
         b'\x1b[6~',
+        b'\x1bOA',
+        b'\x1bOB',
+        b'\x1bOC',
+        b'\x1bOD',
+        b'\x1bOH',
+        b'\x1bOF',
     }
 )
 
@@ -226,6 +380,14 @@ def _decode_key(data):
         b'\x1b[4~': 'end',
         b'\x1b[5~': 'pgup',
         b'\x1b[6~': 'pgdn',
+        b'\x1bOA': 'up',
+        b'\x1bOB': 'down',
+        b'\x1bOC': None,
+        b'\x1bOD': None,
+        b'\x1bOH': 'home',
+        b'\x1bOF': 'end',
+        b'\x1b': 'escape',
+        b'\x1b\x1b': 'escape',
         b'k': 'up',
         b'j': 'down',
         b'\r': 'enter',
@@ -252,7 +414,8 @@ def _read_key(fd, timeout=0.25):
         data = os.read(fd, 1)
         if data == b'\x1b':
             # Stop at a complete sequence: reading the whole burst swallowed the
-            # next key (e.g. the q that follows an arrow) and lost it.
+            # next key (e.g. the q that follows an arrow) and lost it.  A lone
+            # ESC that sees no follow-up byte within the window is the Esc key.
             while len(data) < 8 and select.select([fd], [], [], 0.01)[0]:
                 data += os.read(fd, 1)
                 if data in _SEQUENCE_KEYS:
@@ -324,48 +487,10 @@ def _paged(action, *args):
 
 
 def _run(action, psu, args, cfg, monitor_state, engine):
-    if action == 'once':
-        return _paged(monitor.run_once, psu, copy.copy(args), cfg, monitor_state, engine)
-    if action == 'export':
-        local = copy.copy(args)
-        local.export = True
-        local.format = 'text'
-        local.from_spec = '1h'
-        local.columns = None
-        local.output = None
-        return _paged(monitor.run_export, local, cfg)
-    if action == 'ocp':
-        local = copy.copy(args)
-        local.ocp = True
-        local.format = 'text'
-        return _paged(monitor.run_ocp, psu, local)
-    if action == 'log':
-        _paged(lambda: monitor.emit(monitor.format_blackbox(psu.read_blackbox()), None))
-        return monitor.EXIT_OK
-    if action == 'config':
-        _paged(lambda: monitor.emit(monitor._dump_effective_config(cfg, 'text'), None))
-        return monitor.EXIT_OK
-    if action == 'alerts':
-        local = copy.copy(args)
-        local.show_alert_log = True
-        local.format = 'text'
-        local.output = None
-        return _paged(monitor.run_show_alert_log, local, cfg)
-    if action == 'watch':
-        local = copy.copy(args)
-        local.watch = 1
-        local.interval = None
-        local.dashboard_text = False
-        local.output = None
-        return monitor.run_watch(psu, local, cfg, monitor_state, engine)
-    if action == 'dashboard':
-        local = copy.copy(args)
-        local.watch = monitor.WATCH_FROM_CONFIG
-        local.interval = 1.0
-        local.dashboard_text = True
-        local.output = None
-        return monitor.run_dashboard_text(psu, local, cfg, monitor_state, engine)
-    raise AssertionError(f'unknown menu action: {action}')
+    spec = ACTIONS.get(action)
+    if spec is None:
+        raise AssertionError(f'unknown menu action: {action}')
+    return spec.runner(psu, args, cfg, monitor_state, engine)
 
 
 def _line_show():
@@ -384,9 +509,6 @@ def _line_show():
 
 def _line_prompt():
     return f'[1-{len(ITEMS)}, ?=menu, 0=quit] choice: '
-
-
-_DEVICE_ACTIONS = frozenset({'once', 'watch', 'dashboard', 'ocp', 'log'})
 
 
 def _execute(action, psu, args, cfg, monitor_state, engine, psu_factory):
@@ -446,11 +568,24 @@ def _line_menu(psu, args, cfg, monitor_state, engine, psu_factory=None):
             _pause()
 
 
+def _action_status(item, code):
+    """One-line result for the header; 'stopped' marks a Ctrl-C exit."""
+    if code == 'interrupted':
+        return f'{item.label} stopped'
+    if code in (None, monitor.EXIT_OK):
+        return f'{item.label} ok'
+    return f'{item.label} exit {code}'
+
+
 def _interactive_menu(psu, args, cfg, monitor_state, engine, psu_factory=None):
     fd = sys.stdin.fileno()
     selected = 0
     offset = 0
     help_mode = False
+    status: Optional[str] = None
+    color = termdash.colour_enabled(sys.stdout)
+    alt = _alt_screen()
+    alt_active = False
     signals = monitor._watch_enable_soft_termination()
     old_tty = None
     cursor_hidden = False
@@ -465,9 +600,11 @@ def _interactive_menu(psu, args, cfg, monitor_state, engine, psu_factory=None):
                 f'needs at least {MIN_WIDTH}x{MIN_HEIGHT}. Using numbered input.'
             )
             return _line_menu(psu, args, cfg, monitor_state, engine, psu_factory)
-        sys.stdout.write('\x1b[?25l')
-        sys.stdout.flush()
+        _write('\x1b[?25l')
         cursor_hidden = True
+        if alt:
+            _write(_ALT_ENTER)
+            alt_active = True
         dirty = True
         last_size = None
         while True:
@@ -478,11 +615,17 @@ def _interactive_menu(psu, args, cfg, monitor_state, engine, psu_factory=None):
             if dirty:
                 width, height = size
                 frame, offset = render_menu(
-                    ITEMS, selected, offset, width, height, help_mode=help_mode
+                    ITEMS,
+                    selected,
+                    offset,
+                    width,
+                    height,
+                    color=color,
+                    help_mode=help_mode,
+                    status=status,
                 )
                 _clear()
-                sys.stdout.write(frame + '\n')
-                sys.stdout.flush()
+                _write(frame + '\n')
                 dirty = False
             key = _read_key(fd)
             if key is None:
@@ -491,6 +634,14 @@ def _interactive_menu(psu, args, cfg, monitor_state, engine, psu_factory=None):
                 # timeout made the screen flash several times a second).
                 continue
             if key == 'quit':
+                return monitor.EXIT_OK
+            if key == 'escape':
+                # Esc closes the help overlay first; on the list it quits, the
+                # way dialog/whiptail treat Esc as cancel.
+                if help_mode:
+                    help_mode = False
+                    dirty = True
+                    continue
                 return monitor.EXIT_OK
             if key == 'help':
                 # ``?`` was decoded but silently ignored (it fell into the
@@ -523,7 +674,13 @@ def _interactive_menu(psu, args, cfg, monitor_state, engine, psu_factory=None):
 
             item = ITEMS[selected]
             _restore_tty(fd, old_tty)
+            old_tty = None
             try:
+                # Action output lands on the normal screen and survives the
+                # menu, so leave the alternate buffer for the duration.
+                if alt_active:
+                    _write(_ALT_EXIT)
+                    alt_active = False
                 _clear()
                 print(f'$ {item.command}')
                 try:
@@ -538,11 +695,17 @@ def _interactive_menu(psu, args, cfg, monitor_state, engine, psu_factory=None):
                     )
                 except KeyboardInterrupt:
                     code = monitor.EXIT_OK
+                    status = _action_status(item, 'interrupted')
+                else:
+                    status = _action_status(item, code)
                 if code not in (None, monitor.EXIT_OK):
                     print(f'exit={code}')
                     _pause()
             finally:
                 old_tty = _cbreak(fd)
+                if alt:
+                    _write(_ALT_ENTER)
+                    alt_active = True
             dirty = True
             help_mode = False
     finally:
@@ -550,11 +713,9 @@ def _interactive_menu(psu, args, cfg, monitor_state, engine, psu_factory=None):
             _restore_tty(fd, old_tty)
         monitor._watch_restore_signals(signals)
         if cursor_hidden:
-            try:
-                sys.stdout.write('\x1b[?25h')
-                sys.stdout.flush()
-            except OSError:
-                pass
+            _write('\x1b[?25h')
+        if alt_active:
+            _write(_ALT_EXIT)
 
 
 def run_menu(psu, args, cfg, monitor_state, engine, psu_factory=None):

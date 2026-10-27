@@ -25,13 +25,12 @@ Append-only task table. `UNKNOWN` is not `PASS`.
 | T-019 | Web dashboard live badge | F | **DONE** | `ac33e89` | `dashboard.py` + harness test | CI run `40425289154` PASS | `● live` / `○ not updating` after 10 missed 1s polls; history keeps serving |
 | T-020 | PTY evidence for `--watch`/`--dashboard-text` | F | **DONE** | `195c7d8` | `tests/test_pty_watch.py` | CI run `40425289154` PASS | 4 PTY tests on Linux; SIGTERM path; found+fixed a real cursor-restore gap (`e453c3f`) |
 | T-021 | Naming/units matrix | G | **DONE** | `ac33e89` | `NAMING_MATRIX.md` | self-checked | No blocking inconsistency; 5 gaps recorded for G2 |
+| T-022 | menu: grouped interactive rework | F | **DONE** | pending | `menu.py`, `test_menu.py` (+15), README/verify/CHANGELOG/ledgers | self-checked | App-cursor arrows (ESC O), Esc/help semantics, header status line, alt-screen lifecycle, NO_COLOR, scroll+resize, thresholds entry, lazy device open. MIT audit: simple-term-menu/console-menu/pick/PyTermGUI licence files verified; prompt_toolkit (BSD-3) and urwid (LGPL-2.1) excluded; route A+ — stdlib-only refactor, no runtime dep. Windows gates green; Linux gates via fork CI |
 
 ## Next (user-feature polish, continuing)
 
-- T-019 Web dashboard empty/stale/error banners + time-range labels (design → implement)
-- T-020 Watch ANSI redraw: PTY evidence at 80x24/120x40 + cursor-restore test
-- T-021 Naming/units matrix for TUI vs text vs JSON vs Prometheus
-- Then G2 review of the remaining scope before more code.
+- T-022 menu interactive rework — **done** (this commit); CI evidence pending.
+- Design cards for OCP dry-run/backup/restore, `--doctor`, `--list`; then G2.
 
 - Human approved the portfolio with “开始”; G1 is treated as approved.
 - Next: design cards for OCP dry-run/backup/restore, `--doctor`, `--list`;

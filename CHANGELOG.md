@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Menu thresholds entry** (`6`): a read-only `--dump-thresholds` view joins
+  the `--menu` command list, so the MPG TS 0xC0 configuration can be inspected
+  from the menu like `--ocp`, without a write path anywhere near it.
 - **Menu alert-log entry** (`8`): `--show-alert-log` runs from `--menu` without
   touching hidraw, so a running daemon keeps the device. The menu footer and
   the numbered prompt now follow the item count instead of a hard-coded `1-7`.
@@ -20,6 +23,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`--menu` rewritten as a grouped interactive menu**. Arrow keys (both the
+  `CSI` and the `ESC O` application-cursor spellings that tmux/vim leave
+  behind) move the selection, digits jump, `q`/`Esc` quit, `?` toggles the key
+  legend, the list scrolls on short terminals, `NO_COLOR` is honoured and the
+  VGA console (`TERM=linux`) stays on the main screen. The menu draws on the
+  alternate screen while idle but leaves it for each action, so action output
+  survives on the normal screen, and the header keeps the last action's
+  result (`Snapshot ok` / `exit 2` / `stopped`). Entries are grouped
+  (Monitor/History/System) and dispatch is a data-driven action table; the
+  interaction model follows simple-term-menu, console-menu, pick and
+  PyTermGUI (all four MIT licence files verified against their sdists), but no
+  third-party library is used — the zero-runtime-dependency rule holds.
 - **`--buzzer-toggle` is the documented name** for the C2h buzzer switch.
   `--buzzer-off` remains as a hidden deprecated alias. The hardware switch
   toggles and has no read-back, so the output still says "switch toggled",

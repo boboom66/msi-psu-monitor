@@ -2116,7 +2116,7 @@ Notes:
     parser.add_argument(
         '--menu',
         action='store_true',
-        help='Numbered interactive menu over the normal commands',
+        help='Grouped interactive menu over the normal commands (arrows/digits select, q/Esc quits)',
     )
     parser.add_argument(
         '--port',

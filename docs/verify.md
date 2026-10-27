@@ -2,8 +2,8 @@
 
 > 没有真机也能验证 CLI、告警、daemon、历史落盘、prometheus 与 dashboard 全链路。
 > 下面每条命令都已在 `.venv`（Python 3.12.3）实跑通过；完整测试套件另在裸
-> Python 3.13.15 与 Python 3.10.21（uv 下载）各复核通过（历史快照曾记录 874 通过；
-> 当前树以本次 `pytest -q` 输出为准）。
+> Python 3.13.15 与 Python 3.10.21（uv 下载）各复核通过（历史快照记录的通过数已
+> 过时；当前树以本次 `pytest -q` 输出为准）。
 > `smoke.sh` → 58 项（Python 3.12 环境跑过）。3.10 已实跑，同时保留静态门禁——ruff `target-version = "py310"`、mypy
 > `python_version = "3.10"`（按 3.10 typeshed 分析）、smoke 里对每个 `.py` 的
 > `ast.parse(feature_version=(3, 10))`；CI 矩阵另在 3.10 / 3.12 / 3.13 上执行。
@@ -80,7 +80,7 @@ uv run --group dev ruff format --check .
 | `tests/test_watch_console.py` | `--watch` 文本控制台：TTY 下 ANSI 重绘与光标恢复（`test_tty_redraw_is_ansi_and_never_calls_clear`）、管道/dumb/窄/矮终端降级、SIGTERM 映射为干净退出 |
 | `tests/test_dashboard_text.py` | 终端 Dashboard：彩色条形与门限色（`test_render_paints_an_overcurrent_pin_red`）、NO_COLOR、按可见宽度对齐边框与截断（`test_colour_does_not_shift_the_box`）、--dashboard-text 互斥 |
 | `tests/test_pty_watch.py` | 真 PTY 证据：`--watch` 原地重绘与光标恢复（`test_watch_redraws_in_place_and_restores_the_cursor`）、管道无转义码、`--dashboard-text` SIGINT 干净退出、8x8 窄 PTY 降级 |
-| `tests/test_menu.py` | 序号菜单：命令展示与执行（`test_the_menu_prints_each_command_and_runs_it`）、非法输入、EOF、--menu 互斥 |
+| `tests/test_menu.py` | 序号菜单：命令展示与执行（`test_the_menu_prints_each_command_and_runs_it`）、非法输入、EOF、--menu 互斥；交互重构——应用光标方向键（`test_application_cursor_arrow_keys_are_understood`）、Esc 语义（`test_escape_closes_the_help_overlay_before_quitting`）、头部状态行（`test_the_header_reports_a_nonzero_exit`）、备用屏进出（`test_the_alternate_screen_is_entered_and_restored`）、VGA 控制台不用 1049（`test_the_linux_console_keeps_the_main_screen`）、NO_COLOR、缩放重绘（`test_a_resize_redraws_at_the_new_width`）、只读阈值入口（`test_the_thresholds_entry_dumps_the_c0h_configuration`） |
 | `tests/test_ocp.py` | 0xC0 阈值 / 0xC1 状态 / 单多轨标志的三格式输出与机型门（`test_run_ocp_on_a_meg_p_model_shows_the_multirail_flag`）；0xC0 阈值写的 MSI 字节编码与 F1h 保存（`test_set_ocp_thresholds_writes_msi_bytes_then_saves`） |
 | `tests/test_daemon.py` | 采样节拍、原子写（`test_a_failed_prometheus_replace_keeps_the_previous_textfile`）、重扫、风扇 Profile 恢复、只答 ident 判读失败、OCP 块换机不继承旧阈值 |
 | `tests/test_dashboard.py` | HTTP 端点、损坏 state.json 的 503（`test_a_corrupt_state_file_is_a_503_while_history_still_serves`）、HEAD 与错误码一致、真实时间 x 轴 |
@@ -124,8 +124,8 @@ bash scripts/smoke.sh          # 加 --keep 保留临时目录便于排查
 它与下面第 1 节的门禁互补：门禁查「代码是否合规」，冒烟查「整条链路是否真的跑得通」。
 CI 里两者都会跑。
 
-三条全绿即通过。历史基线（2026-10-22）：**874 passed**、`ruff check` 全过、`mypy` 10 个文件无问题；
-分支覆盖率 **90%**（CI 门限 90%）。当前树以本次运行输出为准。
+三条全绿即通过。历史审计快照（2026-10-22）：803 个用例通过、`ruff check` 全过、`mypy` 10 个文件无问题；
+分支覆盖率 **90%**（CI 门限 90%）。当前树以本次运行输出为准（数字随用例增长漂移，勿引用快照）。
 
 > `ruff format --check .` **可以全仓跑**（CI 也跑）：`protocol.py`/`__init__.py`/`__main__.py`/
 > `tests/test_monitor.py` 这四个历史文件混用引号风格，已由 `[tool.ruff.format] exclude` +

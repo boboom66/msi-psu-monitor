@@ -138,3 +138,22 @@ ADR-style log. Context → Decision → Consequence.
   `BASELINE_TEST_REPORT.md`; do not claim release readiness.
 - Consequence: improvements may start, but every later claim must cite the
   remaining evidence gaps.
+
+## D-014 — `--menu` rework: refactor in place (route A+), no menu library
+
+- Context: the user asked for the menu to be rebuilt with the polish of mature
+  GitHub projects. Candidate libraries were researched from their PyPI sdists
+  with licence files read verbatim: simple-term-menu 1.6.6, console-menu 0.8.0,
+  pick 2.6.0 and PyTermGUI 7.8.1 are MIT; prompt_toolkit is BSD-3 and urwid is
+  LGPL-2.1 (excluded); console-menu's dependency chain also includes
+  Apache-2.0 ansiwrap and textual needs BSD-2 pygments. Every candidate is a
+  runtime dependency, and this project is stdlib-only by contract
+  (`tests/test_stdlib_only.py`, self-contained release binaries).
+- Decision: route A+ — refactor the in-house menu (stdlib-only) while adopting
+  the candidates' verified interaction design: application-cursor arrow keys,
+  Esc semantics, a key legend, a status line, alternate-screen lifecycle,
+  `NO_COLOR`, and short-terminal scrolling. Documented in `menu.py`'s module
+  docstring; the licence audit lives in this decision.
+- Consequence: no dependency chain to audit downstream, and the zero-runtime
+  promise is testable as before. A `tests/test_menu.py` extension (+15 tests)
+  locks the new behaviour; PTY-based assertions only run on Linux CI.
