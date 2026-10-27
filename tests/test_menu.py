@@ -480,7 +480,8 @@ def _drive_interactive(monkeypatch, keys, run=None, size=(80, 24), env=None):
 
 
 def test_escape_closes_the_help_overlay_before_quitting(monkeypatch):
-    out, code = _drive_interactive(monkeypatch, ('?', 'escape', 'quit'))
+    # Keys here are decoded action names: '?' reaches the loop as 'help'.
+    out, code = _drive_interactive(monkeypatch, ('help', 'escape', 'quit'))
     assert code == monitor.EXIT_OK
     assert out.count('returns to the list') == 1
 
