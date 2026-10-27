@@ -90,3 +90,12 @@ or
 ```text
 G0: D (static only; gates stay BLOCKED)
 ```
+
+## 环境澄清（2026-10-27）
+
+- 用户确认：项目只在**纯净 Ubuntu 虚拟机**里运行（不是 WSL；WSL 的 USB/系统服务
+  限制无法满足本项目）。
+- 因此上文的选项 **A（WSL2 + Ubuntu 22.04）作废**：本机执行路径 = Linux 虚拟机，
+  fork GitHub Actions 继续作为无人值守门禁。
+- 虚拟机内的 `.venv` 必须在 VM 里重建（`uv sync --group dev`）；从 Windows 目录
+  同步过去的副本只是产物，不是权威运行环境。

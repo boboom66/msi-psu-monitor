@@ -4,16 +4,23 @@
 
 ## 1. 选择系统
 
-推荐 **Ubuntu 24.04 LTS Desktop x86_64**（原生安装，不是 WSL）。
-也支持 Ubuntu 22.04：kit 的二进制若因 glibc 不匹配无法启动，`setup.sh` 会自动
-改用系统 Python 3.10 运行随包源码，不需要 pip。
+目标运行环境是**纯净的 Ubuntu 虚拟机**（VMware / VirtualBox / KVM / libvirt 均可），
+不是 WSL，也不要求物理机：
 
-如果测试机是虚拟机（VMware/VirtualBox/KVM），必须把 PSU 的 USB 设备以
-**USB 3.0/xHCI** 方式直通给虚拟机；只直通键盘鼠标不够。
+- 推荐 **Ubuntu 24.04 LTS x86_64**。22.04 也支持：kit 的二进制若因 glibc 不匹配
+  无法启动，`setup.sh` 会自动改用系统 Python 3.10 运行随包源码，不需要 pip。
+- **不支持 WSL**：USB 透传不稳定（hidraw 时有时无），systemd/udev/root 安装也
+  无法真实验证。
+- 虚拟机必须把 PSU 的 USB 设备以 **USB 3.0/xHCI** 方式直通给虚拟机；只直通键盘
+  鼠标不够。
+- 仓库里的 `.venv` 是虚拟机内建好后同步出来的副本，**不要复用**：进入虚拟机里的
+  项目目录重新 `uv sync --group dev`，或直接用 kit 安装。
 
-## 2. 下载并制作安装 U 盘
+## 2. 获取并安装 Ubuntu
 
-在一台 Windows/Mac/Linux 上：
+虚拟机：新建虚拟机 → 挂载 ISO → 按向导安装（“Erase disk” 指虚拟磁盘）。
+
+物理机：在一台 Windows/Mac/Linux 上：
 
 1. 从 <https://ubuntu.com/download/desktop> 下载 Ubuntu 24.04 LTS ISO；
 2. 用 Rufus（Windows）、balenaEtcher 或 `dd` 写入 U 盘（U 盘会被清空）；
@@ -70,6 +77,7 @@ sudo ./setup.sh
 | 没有网络 | `setup.sh --no-apt`；验收只读项不需要网络 |
 | 22.04 二进制报 GLIBC | `sudo ./setup.sh --source`；系统自带 Python 3.10 即可 |
 | 虚拟机看不到 hidraw | 检查 USB 3.0 直通；不要用 WSL |
+| 复用同步来的 `.venv` 报 `python: not found` | venv 里写的是创建时的绝对路径；在虚拟机项目目录内 `uv sync --group dev` 重建 |
 
 ## 7. 需要下载的东西清单
 

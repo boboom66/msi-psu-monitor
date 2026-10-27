@@ -135,7 +135,7 @@ Correctness, safety, usability, reliability, security, compatibility, maintainab
 | CI | Python 3.10/3.12/3.13; smoke; soak; `.deb`; 22.04 freeze; arm64 release matrix |
 | Package policy | stdlib-only runtime; `Development Status :: 4 - Beta` |
 | Lint/type baseline | ruff `select = ["E","F"]`; mypy `strict = false` |
-| Windows host | No WSL distro, no Docker, no `uv`; `.venv` is a Linux venv (broken on Windows) |
+| Runtime host | Windows host is for editing only; gates and hardware work run in a **clean Ubuntu VM** (not WSL) |
 | GitHub CLI | `gh` 2.99.0 installed, **not authenticated** |
 
 ### 2.2 Known issues to fix first
@@ -351,23 +351,24 @@ Do not ask “shall I continue?” after each task.
 
 ## 4. Environment bootstrap
 
-### 4.1 Windows host reality
+### 4.1 Runtime environment (confirmed 2026-10-27)
 
-The current host has:
+The product runs only on Linux (imports `fcntl`/`termios`; hidraw, systemd and udev).
+The authoritative environment is a **clean Ubuntu VM**, not WSL:
 
-- no WSL distro, no Docker, no `uv`;
-- a Linux `.venv` that cannot run on Windows;
-- `gh` installed but not authenticated.
+- **Linux VM (Ubuntu 24.04; 22.04 supported)** — all gates, TUI/PTY captures and
+  hardware acceptance run here. Pass the PSU through as a **USB 3.0/xHCI** device
+  (see `machine-setup.md`).
+- **Windows host** — editing only. `ruff`/`mypy` and the 246-case POSIX-free subset
+  run here; the 21 test modules that import `fcntl`/`termios` cannot.
+- **Fork GitHub Actions** — unattended runner for the same Linux gates.
 
-The project imports `fcntl`/`termios`; it will not run natively on Windows. Choose one:
+**WSL is not supported**: USB passthrough is unreliable (hidraw appears and
+disappears) and systemd/udev/root installs cannot be verified. A `.venv` found in
+this tree is a VM artifact synced back; rebuild it inside the VM with
+`uv sync --group dev` instead of reusing the copy.
 
-| Option | When | Setup |
-|---|---|---|
-| A. WSL2 + Ubuntu | Best local loop, TUI captures | `wsl --install -d Ubuntu-22.04`, then `uv sync --group dev` |
-| B. GitHub Actions on fork | No local Linux; fully automatable | `gh auth login`; push branches to `fork`; `gh run watch` |
-| C. SSH Linux host | You already have one | configure `~/.ssh/config`; run commands remotely |
-
-If none is available, stop at **G0**. Static edits are allowed; gates are `BLOCKED`; no claims of pass.
+If no Linux VM is available, stop at **G0**. Static edits are allowed; gates are `BLOCKED`; no claims of pass.
 
 ### 4.2 Preserve current work (do this first)
 

@@ -157,3 +157,19 @@ ADR-style log. Context → Decision → Consequence.
 - Consequence: no dependency chain to audit downstream, and the zero-runtime
   promise is testable as before. A `tests/test_menu.py` extension (+15 tests)
   locks the new behaviour; PTY-based assertions only run on Linux CI.
+
+## D-015 — Runtime environment is a clean Ubuntu VM, not WSL
+
+- Context: the project imports `fcntl`/`termios` and needs hidraw, systemd and udev,
+  so it cannot run on the Windows host. Earlier phase documents listed WSL2 as the
+  recommended local Linux path because no distro was installed on the host.
+- Decision (user, 2026-10-27): the authoritative runtime is a **clean Ubuntu virtual
+  machine** (VMware/VirtualBox/KVM). WSL is explicitly **not** used or supported:
+  its USB passthrough is unreliable for hidraw, and systemd/udev/root installs
+  cannot be validated there. The Windows host keeps only editing duties
+  (ruff/mypy plus the POSIX-free test subset); fork GitHub Actions stays the
+  unattended Linux runner.
+- Consequence: any `.venv` found inside this tree is a VM artifact that was synced
+  back. It must be rebuilt inside the VM (`uv sync --group dev`) and never reused;
+  `docs/machine-setup.md` now leads with the VM path, with physical installs as a
+  side note.

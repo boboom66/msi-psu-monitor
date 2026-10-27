@@ -76,3 +76,8 @@ Reply `G0: A`, `G0: B`, `G0: C <host>`, or `G0: D`.
 The user's work is safe, the repository is cleanly split, and Phase 0 is
 complete except for the Linux environment. The next action is a **human
 environment choice**, not code. No production claim is made.
+
+## 后记（2026-10-27）
+
+用户澄清：Linux 执行路径是**纯净 Ubuntu 虚拟机**（不是 WSL）。上文「无 WSL distro」
+只是当时的探测结果，不代表推荐 WSL——WSL 已明确不采用。
