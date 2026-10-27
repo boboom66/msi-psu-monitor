@@ -443,7 +443,8 @@ def _drive_interactive(monkeypatch, keys, run=None, size=(80, 24), env=None):
     """Drive the interactive loop over a pty; returns (stdout text, exit code).
 
     ``size`` may be a single (width, height) pair or a list of pairs, one per
-    redraw cycle, to drive the resize path.
+    ``_size()`` call — the loop sizes the terminal once at startup and again on
+    every wake-up — to drive the resize path.
     """
     master, slave = pty.openpty()
     stdin = os.fdopen(os.dup(slave), 'r', encoding='utf-8', buffering=1)
@@ -466,12 +467,16 @@ def _drive_interactive(monkeypatch, keys, run=None, size=(80, 24), env=None):
         code = menu.run_menu(
             StubPSU(), _args(), {'retention_days': 30, 'interval': 1.0}, None, None
         )
+        # getvalue() must run while the fake stdout is still open: the finally
+        # below closes it, and a closed StringIO answers getvalue() with
+        # "I/O operation on closed file" instead of the frame.
+        text = stdout.getvalue()
     finally:
         stdin.close()
         stdout.close()
         os.close(master)
         os.close(slave)
-    return stdout.getvalue(), code
+    return text, code
 
 
 def test_escape_closes_the_help_overlay_before_quitting(monkeypatch):
@@ -540,7 +545,9 @@ def test_no_color_removes_the_selection_bar(monkeypatch):
 
 
 def test_a_resize_redraws_at_the_new_width(monkeypatch):
-    out, code = _drive_interactive(monkeypatch, (None, 'quit'), size=[(80, 24), (46, 12)])
+    # Startup sizes the terminal once, the loop again on every wake-up; the
+    # duplicated first pair covers that, then the resize happens.
+    out, code = _drive_interactive(monkeypatch, (None, 'quit'), size=[(80, 24), (80, 24), (46, 12)])
     assert code == monitor.EXIT_OK
     assert '-' * 80 in out
     assert '-' * 46 in out
