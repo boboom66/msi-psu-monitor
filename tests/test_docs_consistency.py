@@ -20,7 +20,6 @@ except ModuleNotFoundError:  # Python 3.10: the stdlib module arrives in 3.11
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DOCS = [
     ROOT / 'README.md',
-    ROOT / 'DEV_PROGRESS.md',
     ROOT / 'AGENTS.md',
     ROOT / 'msi_psu_monitor' / 'AGENTS.md',
     *sorted((ROOT / 'docs').glob('*.md')),
@@ -193,7 +192,7 @@ def test_the_quoted_smoke_check_count_matches_the_script():
                 quoted += 1
                 if int(claimed) != expected:
                     stale.append(f'{doc.relative_to(ROOT)}: says {claimed}, actual {expected}')
-    assert quoted >= 2, 'the smoke total is no longer quoted in the docs'
+    assert quoted >= 1, 'the smoke total is no longer quoted in the docs'
     assert not stale, '\n'.join(stale)
 
 
@@ -211,9 +210,9 @@ def _verify_section_8():
 def test_the_quoted_real_hardware_check_count_matches_verify_md():
     """That checklist is the last thing blocking release, and it grows by hand.
 
-    DEV_PROGRESS.md once said "共 10 项" above a list of nine (item 4b and the
-    Ai1600T case were added to verify.md and never mirrored), so the two numbers
-    are now tied together instead of trusted.
+    An archived progress log once said "共 10 项" above a list of nine (item 4b and
+    the Ai1600T case were added to verify.md and never mirrored). The living docs
+    quote verify.md §8, so the quoted total is tied to the real list here.
     """
     expected = len(HARDWARE_ENTRY_RE.findall(_verify_section_8()))
     assert expected >= 10, f'only {expected} hardware checks found in verify.md §8'
@@ -227,16 +226,8 @@ def test_the_quoted_real_hardware_check_count_matches_verify_md():
             quoted += 1
             if int(claimed) != expected:
                 stale.append(f'{doc.relative_to(ROOT)}: says {claimed}, actual {expected}')
-    assert quoted >= 2, 'the hardware checklist total is no longer quoted in the docs'
+    assert quoted >= 1, 'the hardware checklist total is no longer quoted in the docs'
     assert not stale, '\n'.join(stale)
-
-    # The list in DEV_PROGRESS.md mirrors verify.md by hand: make sure the two
-    # agree item by item, not just in the total.
-    progress = (ROOT / 'DEV_PROGRESS.md').read_text(encoding='utf-8')
-    section = progress.split('### 真机验收', 1)[1].split('## ', 1)[0]
-    assert len(HARDWARE_ENTRY_RE.findall(section)) == expected, (
-        'DEV_PROGRESS.md lists a different number of hardware checks than verify.md §8'
-    )
 
 
 STALE_FORMAT_BAN_RE = re.compile(

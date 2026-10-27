@@ -1,7 +1,7 @@
 # 开发进度
 
 > 最后更新：v2 改造「一期」功能全部落地（CLI/daemon/dashboard/状态/打包/systemd/文档/测试）。
-> 验证方式见 [`docs/verify.md`](docs/verify.md)（无硬件可全链路自检）。
+> 验证方式见 [`docs/verify.md`](../verify.md)（无硬件可全链路自检）。
 
 ## 已完成
 

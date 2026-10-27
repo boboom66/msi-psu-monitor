@@ -288,7 +288,7 @@ systemd-analyze verify                 exit 0
 - 当时全套 **645 passed**；新增测试实际执行。
 ## 11. 第五轮全项目深度审计（2026-10-19）
 
-完整命令、复现与未执行清单：[bug-audit/TEST_REPORT.md](../../bug-audit/TEST_REPORT.md)。
+完整命令、复现与未执行清单：[bug-audit/TEST_REPORT.md](../audit/TEST_REPORT.md)。
 
 ### 11.1 基线
 
@@ -347,7 +347,7 @@ systemd-analyze verify                 exit 0
 - 设计约束：阈值名与 E1h 名分离，不污染 12V-2x6 Status；缺读数不视为恢复；
   `--no-alerts` 连阈值一起关闭；0 = 关闭单项。
 - 结果：**680 passed**；ruff/format/mypy clean；coverage 92%；smoke 58/58。
-  详细命令/未执行项见 [bug-audit/TEST_REPORT.md](../../bug-audit/TEST_REPORT.md)。
+  详细命令/未执行项见 [bug-audit/TEST_REPORT.md](../audit/TEST_REPORT.md)。
 
 ## 14. 第八轮：运维/CLI 打磨（2026-10-19）
 

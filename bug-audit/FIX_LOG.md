@@ -14,7 +14,7 @@ old code path and passes now.
 | DEF-027 | `scripts/build_hardware_kit.sh` | capture `GLIBC=$(ldd --version ...)`, use it in `BUILD-INFO` and substitute `__GLIBC__` in `START-HERE.md` | `test_the_kit_start_page_reports_the_real_build_glibc` |
 | DEF-028 | `msi_psu_monitor/daemon.py` | empty `--config`/`--state-dir`/`--prom-path` → argparse usage error (exit 2) | 3-parameter `test_empty_path_arguments_are_usage_errors` |
 | DEF-029 | `msi_psu_monitor/state.py` | `iter_alert_log()` streams into `deque(maxlen=limit)` instead of loading all lines first | `test_iter_alert_log_limit_keeps_the_newest_lines_in_order`; existing order/rotation tests stay green |
-| DEF-030 | `msi_psu_monitor/daemon.py` | corrected `--iterations` help and `run()` docstring to describe loop passes, not "positive samples" | manual `--help` output recorded in TEST_REPORT |
+| DEF-030 | `msi_psu_monitor/daemon.py` | corrected `--iterations` help and `run()` docstring to describe loop passes, not "positive samples" | manual `--help` output recorded in the archived TEST_REPORT |
 | DEF-031 | `msi_psu_monitor/dashboard.py` | state-directory gate only for the four real API routes; unknown API path stays 404 | `test_an_unknown_api_route_is_404_even_without_a_state_dir` |
 
 ## Verification after the batch
@@ -35,9 +35,11 @@ udevadm verify                   Success: 1 / Fail: 0
 - `tests/test_docs_consistency.py`: new guard against literal release-artifact versions in shell scripts.
 - `AGENTS.md` / `msi_psu_monitor/AGENTS.md`: recorded the output-path rule, live-view contract,
   guarded housekeeping, and the single version source.
-- `docs/testing/bug-report.md§10`, `docs/testing/fix-log.md§Phase 5`, `docs/testing/test-cases.md`,
-  `docs/testing/test-report.md§11`: Phase 5 evidence.
-- `bug-audit/`: this ledger, test report, code audit, release readiness.
+- Phase 5 evidence: `docs/archive/testing/bug-report.md` §10, `test-cases.md` and
+  `test-report.md` §11. The old `docs/testing/fix-log.md` duplicate was folded into this
+  ledger; `docs/archive/` holds the snapshots.
+- `bug-audit/`: this ledger and the current release readiness assessment; the Phase 5
+  test report and code audit are archived under `docs/archive/audit/`.
 ## psu-file 对比轮（DEF-032..035）
 
 | Bug | Files changed | Change | Regression evidence |

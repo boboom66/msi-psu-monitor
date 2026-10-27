@@ -80,4 +80,4 @@ MSI_PSU_DEMO_MODEL=mpg_ai1300ts bash scripts/soak.sh 5000
 - 风扇/Zero Fan/蜂鸣器的实际动作
 - 24h/72h 长稳、arm64、真实 root/systemd/udev、桌面浏览器
 
-这些项目在 demo 中通过不等于真机 PASS；样机到位后按 [hardware-acceptance.md](../hardware-acceptance.md) 和 [verify.md](../verify.md) §8 执行。
+这些项目在 demo 中通过不等于真机 PASS；样机到位后按 [hardware-acceptance.md](../../hardware-acceptance.md) 和 [verify.md](../../verify.md) §8 执行。

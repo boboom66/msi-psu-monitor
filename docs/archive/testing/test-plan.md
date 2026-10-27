@@ -2,7 +2,7 @@
 
 > **历史记录。** 当前测试数/覆盖率/发布判断见
 > [docs/testing/test-coverage.md](test-coverage.md) 与
-> [bug-audit/RELEASE_READINESS.md](../../bug-audit/RELEASE_READINESS.md)（803 tests、94%）。
+> [bug-audit/RELEASE_READINESS.md](../../../bug-audit/RELEASE_READINESS.md)（803 tests、94%）。
 
 > 状态：Phase 1 完成（项目结构调查、功能盘点、测试矩阵、基线执行）
 > 基线提交：`650076a`（2026-10-19）

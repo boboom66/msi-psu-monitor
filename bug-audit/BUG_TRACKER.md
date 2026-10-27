@@ -3,7 +3,7 @@
 - Repository: `msi-psu-monitor` (`/home/timzhang/projects/project/msi-psu-monitor`)
 - Audit date: 2026-10-19; **updated 2026-10-22 after the second full audit**
 - Audit baseline: `fdfc97d`; current HEAD is the 2026-10-22 audit/doc commit (clean tree, ahead of `origin/master` at update time); current gate **803 tests / 94% branch coverage**
-- Earlier ledger: [docs/testing/bug-report.md](../docs/testing/bug-report.md) DEF-001..DEF-021.
+- Earlier ledger: [docs/archive/testing/bug-report.md](../docs/archive/testing/bug-report.md) DEF-001..DEF-021.
   This file is the continuing global ledger; DEF-001..DEF-021 keep their status there.
 
 Status vocabulary: `CONFIRMED` / `FIXED` (source changed, not fully verified yet) / `VERIFIED`
@@ -31,7 +31,7 @@ VERIFIED on static reasoning alone.
 ## psu-file 对比轮（2026-10-19，DEF-032..035）
 
 触发来源：对照 `psu-file/01_需求文档/*`、`04_MSI-Center源码` 与 `05_截图` 的逐项复核；
-完整矩阵见 [docs/testing/psu-file-gap-analysis.md](../docs/testing/psu-file-gap-analysis.md)。
+完整矩阵见 [docs/archive/testing/psu-file-gap-analysis.md](../docs/archive/testing/psu-file-gap-analysis.md)。
 
 | ID | Sev | Status | Files | Category | Trigger | Actual before fix | Root cause / fix | Regression test |
 |---|---|---|---|---|---|---|---|---|
@@ -56,7 +56,7 @@ VERIFIED on static reasoning alone.
 ## Previously open item still open
 
 - DEF-002 (P3, metadata: Beta classifier, example e-mail, upstream URLs) — unchanged from
-  [docs/testing/bug-report.md](../docs/testing/bug-report.md). Release decision pending.
+  [docs/archive/testing/bug-report.md](../docs/archive/testing/bug-report.md). Release decision pending.
 ## Second full audit (2026-10-22)
 
 AUD-01..AUD-14 (NaN/FIFO/Recursion/permissions/contracts/release/docs/soak) are

@@ -456,10 +456,6 @@ the user-space tool**; there is no kernel module to build today.
 See [`docs/protocol.md`](docs/protocol.md) for full protocol documentation, including
 the 62-byte `0xE0` bulk read layout and the register map.
 
-A Chinese walkthrough of the major features added on top of the upstream tool —
-what each one does, how it is implemented, and which parts still need real hardware
-— is in [`docs/新增功能指令与预览.md`](docs/新增功能指令与预览.md)（历史 v1.0.0 输出）.
-
 ## Security and support
 
 - [SECURITY.md](SECURITY.md) — reporting a vulnerability, security properties and
@@ -475,8 +471,10 @@ This tree is a fork of [HesiPullupTimbo/msi-psu-monitor](https://github.com/Hesi
 device discovery, the HID transport and the original sensor parsing come from there.
 Everything added on top — the variant-aware 0xE0 parsing, the E1h alert engine, the
 black-box reader, the OCP views, the daemon, the dashboard, the packaging and the
-tests — is described in [`DEV_PROGRESS.md`](DEV_PROGRESS.md) and
-[`docs/requirements-traceability.md`](docs/requirements-traceability.md).
+tests — is described in [`CHANGELOG.md`](CHANGELOG.md) and
+[`docs/requirements-traceability.md`](docs/requirements-traceability.md); the
+historical development log is archived in
+[`docs/archive/DEV_PROGRESS.md`](docs/archive/DEV_PROGRESS.md).
 
 The protocol details were cross-checked against the CWT REV6 USB command
 specification that ships with the PSU and against MSI Center's own reading
