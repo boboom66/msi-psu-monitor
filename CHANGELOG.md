@@ -42,6 +42,32 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **AC input voltage lost sub-volt precision**: VIN was decoded with an integer
+  LINEAR11 shift, so a device encoding such as 461 x 2^-1 V (230.5 V) was shown
+  as 230.0 V while the frame prints 0.1 V. It now uses the same floating decode
+  as MSI's `ValueCalc`.
+- **Energy stopped accumulating at slow sampling cadences**: the 300 s gap guard
+  also capped the normal interval, so `--watch 600` or
+  `[daemon] sample_interval = 600` skipped every sample and froze the kWh total
+  (the average kept moving, which hid it). Callers now pass a gap budget of
+  `max(300, interval * 2)`, and the daemon uses its injected wall clock for the
+  integral it writes next to the history.
+- **Daemon sampled nothing without saying why**: `[monitor] serial` that matched
+  no attached device, and devices that all failed to open, were only logged at
+  debug level once per five seconds. Discovery misses now raise one warning per
+  distinct reason and reset after a successful open.
+- **A symlink in the state directory could hang the daemon or dashboard**:
+  `Path.is_file()` follows symlinks, so a symlink to a FIFO or `/dev/zero` passed
+  the special-file guards and blocked the open forever. All state/history/
+  alert-log/live reads and appends now decide with `lstat`.
+- **Undefined 0xC0 multirail byte reported as "single rail"**: bytes other than
+  the two defined states (1 = combined, 2 = per-rail) now make the read
+  unusable instead of claiming a protection mode the PSU never sent.
+- **`--dump-config --menu` silently ignored `--menu`**, and `--dashboard-text`
+  silently ignored a config-sourced `[monitor] output`; both now behave like the
+  other modes (usage error / explicit warning).
+- **Confusing `--dashboard-text --menu` rejection**: the error named `--watch`
+  although the user never passed it.
 - **Terminal dashboard box alignment with colour**: padding counted ANSI escape
   bytes as columns, so the right border wandered nine columns to the left for
   every coloured value. Rows are now padded by visible width.

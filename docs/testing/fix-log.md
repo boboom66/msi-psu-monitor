@@ -1,5 +1,9 @@
 # 修复台账（Fix Log）
 
+> **历史快照（截至 2026-10-22），不是当前台账。**
+> 当前缺陷与修复记录见 [`bug-audit/FIX_LOG.md`](../../bug-audit/FIX_LOG.md) 与
+> [`bug-audit/BUG_TRACKER.md`](../../bug-audit/BUG_TRACKER.md)。
+
 - 项目：msi-psu-monitor
 - 记录截至：2026-10-22（2026-10-19 起的分轮修复记录）
 - 本轮快照：803 passed；分支覆盖率 94%；smoke 58/58。当前发布状态见
@@ -60,7 +64,7 @@
 | DEF-031 | `msi_psu_monitor/dashboard.py` | `test_an_unknown_api_route_is_404_even_without_a_state_dir` |
 
 全部 659 tests / ruff / format / mypy / smoke 58 / coverage 92% / shellcheck / systemd-analyze /
-udevadm verify 均通过；详细命令与未执行项见 [bug-audit/TEST_REPORT.md](../../bug-audit/TEST_REPORT.md)。
+udevadm verify 均通过；详细命令与未执行项见 [bug-audit/TEST_REPORT.md](../archive/audit/TEST_REPORT.md)。
 
 ## 第六轮追加（2026-10-19，psu-file 对比）
 

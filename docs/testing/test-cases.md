@@ -109,7 +109,7 @@
 | TEST-079 | FUNC-130 | iterations 帮助文本 | `msi-psu-monitor-daemon --help` | 描述 sample-loop passes、失败读也计数 | 通过 | PASS（DEF-030） |
 | TEST-080 | FUNC-160 | 未知 API 路由 | 无 state 目录服务器 GET `/api/typo` 与 `/api/state` | 404 与 503 | 通过 | PASS（DEF-031） |
 
-回归与未执行项见 [bug-audit/TEST_REPORT.md](../../bug-audit/TEST_REPORT.md)。
+回归与未执行项见 [bug-audit/TEST_REPORT.md](../archive/audit/TEST_REPORT.md)。
 
 ## D. 第六轮 psu-file 对比新增用例（2026-10-19）
 

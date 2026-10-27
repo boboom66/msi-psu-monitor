@@ -173,3 +173,26 @@ ADR-style log. Context → Decision → Consequence.
   back. It must be rebuilt inside the VM (`uv sync --group dev`) and never reused;
   `docs/machine-setup.md` now leads with the VM path, with physical installs as a
   side note.
+
+## D-016 — Documentation consolidation: one home per fact, dated material archived
+
+- Context: the tree carried a Phase 2 execution plan, a v1.0.0 command/output
+  preview, Phase 5 audit snapshots in `bug-audit/`, a historical `docs/testing/`
+  folder and live ledgers side by side, with several cross-references to each
+  other and two duplicate fix/release records. Readers could not tell which
+  document was current, and the docs-consistency gate only scans `docs/*.md`,
+  so stale snapshots inside scanned files were a recurring failure source.
+- Decision: keep current facts in one place each (README = behavior,
+  protocol.md = registers, verify.md = gates, requirements-traceability.md =
+  requirement mapping, bug-audit/RELEASE_READINESS.md = verdict,
+  agent-progress/STATE.md = live status). Move pure snapshots
+  (`新增功能指令与预览.md`, Phase 5 `CODE_AUDIT.md`/`TEST_REPORT.md`) into
+  `docs/archive/` with banners and fixed relative links. Keep `docs/testing/`
+  as the labelled historical test record, and mark its `fix-log.md` /
+  `release-readiness.md` as superseded by the `bug-audit/` ledgers instead of
+  deleting content that still has Phase 3 evidence. `docs/README.md` gains the
+  short maintenance rules; `AGENT_MASTER_PLAN.md` gains a status banner pointing
+  at STATE/LEDGER so its startup-phase sections are not read as current.
+- Consequence: no document is both historical and untagged; nothing was deleted
+  without a duplicate/archive record; links were re-checked with a local
+  markdown link scan (0 dangling). Future snapshots have a defined home.

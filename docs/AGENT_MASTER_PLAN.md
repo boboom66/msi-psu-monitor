@@ -1,5 +1,12 @@
 # AGENT MASTER PLAN — msi-psu-monitor Product v2
 
+> **状态：Phase 2 执行计划，仍定义 G0–G5 门禁与工作方式。**
+> 当前进度、门禁结果与未决事项以
+> [`agent-progress/STATE.md`](agent-progress/STATE.md)、
+> [`LEDGER.md`](agent-progress/LEDGER.md) 和 [`DECISIONS.md`](agent-progress/DECISIONS.md) 为准；
+> 本文 §0–§6 中带日期的启动期记录（G0 请求、基线步骤）属于历史，不要当成当前状态。
+> 若与 `AGENTS.md` 冲突，以 AGENTS.md 为准。
+
 > **READ THIS ENTIRE FILE BEFORE DOING ANYTHING.**
 > You are the **orchestrator** (GLM-5.3-Flash). The human is the **supervisor**.
 > Your job is to **execute**, not to ask permission for every step.

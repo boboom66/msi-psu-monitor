@@ -17,7 +17,7 @@
 | 实屏 | `05_截图/images/01..10` | 总览/曲线/导出/风扇：UI 语义 |
 
 当前实现：本仓库 2026-10-22 审计提交（对比时工作树 clean；803 tests，覆盖率 94%，smoke 58/58），详见
-[bug-audit/TEST_REPORT.md](../../bug-audit/TEST_REPORT.md)。
+[bug-audit/TEST_REPORT.md](../archive/audit/TEST_REPORT.md)。
 
 ## 1. 结论摘要
 

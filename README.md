@@ -185,8 +185,9 @@ msi-psu-monitor [-h] [-f {text,json,prometheus}] [-w [WATCH]] [-i INTERVAL] [-o]
                    no browser; --once/--watch/--export/--format/-O do not apply
       --menu       Grouped interactive menu over the normal commands: arrows or
                    digits select, Enter runs, q/Esc quits (snapshot, watch,
-                   dashboard, export, OCP, thresholds, log, config); the header
-                   shows the last action's result, pipes get a numbered prompt
+                   dashboard, export, OCP, thresholds, log, alert log, config);
+                   the header shows the last action's result, pipes get a
+                   numbered prompt; 9 entries in Monitor/History/System groups
       --port       Dashboard port (default 8899)
       --show-log   Dump the PSU black-box alert records (C1h; this format is
                    project-defined because MSI Center never reads that log)
@@ -480,7 +481,7 @@ The categorized documentation index is [`docs/README.md`](docs/README.md).
 
 A Chinese walkthrough of the major features added on top of the upstream tool —
 what each one does, how it is implemented, and which parts still need real hardware
-— is in [`docs/新增功能指令与预览.md`](docs/新增功能指令与预览.md)（历史开发快照，`--version` 显示 1.0.0）.
+— is in [`docs/archive/新增功能指令与预览.md`](docs/archive/新增功能指令与预览.md)（历史开发快照，`--version` 显示 1.0.0）.
 
 ## Security and support
 

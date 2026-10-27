@@ -9,7 +9,9 @@ and fix evidence.
 | [RELEASE_READINESS.md](RELEASE_READINESS.md) | Current release verdict, latest CI evidence, and remaining blockers |
 | [BUG_TRACKER.md](BUG_TRACKER.md) | Open, resolved, and blocked findings |
 | [FIX_LOG.md](FIX_LOG.md) | Fixes and regression evidence from the 2026-10-22 audit |
-| [CODE_AUDIT.md](CODE_AUDIT.md) | Historical Phase 5 code-audit snapshot |
-| [TEST_REPORT.md](TEST_REPORT.md) | Historical Phase 5 audit test report |
+
+Phase 5 snapshots moved to the archive when the ledger was consolidated:
+[docs/archive/audit/CODE_AUDIT.md](../docs/archive/audit/CODE_AUDIT.md) and
+[docs/archive/audit/TEST_REPORT.md](../docs/archive/audit/TEST_REPORT.md).
 
 Detailed dated test plans and reports live in [`docs/testing/`](../docs/testing/README.md).

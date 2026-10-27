@@ -461,7 +461,7 @@ SHIP / SHIP WITH KNOWN ISSUES / NOT READY
    - `--dashboard-text` 80x24 / 120x40
    - `--menu` 主菜单 / 二级菜单 / 非 TTY
    - dashboard 320/768/1920，正常/空/daemon 停止/`latest.json` 删除
-   把路径写进 `docs/testing/ui-evidence/README.md`，供 GLM-5.3-Flash 评审。
+   把证据目录与索引写进本轮评审报告，并在 `docs/testing/` 下留档，供评审复核。
 
 ---
 

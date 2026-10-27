@@ -11,6 +11,11 @@ The documents below record earlier test rounds. Their counts, environment detail
 and pass/fail statuses are frozen at the date stated in each document; do not use
 them as the current test count or release verdict.
 
+Two files overlap the current ledgers and are kept only as Phase 3/5 history:
+`fix-log.md` is superseded by [`bug-audit/FIX_LOG.md`](../../bug-audit/FIX_LOG.md)
+and `release-readiness.md` by
+[`bug-audit/RELEASE_READINESS.md`](../../bug-audit/RELEASE_READINESS.md).
+
 | Group | Files | Purpose |
 |---|---|---|
 | Plans and cases | [test-plan.md](test-plan.md), [test-cases.md](test-cases.md) | Historical test scope and case inventory |
