@@ -707,14 +707,15 @@ def _line_for(item, width, selected, color):
     label_field = _pad(item.label, label_width)
     base = f'{prefix_field} {label_field}'
     command = _truncate(item.command, max(0, width - _display_width(base) - 1))
-    plain = _pad(_truncate(f'{base} {command}', width), width)
-    padding = ' ' * max(0, width - _display_width(plain))
+    content = _truncate(f'{base} {command}', width)
+    plain = _pad(content, width)
+    padding = ' ' * max(0, width - _display_width(content))
     if selected:
         # Reverse video paints a full-width selection bar, including the
         # padding, so the cursor line is unmistakable even without colour.
-        return _paint(plain + padding, _REVERSE, color)
+        return _paint(plain, _REVERSE, color)
     if not color:
-        return plain + padding
+        return plain
     return (
         f'{_COLOR_NUMBER}{prefix_field}{_RESET} '
         f'{_COLOR_LABEL}{label_field}{_RESET} '
@@ -1178,7 +1179,7 @@ def _interactive_menu(psu, args, cfg, monitor_state, engine, psu_factory=None):
                     status=status,
                 )
                 _clear()
-                _write(frame + '\n')
+                _write(frame)
                 dirty = False
             key = _read_key(fd)
             if key is None:

@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Menu layout fixes**: colour rows now keep the trailing padding that puts
+  the right border at the terminal edge, and a full-height frame is written
+  without an extra newline so an 80×24 terminal no longer scrolls the title
+  border off the top. Regression tests assert 80-column colour/no-colour rows
+  and the final frame's missing trailing newline.
 - **Menu prompt/pipe UX**: EOF or Ctrl-C at a parameter prompt is now a clean
   cancellation (not a validation error), device-discovery failures are printed
   once instead of twice, control characters typed into the numbered prompt are

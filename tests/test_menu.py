@@ -285,6 +285,9 @@ def test_the_menu_is_a_boxed_card_with_group_counts_and_even_width():
     # The selected row is padded as well, so reverse video is a full bar.
     assert any(line.startswith('| > 1)') for line in lines)
 
+    colored, _ = menu.render_menu(menu.ITEMS, 0, 0, 80, 24, color=True)
+    assert all(menu._display_width(line) == 80 for line in colored.splitlines())
+
 
 def test_the_menu_falls_back_to_ascii_glyphs_for_vga_terminals(monkeypatch):
     monkeypatch.setenv('TERM', 'linux')
@@ -655,6 +658,23 @@ def test_a_resize_redraws_at_the_new_width(monkeypatch):
     widths = {len(line) for line in _visible(out).splitlines() if line}
     assert 80 in widths
     assert 46 in widths
+
+
+def test_the_last_frame_does_not_scroll_the_top_border_off(monkeypatch):
+    """A full-height frame plus a trailing newline scrolls the title away.
+
+    The bug showed up in an 80x24 terminal as a menu whose top border was
+    missing. The frame is height rows, so it must be written without an extra
+    newline; the next redraw starts with a clear/home anyway.
+    """
+    frame, _ = menu.render_menu(menu.ITEMS, 0, 0, 80, 24, color=False)
+    assert len(frame.splitlines()) == 24
+    out, code = _drive_interactive(monkeypatch, ('quit',), size=(80, 24))
+    assert code == monitor.EXIT_OK
+    assert '+- MSI PSU Monitor' in _visible(out)
+    footer_at = out.rfind('Up/Down move')
+    assert footer_at > 0
+    assert '\n' not in out[footer_at:]
 
 
 def test_the_thresholds_entry_dumps_the_c0h_configuration(monkeypatch, capsys):
