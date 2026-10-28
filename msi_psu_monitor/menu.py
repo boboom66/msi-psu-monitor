@@ -47,7 +47,6 @@ _DIM = '\x1b[2m'
 _RESET = '\x1b[0m'
 # Menu palette: standard 8/16-colour SGR only, so it works over SSH, tmux and
 # the Linux VGA console without requiring 256-colour support.
-_COLOR_BORDER = '\x1b[36m'
 _COLOR_TITLE = '\x1b[1;36m'
 _COLOR_GROUP = '\x1b[1;34m'
 _COLOR_NUMBER = '\x1b[33m'
@@ -659,40 +658,6 @@ def _paint(text, code, enabled):
     return f'{code}{text}{_RESET}' if enabled else text
 
 
-_ASCII_GLYPHS = {
-    'tl': '+',
-    'tr': '+',
-    'bl': '+',
-    'br': '+',
-    'h': '-',
-    'v': '|',
-    'dot': '*',
-}
-_UNICODE_GLYPHS = {
-    'tl': '╭',
-    'tr': '╮',
-    'bl': '╰',
-    'br': '╯',
-    'h': '─',
-    'v': '│',
-    'dot': '·',
-}
-
-
-def _glyphs():
-    """Box glyphs that the terminal can actually encode.
-
-    The Linux VGA console (``TERM=linux``) and a non-UTF-8 locale get ASCII:
-    a UnicodeEncodeError while drawing the menu would otherwise kill it. The
-    caller can also inject a fixed set in tests.
-    """
-    term = os.environ.get('TERM', '').strip().lower()
-    encoding = (getattr(sys.stdout, 'encoding', '') or '').lower()
-    if term == 'linux' or 'utf' not in encoding:
-        return _ASCII_GLYPHS
-    return _UNICODE_GLYPHS
-
-
 def _line_for(item, width, selected, color):
     """One menu row, padded to exactly ``width`` visible columns.
 
@@ -723,17 +688,21 @@ def _line_for(item, width, selected, color):
     )
 
 
-def _group_line(group, count, width, color, glyphs):
-    """A group heading with item count and a subtle rule to the right."""
+def _group_line(group, count, width, color):
+    """A minimal group heading: name and item count, no rule or box."""
     label = f' {group}'
-    meta = f' {glyphs["dot"]} {count} '
-    rule = glyphs['h'] * max(0, width - _display_width(label) - _display_width(meta))
+    meta = f'  {count}'
+    plain = _pad(label + meta, width)
     if not color:
-        return label + meta + rule
-    return f'{_COLOR_GROUP}{label}{_RESET}{_DIM}{meta}{_RESET}{_COLOR_BORDER}{rule}{_RESET}'
+        return plain
+    return (
+        f'{_COLOR_GROUP}{label}{_RESET}'
+        f'{_DIM}{meta}{_RESET}'
+        f'{" " * max(0, width - _display_width(label) - _display_width(meta))}'
+    )
 
 
-def _body_lines(items, selected, width, color, glyphs):
+def _body_lines(items, selected, width, color):
     """Return (lines, index of the selected line) with group headings."""
     counts = {group: 0 for group in GROUPS}
     for item in items:
@@ -741,7 +710,7 @@ def _body_lines(items, selected, width, color, glyphs):
     lines = []
     selected_line = 0
     for group in GROUPS:
-        lines.append(_group_line(group, counts[group], width, color, glyphs))
+        lines.append(_group_line(group, counts[group], width, color))
         for item in items:
             if item.group != group:
                 continue
@@ -752,37 +721,17 @@ def _body_lines(items, selected, width, color, glyphs):
     return lines, selected_line
 
 
-def _border_top(inner, title, right, color, glyphs, right_color=None):
-    """Top border with a title on the left and version/status on the right."""
-    available = inner - 2
-    title_text = f' {title} '
-    right_text = f' {right} ' if right else ''
-    max_right = max(0, available - 2 - _display_width(title_text))
+def _header_line(inner, title, right, color, right_color=None):
+    """Title on the left, version/status on the right, no surrounding rule."""
+    left = f' {title}'
+    right_text = f'{right} ' if right else ''
+    max_right = max(0, inner - _display_width(left) - 1)
     right_text = _truncate(right_text, max_right)
-    fill = max(
-        0,
-        available - 2 - _display_width(title_text) - _display_width(right_text),
-    )
-    rule = glyphs['h'] * fill
+    gap = ' ' * max(1, inner - _display_width(left) - _display_width(right_text))
+    plain = left + gap + right_text
     if not color:
-        return (
-            glyphs['tl'] + glyphs['h'] + title_text + rule + right_text + glyphs['h'] + glyphs['tr']
-        )
-    return (
-        f'{_COLOR_BORDER}{glyphs["tl"]}{glyphs["h"]}{_RESET}'
-        f'{_COLOR_TITLE}{title_text}{_RESET}'
-        f'{_COLOR_BORDER}{rule}{_RESET}'
-        f'{right_color or _COLOR_DETAIL}{right_text}{_RESET}'
-        f'{_COLOR_BORDER}{glyphs["h"]}{glyphs["tr"]}{_RESET}'
-    )
-
-
-def _box_line(content, glyphs, color):
-    if color:
-        return (
-            f'{_COLOR_BORDER}{glyphs["v"]}{_RESET} {content} {_COLOR_BORDER}{glyphs["v"]}{_RESET}'
-        )
-    return f'{glyphs["v"]} {content} {glyphs["v"]}'
+        return plain
+    return f'{_COLOR_TITLE}{left}{_RESET}{gap}{right_color or _COLOR_DETAIL}{right_text}{_RESET}'
 
 
 def render_menu(
@@ -795,15 +744,18 @@ def render_menu(
     color=True,
     help_mode=False,
     status=None,
-    glyphs=None,
 ):
-    """Pure renderer: returns (frame, new_offset) for tests and the loop."""
-    inner = max(MIN_WIDTH, min(width, 100))
-    glyphs = glyphs or _glyphs()
-    content_width = max(1, inner - 4)
-    body, selected_line = _body_lines(items, selected, content_width, color, glyphs)
+    """Pure renderer: returns (frame, new_offset) for tests and the loop.
 
-    available = max(1, height - 4)  # top border, bottom border, detail, footer
+    The menu is deliberately borderless: a title/status line, grouped rows and
+    a footer. That keeps it readable at 40 columns and avoids box-drawing
+    characters on VGA consoles and non-UTF-8 locales.
+    """
+    inner = max(MIN_WIDTH, min(width, 100))
+    body, selected_line = _body_lines(items, selected, inner, color)
+
+    # Title, blank spacer, body, detail and footer. The body gets the rest.
+    available = max(1, height - 4)
     offset = max(0, min(offset, max(0, len(body) - available)))
     if selected_line < offset:
         offset = selected_line
@@ -827,15 +779,11 @@ def render_menu(
         right = f'v{version}' if version else ''
         right_color = _COLOR_DETAIL
 
-    frame = [_border_top(inner, 'MSI PSU Monitor', right, color, glyphs, right_color)]
-    frame.extend(_box_line(line, glyphs, color) for line in window)
-    frame.append(
-        _paint(
-            glyphs['bl'] + glyphs['h'] * (inner - 2) + glyphs['br'],
-            _COLOR_BORDER,
-            color,
-        )
-    )
+    frame = [
+        _header_line(inner, 'MSI PSU Monitor', right, color, right_color),
+        ' ' * inner,
+        *window,
+    ]
 
     if help_mode:
         # The detail slot is the most readable place for the key legend; the
@@ -845,8 +793,6 @@ def render_menu(
     else:
         detail = ' ' + _truncate(f'{item.label}: {item.purpose}', inner - 1)
         footer = ' ' + _truncate(_footer_text(), inner - 1)
-    # Pad the two free-standing lines too, so every visual row has the same
-    # width as the card even when the terminal has no background colour.
     frame.append(_paint(_pad(detail, inner), _COLOR_DETAIL, color))
     frame.append(_paint(_pad(footer, inner), _COLOR_FOOTER, color))
     return '\n'.join(frame), offset
@@ -1027,11 +973,10 @@ def _run(action, psu, args, cfg, monitor_state, engine):
 
 
 def _line_show():
-    """Fallback/piped menu: the same order and grouping as the card."""
-    width = 62
+    """Fallback/piped menu: the same order and grouping as the interactive list."""
     print()
     print(' MSI PSU Monitor - menu')
-    print(' ' + '-' * width)
+    print()
     counts = {}
     for item in ITEMS:
         counts[item.group] = counts.get(item.group, 0) + 1
@@ -1044,7 +989,6 @@ def _line_show():
         print(f'        -> {item.purpose}')
     print()
     print(' 0) quit   ?=menu   h/help=menu')
-    print(' ' + '-' * width)
 
 
 def _line_prompt():

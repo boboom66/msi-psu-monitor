@@ -1,7 +1,7 @@
 # STATE
 
 - Phase: **Phase 2 — user-added feature polish (TUI/menu/dashboard/watch)**
-- Task: **Menu card borders/UX/stability pass done; G2 review next**
+- Task: **Menu borderless/minimal UX + stability pass done; G2 review next**
 - Branch: `work/product-v2`
 - HEAD: `5537ecd` on `work/product-v2` (CI run #66 green)
 - Baseline tag: `baseline-2026-10-26-r2`

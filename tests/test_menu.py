@@ -273,28 +273,33 @@ def test_render_highlights_with_reverse_video_in_colour_mode():
     assert menu._RESET in frame
 
 
-def test_the_menu_is_a_boxed_card_with_group_counts_and_even_width():
-    frame, _ = menu.render_menu(menu.ITEMS, 0, 0, 80, 24, color=False, glyphs=menu._ASCII_GLYPHS)
+def test_the_menu_is_a_clean_borderless_list_with_group_counts():
+    frame, _ = menu.render_menu(menu.ITEMS, 0, 0, 80, 24, color=False)
     lines = frame.splitlines()
-    assert lines[0].startswith('+- MSI PSU Monitor ')
-    assert lines[0].endswith('-+')
-    assert 'Monitor * 7' in lines[1]
-    assert 'History * 7' in frame
-    assert 'Writes * 7' in frame
+    assert lines[0].startswith(' MSI PSU Monitor ')
+    assert 'v1.0.1' in lines[0]
+    assert 'Monitor  7' in lines[2]
+    assert 'History  7' in frame
+    assert 'Writes  7' in frame
     assert all(len(line) == 80 for line in lines), [len(line) for line in lines]
+    # No box drawing, vertical bars or '+' corners anywhere.
+    for glyph in ('+', '│', '╭', '╮', '╰', '╯', '─'):
+        assert glyph not in frame, glyph
     # The selected row is padded as well, so reverse video is a full bar.
-    assert any(line.startswith('| > 1)') for line in lines)
+    assert any(line.startswith('> 1)') for line in lines)
 
     colored, _ = menu.render_menu(menu.ITEMS, 0, 0, 80, 24, color=True)
     assert all(menu._display_width(line) == 80 for line in colored.splitlines())
 
 
-def test_the_menu_falls_back_to_ascii_glyphs_for_vga_terminals(monkeypatch):
+def test_the_menu_never_draws_box_characters_on_a_vga_terminal(monkeypatch):
+    """The minimal list has no Unicode box glyphs to fail on TERM=linux."""
     monkeypatch.setenv('TERM', 'linux')
-    assert menu._glyphs() is menu._ASCII_GLYPHS
     frame, _ = menu.render_menu(menu.ITEMS, 0, 0, 60, 12, color=False)
-    assert frame.startswith('+- MSI PSU Monitor ')
-    assert '| > 1)' in frame
+    assert frame.startswith(' MSI PSU Monitor ')
+    assert '> 1)' in frame
+    for glyph in ('+', '│', '╭', '╮', '╰', '╯', '─'):
+        assert glyph not in frame, glyph
 
 
 class FakeIO(io.StringIO):
@@ -660,18 +665,18 @@ def test_a_resize_redraws_at_the_new_width(monkeypatch):
     assert 46 in widths
 
 
-def test_the_last_frame_does_not_scroll_the_top_border_off(monkeypatch):
+def test_the_last_frame_does_not_scroll_the_title_off(monkeypatch):
     """A full-height frame plus a trailing newline scrolls the title away.
 
-    The bug showed up in an 80x24 terminal as a menu whose top border was
-    missing. The frame is height rows, so it must be written without an extra
-    newline; the next redraw starts with a clear/home anyway.
+    The bug showed up in an 80x24 terminal as a menu whose title was missing.
+    The frame is height rows, so it must be written without an extra newline;
+    the next redraw starts with a clear/home anyway.
     """
     frame, _ = menu.render_menu(menu.ITEMS, 0, 0, 80, 24, color=False)
     assert len(frame.splitlines()) == 24
     out, code = _drive_interactive(monkeypatch, ('quit',), size=(80, 24))
     assert code == monitor.EXIT_OK
-    assert '+- MSI PSU Monitor' in _visible(out)
+    assert ' MSI PSU Monitor' in _visible(out)
     footer_at = out.rfind('Up/Down move')
     assert footer_at > 0
     assert '\n' not in out[footer_at:]

@@ -188,13 +188,13 @@ corresponding `msi-psu-monitor` invocations.
       --dashboard-text  Live terminal dashboard: coloured bars in the console,
                    no browser; --once/--watch/--export/--format/-O do not apply
       --menu       Full interactive menu over every action (23 entries grouped
-                   Monitor/History/Writes/System): a boxed card with group
-                   counts, a highlighted selection bar and a status-coloured
-                   header; arrows or digits select, Enter runs, q/Esc quits;
-                   write entries prompt for their parameters and ask for
-                   confirmation. The header shows the last result; pipes get a
-                   numbered prompt. A bare `menu` word is the same switch, and
-                   the installed `psu` command opens it.
+                   Monitor/History/Writes/System): a minimal borderless list
+                   with group counts, a highlighted selection bar and a
+                   status-coloured header; arrows or digits select, Enter runs,
+                   q/Esc quits; write entries prompt for their parameters and
+                   ask for confirmation. The header shows the last result; pipes
+                   get a numbered prompt. A bare `menu` word is the same switch,
+                   and the installed `psu` command opens it.
       --port       Dashboard port (default 8899)
       --show-log   Dump the PSU black-box alert records (C1h; this format is
                    project-defined because MSI Center never reads that log)
