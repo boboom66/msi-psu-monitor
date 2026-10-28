@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Menu prompt/pipe UX**: EOF or Ctrl-C at a parameter prompt is now a clean
+  cancellation (not a validation error), device-discovery failures are printed
+  once instead of twice, control characters typed into the numbered prompt are
+  sanitised before they are echoed, and the pipe/fallback menu uses the same
+  grouping, labels and counts as the interactive card.
 - **Menu visual refresh**: the interactive menu is now a boxed card with a
   title/version and a colour-coded `last:` status (green ok, red exit, yellow
   stopped), group headings with item counts, aligned action/command columns and

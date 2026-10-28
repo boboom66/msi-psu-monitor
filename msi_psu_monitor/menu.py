@@ -26,11 +26,13 @@ import io
 import math
 import os
 import pydoc
+import re
 import select
 import shutil
 import subprocess
 import sys
 import termios
+import unicodedata
 from dataclasses import dataclass
 from typing import Callable, NamedTuple, Optional
 
@@ -355,6 +357,8 @@ def _action_once_prometheus(psu, args, cfg, monitor_state, engine):
 
 def _action_watch_custom(psu, args, cfg, monitor_state, engine):
     raw = _ask('Refresh interval in seconds (e.g. 2): ')
+    if raw is None:
+        return _cancelled()
     try:
         interval = float(raw) if raw is not None else None
     except ValueError:
@@ -378,13 +382,17 @@ def _action_dashboard_web(psu, args, cfg, monitor_state, engine):
 
 
 def _action_export_custom(psu, args, cfg, monitor_state, engine):
-    window = _ask('Window (e.g. 30m, 2h, 7d; empty = 1h): ') or '1h'
-    columns = _ask('Columns (e.g. cpu,gpu,temp; empty = all): ')
+    window_raw = _ask('Window (e.g. 30m, 2h, 7d; empty = 1h): ')
+    if window_raw is None:
+        return _cancelled()
+    columns_raw = _ask('Columns (e.g. cpu,gpu,temp; empty = all): ')
+    if columns_raw is None:
+        return _cancelled()
     local = copy.copy(args)
     local.export = True
     local.format = 'text'
-    local.from_spec = window
-    local.columns = columns or None
+    local.from_spec = window_raw or '1h'
+    local.columns = columns_raw or None
     local.output = None
     return _paged(monitor.run_export, local, cfg)
 
@@ -404,8 +412,10 @@ def _action_fan_auto(psu, args, cfg, monitor_state, engine):
 
 def _action_fan_duty(psu, args, cfg, monitor_state, engine):
     raw = _ask('Fan duty in percent (0-100): ')
+    if raw is None:
+        return _cancelled()
     try:
-        duty = int(raw) if raw is not None else -1
+        duty = int(raw)
     except ValueError:
         duty = -1
     if not 0 <= duty <= 100:
@@ -421,7 +431,10 @@ def _action_fan_duty(psu, args, cfg, monitor_state, engine):
 
 
 def _action_zero_fan(psu, args, cfg, monitor_state, engine):
-    raw = (_ask('Zero Fan state (on/off): ') or '').lower()
+    raw = _ask('Zero Fan state (on/off): ')
+    if raw is None:
+        return _cancelled()
+    raw = raw.lower()
     if raw not in ('on', 'off'):
         print('Error: choose on or off.')
         return monitor.EXIT_ERROR
@@ -443,7 +456,10 @@ def _action_buzzer(psu, args, cfg, monitor_state, engine):
 
 
 def _action_rail(psu, args, cfg, monitor_state, engine):
-    raw = (_ask('Rail protection mode (multi/single): ') or '').lower()
+    raw = _ask('Rail protection mode (multi/single): ')
+    if raw is None:
+        return _cancelled()
+    raw = raw.lower()
     if raw not in (monitor.RAIL_MODE_MULTI, monitor.RAIL_MODE_SINGLE):
         print('Error: choose multi or single.')
         return monitor.EXIT_ERROR
@@ -457,6 +473,8 @@ def _action_rail(psu, args, cfg, monitor_state, engine):
 
 def _action_ocp_write(psu, args, cfg, monitor_state, engine):
     raw = _ask('POINT_A,DIFF_A,TRIGGER_S,DIFF_TRIGGER_S,WARNING_S[,on|off]: ')
+    if raw is None:
+        return _cancelled()
     if not raw:
         print('Error: five values are required (see --help for the ranges).')
         return monitor.EXIT_ERROR
@@ -479,6 +497,8 @@ def _action_ocp_write(psu, args, cfg, monitor_state, engine):
 
 def _action_ocp_load(psu, args, cfg, monitor_state, engine):
     path = _ask('JSON file with the thresholds (dump -f json output): ')
+    if path is None:
+        return _cancelled()
     if not path:
         print('Error: a file path is required.')
         return monitor.EXIT_ERROR
@@ -497,6 +517,8 @@ def _action_ocp_load(psu, args, cfg, monitor_state, engine):
 def _action_serial(psu, args, cfg, monitor_state, engine):
     """Set the serial filter used by later device actions in this session."""
     raw = _ask('PSU serial (empty = first attached PSU): ')
+    if raw is None:
+        return _cancelled()
     args.serial = raw or None
     print(f'Serial filter: {args.serial or "first attached PSU"}')
     return monitor.EXIT_OK
@@ -593,15 +615,44 @@ def _size(fd=None):
         return 80, 24
 
 
+_SGR_RE = re.compile(r'\x1b\[[0-9;]*m')
+
+
+def _display_width(text):
+    """Visible terminal columns, honouring SGR-free wide/full-width glyphs.
+
+    A CJK label or a warning pasted into a prompt counts two columns on real
+    terminals; ``len()`` counts one, which shifts every following field. SGR
+    sequences are removed first so an already-painted string can be measured.
+    """
+    stripped = _SGR_RE.sub('', text)
+    return sum(2 if unicodedata.east_asian_width(char) in ('W', 'F') else 1 for char in stripped)
+
+
+def _pad(text, width):
+    """Pad ``text`` to ``width`` visible columns with spaces."""
+    return text + ' ' * max(0, width - _display_width(text))
+
+
 def _truncate(text, width):
     """Cut to ``width`` columns, marking the cut so it is not read as data."""
     if width <= 0:
         return ''
-    if len(text) <= width:
+    if _display_width(text) <= width:
         return text
     if width <= 2:
         return text[:width]
-    return text[: width - 2] + '..'
+    # Leave two columns for the marker; CJK characters count two columns, so a
+    # character-width loop would otherwise overflow the line.
+    out = []
+    seen = 0
+    for char in text:
+        char_width = 2 if unicodedata.east_asian_width(char) in ('W', 'F') else 1
+        if seen + char_width > width - 2:
+            break
+        out.append(char)
+        seen += char_width
+    return ''.join(out) + '..'
 
 
 def _paint(text, code, enabled):
@@ -652,12 +703,12 @@ def _line_for(item, width, selected, color):
     marker = '>' if selected else ' '
     prefix = f'{marker} {item.number})'
     prefix_field = f'{prefix:<5}'
-    label_width = min(15, max(8, width - len(prefix_field) - 6))
-    label_field = f'{item.label:<{label_width}}'
+    label_width = min(15, max(8, width - _display_width(prefix_field) - 6))
+    label_field = _pad(item.label, label_width)
     base = f'{prefix_field} {label_field}'
-    command = _truncate(item.command, max(0, width - len(base) - 1))
-    plain = _truncate(f'{base} {command}', width)
-    padding = ' ' * max(0, width - len(plain))
+    command = _truncate(item.command, max(0, width - _display_width(base) - 1))
+    plain = _pad(_truncate(f'{base} {command}', width), width)
+    padding = ' ' * max(0, width - _display_width(plain))
     if selected:
         # Reverse video paints a full-width selection bar, including the
         # padding, so the cursor line is unmistakable even without colour.
@@ -675,7 +726,7 @@ def _group_line(group, count, width, color, glyphs):
     """A group heading with item count and a subtle rule to the right."""
     label = f' {group}'
     meta = f' {glyphs["dot"]} {count} '
-    rule = glyphs['h'] * max(0, width - len(label) - len(meta))
+    rule = glyphs['h'] * max(0, width - _display_width(label) - _display_width(meta))
     if not color:
         return label + meta + rule
     return f'{_COLOR_GROUP}{label}{_RESET}{_DIM}{meta}{_RESET}{_COLOR_BORDER}{rule}{_RESET}'
@@ -705,9 +756,12 @@ def _border_top(inner, title, right, color, glyphs, right_color=None):
     available = inner - 2
     title_text = f' {title} '
     right_text = f' {right} ' if right else ''
-    max_right = max(0, available - 2 - len(title_text))
+    max_right = max(0, available - 2 - _display_width(title_text))
     right_text = _truncate(right_text, max_right)
-    fill = max(0, available - 2 - len(title_text) - len(right_text))
+    fill = max(
+        0,
+        available - 2 - _display_width(title_text) - _display_width(right_text),
+    )
     rule = glyphs['h'] * fill
     if not color:
         return (
@@ -792,8 +846,8 @@ def render_menu(
         footer = ' ' + _truncate(_footer_text(), inner - 1)
     # Pad the two free-standing lines too, so every visual row has the same
     # width as the card even when the terminal has no background colour.
-    frame.append(_paint(f'{detail:<{inner}}', _COLOR_DETAIL, color))
-    frame.append(_paint(f'{footer:<{inner}}', _COLOR_FOOTER, color))
+    frame.append(_paint(_pad(detail, inner), _COLOR_DETAIL, color))
+    frame.append(_paint(_pad(footer, inner), _COLOR_FOOTER, color))
     return '\n'.join(frame), offset
 
 
@@ -954,6 +1008,12 @@ def _confirm(label):
     return bool(answer) and answer.lower() in ('y', 'yes')
 
 
+def _cancelled():
+    """EOF/Ctrl-C at a parameter prompt is a cancellation, not an error."""
+    print('Cancelled.')
+    return monitor.EXIT_OK
+
+
 def _run(action, psu, args, cfg, monitor_state, engine):
     spec = ACTIONS.get(action)
     if spec is None:
@@ -962,21 +1022,40 @@ def _run(action, psu, args, cfg, monitor_state, engine):
 
 
 def _line_show():
+    """Fallback/piped menu: the same order and grouping as the card."""
+    width = 62
     print()
-    print('============== MSI PSU Monitor - menu ==============')
+    print(' MSI PSU Monitor - menu')
+    print(' ' + '-' * width)
+    counts = {}
+    for item in ITEMS:
+        counts[item.group] = counts.get(item.group, 0) + 1
     current = None
     for item in ITEMS:
         if item.group != current:
             current = item.group
-            print(f' {current}')
-        print(f' {item.number}) {item.command}')
-        print(f'    -> {item.purpose}')
-    print('  0) quit')
-    print('=====================================================')
+            print(f' {current} ({counts[current]})')
+        print(f'   {item.number:>2})  {item.label:<15} {item.command}')
+        print(f'        -> {item.purpose}')
+    print()
+    print(' 0) quit   ?=menu   h/help=menu')
+    print(' ' + '-' * width)
 
 
 def _line_prompt():
     return f'[1-{len(ITEMS)}, ?=menu, 0=quit] choice: '
+
+
+def _sanitize_input(text):
+    """Make raw terminal input safe to echo in an error message.
+
+    A control character or escape sequence typed into the numbered prompt must
+    not be printed back as a terminal command; '?' keeps the message readable
+    without inventing content.
+    """
+    return ''.join(
+        char if ord(char) >= 0x20 and unicodedata.category(char) != 'Cc' else '?' for char in text
+    )
 
 
 def _execute(action, psu, args, cfg, monitor_state, engine, psu_factory):
@@ -993,7 +1072,8 @@ def _execute(action, psu, args, cfg, monitor_state, engine, psu_factory):
             print(f'Error: could not open MSI PSU: {exc}')
             return monitor.EXIT_ERROR
         if active_psu is None:
-            print('Error: MSI PSU not found or could not be opened.')
+            # The factory (device discovery) has already printed the precise
+            # reason; repeating a generic error here only doubles the noise.
             return monitor.EXIT_ERROR
         owned = True
     try:
@@ -1022,7 +1102,8 @@ def _line_menu(psu, args, cfg, monitor_state, engine, psu_factory=None):
             continue
         action = actions.get(choice)
         if action is None:
-            print(f'invalid choice: {choice}')
+            safe = _sanitize_input(choice)
+            print(f'invalid choice: {safe} (valid 1-{len(ITEMS)}, 0=quit, ?=menu)')
             _pause()
             continue
         item = next(i for i in ITEMS if i.number == choice)

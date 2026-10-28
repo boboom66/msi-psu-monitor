@@ -10,7 +10,7 @@
 | 🟡 部分/待放行 | 软件链路已实现并测试，但关键动作仍需真机 bench 或产品决策后才能放行 |
 | ⏸ 冻结 | 明确留待后续批准批次，本轮不做 |
 
-> 当前基线：**974 tests collected**（34 个测试模块），Linux VM 上除 2 个环境跳过外全部通过（Node 补装后 dashboard JS 测试通过；安装命名空间测试在 root 下单独通过）。本机 Windows
+> 当前基线：**978 tests collected**（34 个测试模块），Linux VM 上除 2 个环境跳过外全部通过（Node 补装后 dashboard JS 测试通过；安装命名空间测试在 root 下单独通过）。本机 Windows
 > 环境不支持 POSIX 专用模块，完整测试以 Linux CI 结果为准。当前发布状态见
 > [`bug-audit/RELEASE_READINESS.md`](../bug-audit/RELEASE_READINESS.md)。
 > 无硬件全链路自检见 [`verify.md`](verify.md)。
@@ -45,7 +45,7 @@
 | 單常駐 daemon（替代 timer） | `daemon.MonitorDaemon`（flock 獨占、1 s 判警、30 s 原子寫 prom、60 s 追加 history、1 h 輪轉） | `test_daemon.py` | ✅ 已实现 |
 | Linux 維運鏈路（node_exporter → Prometheus → Grafana；告警走 stderr + exit 2） | `write_prometheus()`、`alerts.format_alert_line()` | `test_daemon.py`、`test_alerts.py`、`test_cli_alerts.py` | ✅ 已实现 |
 | 告警審計檔案（MSI AlertLog 等價：`alerts-YYYYMMDD.log`，5 MiB 輪轉、30 天清理、`--show-alert-log`） | `state.append_alert_log()` / `iter_alert_log()` / `prune_alert_logs()`、`daemon._record_alerts()`、`monitor.run_show_alert_log()` | `test_state.py`、`test_daemon.py`、`test_cli_features.py` | ✅ 已实现 |
-| 文本控制台菜单（`--menu` / 裸 `menu` / `psu`，交互重构） | `menu.py`：23 项、4 组（Monitor/History/Writes/System）覆盖全部 CLI 动作（含 `--pins`）；数据驱动 `ACTIONS`、应用光标方向键（ESC O 兼容）、Esc 语义、头部状态行、备用屏、NO_COLOR；卡片式圆角边框、分组计数、选中行整行高亮、状态色、ASCII/VGA 回退；写操作先提示参数再要求确认；`psu.py` 提供无参数即开菜单的短命令 | `test_menu.py`（`test_every_cli_action_is_reachable_from_the_menu`、`test_the_menu_is_a_boxed_card_with_group_counts_and_even_width`、`test_the_menu_falls_back_to_ascii_glyphs_for_vga_terminals`、`test_the_pins_entry_runs_the_read_only_2ch_view`、`test_fan_duty_entry_prompts_and_writes` 等） | ✅ 已实现 |
+| 文本控制台菜单（`--menu` / 裸 `menu` / `psu`，交互重构） | `menu.py`：23 项、4 组（Monitor/History/Writes/System）覆盖全部 CLI 动作（含 `--pins`）；数据驱动 `ACTIONS`、应用光标方向键（ESC O 兼容）、Esc 语义、头部状态行、备用屏、NO_COLOR；卡片式圆角边框、分组计数、选中行整行高亮、状态色、ASCII/VGA 回退；写操作先提示参数再要求确认；参数提示 EOF/Ctrl-C 取消、管道菜单分组/标签/计数、控制字符回显净化、设备发现失败只报一次；`psu.py` 提供无参数即开菜单的短命令 | `test_menu.py`（`test_every_cli_action_is_reachable_from_the_menu`、`test_the_menu_is_a_boxed_card_with_group_counts_and_even_width`、`test_the_menu_falls_back_to_ascii_glyphs_for_vga_terminals`、`test_the_line_menu_groups_entries_with_labels_and_counts`、`test_prompts_treat_eof_as_cancel`、`test_a_factory_without_a_device_is_reported_once`、`test_an_unsafe_choice_is_sanitised_before_it_is_echoed` 等） | ✅ 已实现 |
 | 官方分发：自包含 tar.gz + 零 Python 依赖 `.deb`（x86_64/arm64） | `scripts/build_binary.sh` / `scripts/build_deb_binary.sh`（PyInstaller onefile，构建基线 Ubuntu 22.04 / glibc 2.35） | CI `freeze` job + `tests/test_packaging.py` | ✅ 已实现（待真机安装验证） |
 | 变更控制：01 文档曾冻结「源码 `.deb` 依赖 python3、不内嵌 Python」；用户 2026-10-19 明确要求官网下载**目标机不装 Python**，故官方产物改为自包含二进制 + 零 Python `.deb`，源码 `.deb` 仅保留为开发/CI 用途 | `scripts/build_binary.sh`、`scripts/build_deb_binary.sh`、`docs/release.md` | `tests/test_packaging.py` 断言 `Depends` 无 python | ✅ 已按新需求覆盖旧冻结 |
 | 供应链与安全：SBOM、SECURITY/CVD、支持周期、应急 runbook | `scripts/build_sbom.py`、`SECURITY.md`、`docs/support.md`、`docs/incident-response.md`；release workflow 生成并上传 `SBOM-<arch>.json` | `tests/test_release_security.py` | ✅ 已实现（GPG 签名待定） |
@@ -131,7 +131,7 @@
 ## 7. 无硬件可覆盖的验证方式
 
 所有 🧪 项在无样机时的最大覆盖：`bash scripts/smoke.sh` 一条命令跑完全链路（CI 也跑），`MSI_PSU_DEMO=1` 合成电源（`MSI_PSU_DEMO_MODEL` 可切
-全部 5 机型、`MSI_PSU_DEMO_ALERT` 可卡任意告警位），配合 974 个单测覆盖解析、告警、
+全部 5 机型、`MSI_PSU_DEMO_ALERT` 可卡任意告警位），配合 978 个单测覆盖解析、告警、
 落盘、导出的全部分支。**每一条待真机项的判定标准与命令见 [`verify.md`](verify.md) §8（共 20 项）。**
 
 ## 非需求交付物（如实标注）

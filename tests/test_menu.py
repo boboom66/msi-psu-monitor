@@ -67,6 +67,46 @@ def test_an_invalid_choice_is_reported_and_the_menu_continues(monkeypatch, capsy
     assert code == EXIT_OK
 
 
+def test_an_unsafe_choice_is_sanitised_before_it_is_echoed(monkeypatch, capsys):
+    """Terminal input is not trusted output; escapes must not be replayed."""
+    answers = iter(['\x1b[31mfoo', '0'])
+    monkeypatch.setattr(builtins, 'input', lambda *a: next(answers))
+    assert (
+        menu.run_menu(StubPSU(), _args(), {'retention_days': 30, 'interval': 1.0}, None, None)
+        == EXIT_OK
+    )
+    out = capsys.readouterr().out
+    assert 'invalid choice: ?[31mfoo' in out
+    assert '\x1b[31mfoo' not in out.split('invalid choice:', 1)[1]
+
+
+def test_the_line_menu_groups_entries_with_labels_and_counts(monkeypatch, capsys):
+    answers = iter(['0'])
+    monkeypatch.setattr(builtins, 'input', lambda *a: next(answers))
+    assert (
+        menu.run_menu(StubPSU(), _args(), {'retention_days': 30, 'interval': 1.0}, None, None)
+        == EXIT_OK
+    )
+    out = capsys.readouterr().out
+    assert ' Monitor (7)' in out
+    assert ' History (7)' in out
+    assert ' Writes (7)' in out
+    assert ' System (2)' in out
+    assert '   1)  Snapshot' in out
+    assert '-> single snapshot' in out
+
+
+def test_a_factory_without_a_device_is_reported_once(monkeypatch, capsys):
+    """Discovery already explains the failure; do not append a generic line."""
+    assert (
+        menu._execute('once', None, _args(), {'retention_days': 30}, None, None, lambda: None)
+        == monitor.EXIT_ERROR
+    )
+    out = capsys.readouterr().out
+    assert 'MSI PSU not found or could not be opened' not in out
+    assert out.count('Error:') == 0
+
+
 def test_eof_ends_the_menu_cleanly(monkeypatch):
     def eof(*_a):
         raise EOFError
@@ -194,6 +234,14 @@ def test_truncate_marks_the_cut():
     assert menu._truncate('abcdef', 4) == 'ab..'
     assert menu._truncate('abc', 10) == 'abc'
     assert menu._truncate('abc', 0) == ''
+
+
+def test_truncate_counts_full_width_glyphs_as_two_columns():
+    """A CJK string must not overflow the same visible width as ASCII."""
+    assert menu._truncate('中中中中', 4) == '中..'
+    assert menu._display_width(menu._truncate('中中中中', 4)) == 4
+    assert menu._display_width('中') == 2
+    assert menu._display_width('\x1b[31m中\x1b[0m') == 2
 
 
 def test_decode_key_covers_arrows_enter_quit_and_digits():
@@ -973,5 +1021,20 @@ def test_prompts_treat_eof_as_cancel(monkeypatch, capsys):
         raise EOFError
 
     monkeypatch.setattr(builtins, 'input', eof)
-    assert menu._run('fan_duty', StubPSU(), _menu_args(), {}, None, None) == monitor.EXIT_ERROR
+    for action in (
+        'watch_custom',
+        'export_custom',
+        'fan_duty',
+        'zero_fan',
+        'rail',
+        'ocp_write',
+        'ocp_load',
+        'serial',
+    ):
+        assert (
+            menu._run(action, StubPSU(), _menu_args(), {'retention_days': 30}, None, None)
+            == monitor.EXIT_OK
+        ), action
     assert menu._run('buzzer', StubPSU(), _menu_args(), {}, None, None) == monitor.EXIT_OK
+    out = capsys.readouterr().out
+    assert out.count('Cancelled.') == 9

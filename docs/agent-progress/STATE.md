@@ -6,9 +6,9 @@
 - HEAD: `c7771e5` on `work/product-v2` (CI run #61 green)
 - Baseline tag: `baseline-2026-10-26-r2`
 - Package version: `1.0.1`
-- Tests: **974 tests / 34 test modules**, per the latest recorded CI run
+- Tests: **978 tests / 34 test modules**, per the latest recorded CI run
 - Last code gates: CI run `40611149498` (#61) on `c7771e5` — **PASS**
-  (974 collected; ruff/format/mypy/shellcheck/pytest/coverage 91%/smoke/soak/
+  (978 collected; ruff/format/mypy/shellcheck/pytest/coverage 91%/smoke/soak/
   deb/freeze on 3.10/3.12/3.13). Linux VM deep re-run: 972 ok, 2 environment
   skips (dashboard JS needed Node, install namespace needs root; both passed
   after installing Node / running as root). Coverage 91%.
