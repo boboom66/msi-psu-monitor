@@ -38,7 +38,7 @@ def test_root_install_keeps_config_and_uninstall_purges_it(tmp_path):
     source.mkdir()
     fake.mkdir()
     # The installer only checks -x and runs --version; stubs are enough here.
-    for name in ('msi-psu-monitor', 'msi-psu-monitor-daemon'):
+    for name in ('msi-psu-monitor', 'msi-psu-monitor-daemon', 'psu'):
         stub = source / name
         stub.write_text('#!/bin/sh\necho msi-psu-monitor 1.0.0\n', encoding='utf-8')
         stub.chmod(0o755)
@@ -65,6 +65,7 @@ def test_root_install_keeps_config_and_uninstall_purges_it(tmp_path):
         bash "$STAGE/install.sh" >/dev/null
         test -x "$PREFIX/bin/msi-psu-monitor"
         test -x "$PREFIX/bin/msi-psu-monitor-daemon"
+        test -x "$PREFIX/bin/psu"
         test -f /etc/msi-psu-monitor.conf
         test -f /etc/systemd/system/msi-psu-monitor.service
         test -f /etc/udev/rules.d/99-msi-psu.rules
@@ -74,6 +75,7 @@ def test_root_install_keeps_config_and_uninstall_purges_it(tmp_path):
         test "$(cat /etc/msi-psu-monitor.conf)" = custom
         bash "$STAGE/uninstall.sh" >/dev/null
         test ! -e "$PREFIX/bin/msi-psu-monitor"
+        test ! -e "$PREFIX/bin/psu"
         test ! -e /etc/systemd/system/msi-psu-monitor.service
         test -f /etc/msi-psu-monitor.conf
         bash "$STAGE/uninstall.sh" --purge >/dev/null

@@ -10,7 +10,7 @@
 | 🟡 部分/待放行 | 软件链路已实现并测试，但关键动作仍需真机 bench 或产品决策后才能放行 |
 | ⏸ 冻结 | 明确留待后续批准批次，本轮不做 |
 
-> 当前基线：**972 passed**（34 个测试模块），以最近一次全绿 CI 运行为准。本机 Windows
+> 当前基线：**972 tests collected**（34 个测试模块），Linux VM 上除 2 个环境跳过外全部通过（Node 补装后 dashboard JS 测试通过；安装命名空间测试在 root 下单独通过）。本机 Windows
 > 环境不支持 POSIX 专用模块，完整测试以 Linux CI 结果为准。当前发布状态见
 > [`bug-audit/RELEASE_READINESS.md`](../bug-audit/RELEASE_READINESS.md)。
 > 无硬件全链路自检见 [`verify.md`](verify.md)。
