@@ -1,18 +1,18 @@
 # STATE
 
 - Phase: **Phase 2 — user-added feature polish (TUI/menu/dashboard/watch)**
-- Task: **REV6 gap closure done (0x2C/0x11/register fallback); G2 review next**
+- Task: **Menu card-style refresh done; G2 review next**
 - Branch: `work/product-v2`
-- HEAD: `work/product-v2` (see `git log -1`; latest recorded CI run below)
+- HEAD: `c7771e5` on `work/product-v2` (CI run #61 green)
 - Baseline tag: `baseline-2026-10-26-r2`
 - Package version: `1.0.1`
 - Tests: **974 tests / 34 test modules**, per the latest recorded CI run
-- Last code gates: CI run `40475061532` (#58) on `0be64fd` — **PASS**
+- Last code gates: CI run `40611149498` (#61) on `c7771e5` — **PASS**
   (974 collected; ruff/format/mypy/shellcheck/pytest/coverage 91%/smoke/soak/
-  deb/freeze on 3.10/3.12/3.13). Deep re-run on Linux VM: full suite green
-  (2 environment skips: dashboard JS needed Node, install namespace needs root;
-  both passed after installing Node / running as root). Coverage 91%.
-  Earlier green: ci#57 `40470619112` (925-case baseline).
+  deb/freeze on 3.10/3.12/3.13). Linux VM deep re-run: 972 ok, 2 environment
+  skips (dashboard JS needed Node, install namespace needs root; both passed
+  after installing Node / running as root). Coverage 91%.
+  Earlier green: ci#60 `40606738505` (972-case baseline).
 - Documentation checks: relative links checked in 22 changed Markdown files; `git diff --check` clean
 - Local test limitation: Windows cannot collect the full Linux suite (`fcntl`, `termios`,
   and `os.geteuid` are unavailable); this is not counted as a project test failure
