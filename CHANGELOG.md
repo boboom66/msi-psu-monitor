@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Menu visual refresh**: the interactive menu is now a boxed card with a
+  title/version and a colour-coded `last:` status (green ok, red exit, yellow
+  stopped), group headings with item counts, aligned action/command columns and
+  a full-width reverse-video selection bar. It uses only standard 8/16-colour
+  SGR, keeps `NO_COLOR`, and falls back to ASCII borders on `TERM=linux` or a
+  non-UTF-8 locale so the VGA console cannot hit a UnicodeEncodeError.
 - **`psu` front door**: the installed `psu` command opens the interactive menu
   with no arguments and passes any explicit arguments through unchanged
   (`psu --once` == `msi-psu-monitor --once`). Shipped by the source install,

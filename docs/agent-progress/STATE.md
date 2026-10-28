@@ -6,9 +6,9 @@
 - HEAD: `work/product-v2` (see `git log -1`; latest recorded CI run below)
 - Baseline tag: `baseline-2026-10-26-r2`
 - Package version: `1.0.1`
-- Tests: **972 tests / 34 test modules**, per the latest recorded CI run
+- Tests: **974 tests / 34 test modules**, per the latest recorded CI run
 - Last code gates: CI run `40475061532` (#58) on `0be64fd` — **PASS**
-  (972 collected; ruff/format/mypy/shellcheck/pytest/coverage 91%/smoke/soak/
+  (974 collected; ruff/format/mypy/shellcheck/pytest/coverage 91%/smoke/soak/
   deb/freeze on 3.10/3.12/3.13). Deep re-run on Linux VM: full suite green
   (2 environment skips: dashboard JS needed Node, install namespace needs root;
   both passed after installing Node / running as root). Coverage 91%.

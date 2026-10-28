@@ -43,6 +43,19 @@ _REVERSE = '\x1b[7m'
 _BOLD = '\x1b[1m'
 _DIM = '\x1b[2m'
 _RESET = '\x1b[0m'
+# Menu palette: standard 8/16-colour SGR only, so it works over SSH, tmux and
+# the Linux VGA console without requiring 256-colour support.
+_COLOR_BORDER = '\x1b[36m'
+_COLOR_TITLE = '\x1b[1;36m'
+_COLOR_GROUP = '\x1b[1;34m'
+_COLOR_NUMBER = '\x1b[33m'
+_COLOR_LABEL = '\x1b[1;37m'
+_COLOR_COMMAND = '\x1b[2;37m'
+_COLOR_DETAIL = '\x1b[36m'
+_COLOR_FOOTER = '\x1b[2;37m'
+_COLOR_OK = '\x1b[32m'
+_COLOR_WARN = '\x1b[33m'
+_COLOR_ERROR = '\x1b[31m'
 
 #: xterm-style alternate screen buffer.  The menu is resident, so it draws on
 #: the alternate screen and restores the shell's view on exit (what
@@ -559,7 +572,7 @@ def _write(text):
     try:
         sys.stdout.write(text)
         sys.stdout.flush()
-    except OSError:
+    except (OSError, UnicodeError):
         pass
 
 
@@ -595,44 +608,147 @@ def _paint(text, code, enabled):
     return f'{code}{text}{_RESET}' if enabled else text
 
 
+_ASCII_GLYPHS = {
+    'tl': '+',
+    'tr': '+',
+    'bl': '+',
+    'br': '+',
+    'h': '-',
+    'v': '|',
+    'dot': '*',
+}
+_UNICODE_GLYPHS = {
+    'tl': '╭',
+    'tr': '╮',
+    'bl': '╰',
+    'br': '╯',
+    'h': '─',
+    'v': '│',
+    'dot': '·',
+}
+
+
+def _glyphs():
+    """Box glyphs that the terminal can actually encode.
+
+    The Linux VGA console (``TERM=linux``) and a non-UTF-8 locale get ASCII:
+    a UnicodeEncodeError while drawing the menu would otherwise kill it. The
+    caller can also inject a fixed set in tests.
+    """
+    term = os.environ.get('TERM', '').strip().lower()
+    encoding = (getattr(sys.stdout, 'encoding', '') or '').lower()
+    if term == 'linux' or 'utf' not in encoding:
+        return _ASCII_GLYPHS
+    return _UNICODE_GLYPHS
+
+
 def _line_for(item, width, selected, color):
+    """One menu row, padded to exactly ``width`` visible columns.
+
+    The command is a separate dim column: the fixed prefix (marker, number,
+    label) keeps the eyes on the action name, while the exact command stays
+    available for anyone who wants to type it manually.
+    """
     marker = '>' if selected else ' '
-    head = f'{marker} {item.number}) {item.label:11s}'
-    tail = f'  {item.command}'
-    text = _truncate(head + tail, width)
-    if selected and color:
-        return _paint(text, _REVERSE, True)
-    return text
+    prefix = f'{marker} {item.number})'
+    prefix_field = f'{prefix:<5}'
+    label_width = min(15, max(8, width - len(prefix_field) - 6))
+    label_field = f'{item.label:<{label_width}}'
+    base = f'{prefix_field} {label_field}'
+    command = _truncate(item.command, max(0, width - len(base) - 1))
+    plain = _truncate(f'{base} {command}', width)
+    padding = ' ' * max(0, width - len(plain))
+    if selected:
+        # Reverse video paints a full-width selection bar, including the
+        # padding, so the cursor line is unmistakable even without colour.
+        return _paint(plain + padding, _REVERSE, color)
+    if not color:
+        return plain + padding
+    return (
+        f'{_COLOR_NUMBER}{prefix_field}{_RESET} '
+        f'{_COLOR_LABEL}{label_field}{_RESET} '
+        f'{_COLOR_COMMAND}{command}{_RESET}{padding}'
+    )
 
 
-def _body_lines(items, selected, width, color):
+def _group_line(group, count, width, color, glyphs):
+    """A group heading with item count and a subtle rule to the right."""
+    label = f' {group}'
+    meta = f' {glyphs["dot"]} {count} '
+    rule = glyphs['h'] * max(0, width - len(label) - len(meta))
+    if not color:
+        return label + meta + rule
+    return f'{_COLOR_GROUP}{label}{_RESET}{_DIM}{meta}{_RESET}{_COLOR_BORDER}{rule}{_RESET}'
+
+
+def _body_lines(items, selected, width, color, glyphs):
     """Return (lines, index of the selected line) with group headings."""
+    counts = {group: 0 for group in GROUPS}
+    for item in items:
+        counts[item.group] = counts.get(item.group, 0) + 1
     lines = []
     selected_line = 0
     for group in GROUPS:
-        lines.append(f' {_BOLD}{group}{_RESET}' if color else f' {group}')
+        lines.append(_group_line(group, counts[group], width, color, glyphs))
         for item in items:
             if item.group != group:
                 continue
             if item is items[selected]:
                 selected_line = len(lines)
             lines.append(_line_for(item, width, item is items[selected], color))
-        lines.append('')
+        lines.append(' ' * width)
     return lines, selected_line
 
 
+def _border_top(inner, title, right, color, glyphs, right_color=None):
+    """Top border with a title on the left and version/status on the right."""
+    available = inner - 2
+    title_text = f' {title} '
+    right_text = f' {right} ' if right else ''
+    max_right = max(0, available - 2 - len(title_text))
+    right_text = _truncate(right_text, max_right)
+    fill = max(0, available - 2 - len(title_text) - len(right_text))
+    rule = glyphs['h'] * fill
+    if not color:
+        return (
+            glyphs['tl'] + glyphs['h'] + title_text + rule + right_text + glyphs['h'] + glyphs['tr']
+        )
+    return (
+        f'{_COLOR_BORDER}{glyphs["tl"]}{glyphs["h"]}{_RESET}'
+        f'{_COLOR_TITLE}{title_text}{_RESET}'
+        f'{_COLOR_BORDER}{rule}{_RESET}'
+        f'{right_color or _COLOR_DETAIL}{right_text}{_RESET}'
+        f'{_COLOR_BORDER}{glyphs["h"]}{glyphs["tr"]}{_RESET}'
+    )
+
+
+def _box_line(content, glyphs, color):
+    if color:
+        return (
+            f'{_COLOR_BORDER}{glyphs["v"]}{_RESET} {content} {_COLOR_BORDER}{glyphs["v"]}{_RESET}'
+        )
+    return f'{glyphs["v"]} {content} {glyphs["v"]}'
+
+
 def render_menu(
-    items, selected, offset, width, height, *, color=True, help_mode=False, status=None
+    items,
+    selected,
+    offset,
+    width,
+    height,
+    *,
+    color=True,
+    help_mode=False,
+    status=None,
+    glyphs=None,
 ):
     """Pure renderer: returns (frame, new_offset) for tests and the loop."""
     inner = max(MIN_WIDTH, min(width, 100))
-    header = ' MSI PSU Monitor - menu'
-    if status:
-        header = _truncate(f'{header}   last: {status}', inner)
-    rule = '-' * inner
-    body, selected_line = _body_lines(items, selected, inner, color)
+    glyphs = glyphs or _glyphs()
+    content_width = max(1, inner - 4)
+    body, selected_line = _body_lines(items, selected, content_width, color, glyphs)
 
-    available = max(1, height - 5)  # header, two rules, detail, footer
+    available = max(1, height - 4)  # top border, bottom border, detail, footer
     offset = max(0, min(offset, max(0, len(body) - available)))
     if selected_line < offset:
         offset = selected_line
@@ -640,6 +756,32 @@ def render_menu(
         offset = selected_line - available + 1
     window = body[offset : offset + available]
     item = items[selected]
+
+    if status:
+        right = f'last: {status}'
+        if status.endswith(' ok'):
+            right_color = _COLOR_OK
+        elif ' exit ' in status:
+            right_color = _COLOR_ERROR
+        elif status.endswith(' stopped'):
+            right_color = _COLOR_WARN
+        else:
+            right_color = _COLOR_DETAIL
+    else:
+        version = getattr(monitor, '__version__', '')
+        right = f'v{version}' if version else ''
+        right_color = _COLOR_DETAIL
+
+    frame = [_border_top(inner, 'MSI PSU Monitor', right, color, glyphs, right_color)]
+    frame.extend(_box_line(line, glyphs, color) for line in window)
+    frame.append(
+        _paint(
+            glyphs['bl'] + glyphs['h'] * (inner - 2) + glyphs['br'],
+            _COLOR_BORDER,
+            color,
+        )
+    )
+
     if help_mode:
         # The detail slot is the most readable place for the key legend; the
         # footer keeps its usual shape so the frame height never changes.
@@ -648,7 +790,10 @@ def render_menu(
     else:
         detail = ' ' + _truncate(f'{item.label}: {item.purpose}', inner - 1)
         footer = ' ' + _truncate(_footer_text(), inner - 1)
-    frame = [header, rule, *window, rule, detail, footer]
+    # Pad the two free-standing lines too, so every visual row has the same
+    # width as the card even when the terminal has no background colour.
+    frame.append(_paint(f'{detail:<{inner}}', _COLOR_DETAIL, color))
+    frame.append(_paint(f'{footer:<{inner}}', _COLOR_FOOTER, color))
     return '\n'.join(frame), offset
 
 

@@ -5,6 +5,7 @@ import copy
 import io
 import os
 import pty
+import re
 import sys
 import termios
 import types
@@ -15,6 +16,13 @@ from msi_psu_monitor import config
 from msi_psu_monitor import menu
 from msi_psu_monitor import monitor
 from msi_psu_monitor.monitor import EXIT_OK
+
+_ANSI_RE = re.compile(r'\x1b\[[0-9;?]*[A-Za-z]')
+
+
+def _visible(text):
+    """Strip SGR/cursor escapes so layout can be measured like the screen."""
+    return _ANSI_RE.sub('', text)
 
 
 class StubPSU:
@@ -215,6 +223,27 @@ def test_render_highlights_with_reverse_video_in_colour_mode():
     frame, _ = menu.render_menu(menu.ITEMS, 2, 0, 80, 24, color=True)
     assert menu._REVERSE in frame
     assert menu._RESET in frame
+
+
+def test_the_menu_is_a_boxed_card_with_group_counts_and_even_width():
+    frame, _ = menu.render_menu(menu.ITEMS, 0, 0, 80, 24, color=False, glyphs=menu._ASCII_GLYPHS)
+    lines = frame.splitlines()
+    assert lines[0].startswith('+- MSI PSU Monitor ')
+    assert lines[0].endswith('-+')
+    assert 'Monitor * 7' in lines[1]
+    assert 'History * 7' in frame
+    assert 'Writes * 7' in frame
+    assert all(len(line) == 80 for line in lines), [len(line) for line in lines]
+    # The selected row is padded as well, so reverse video is a full bar.
+    assert any(line.startswith('| > 1)') for line in lines)
+
+
+def test_the_menu_falls_back_to_ascii_glyphs_for_vga_terminals(monkeypatch):
+    monkeypatch.setenv('TERM', 'linux')
+    assert menu._glyphs() is menu._ASCII_GLYPHS
+    frame, _ = menu.render_menu(menu.ITEMS, 0, 0, 60, 12, color=False)
+    assert frame.startswith('+- MSI PSU Monitor ')
+    assert '| > 1)' in frame
 
 
 class FakeIO(io.StringIO):
@@ -566,8 +595,9 @@ def test_a_resize_redraws_at_the_new_width(monkeypatch):
     # duplicated first pair covers that, then the resize happens.
     out, code = _drive_interactive(monkeypatch, (None, 'quit'), size=[(80, 24), (80, 24), (46, 12)])
     assert code == monitor.EXIT_OK
-    assert '-' * 80 in out
-    assert '-' * 46 in out
+    widths = {len(line) for line in _visible(out).splitlines() if line}
+    assert 80 in widths
+    assert 46 in widths
 
 
 def test_the_thresholds_entry_dumps_the_c0h_configuration(monkeypatch, capsys):
