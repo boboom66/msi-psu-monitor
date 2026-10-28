@@ -1,18 +1,18 @@
 # STATE
 
 - Phase: **Phase 2 — user-added feature polish (TUI/menu/dashboard/watch)**
-- Task: **Menu borderless/minimal UX + stability pass done; G2 review next**
+- Task: **Borderless minimal menu UX/stability done; G2 review next**
 - Branch: `work/product-v2`
-- HEAD: `5537ecd` on `work/product-v2` (CI run #66 green)
+- HEAD: `e6a8632` on `work/product-v2` (CI run #68 green)
 - Baseline tag: `baseline-2026-10-26-r2`
 - Package version: `1.0.1`
 - Tests: **980 tests / 34 test modules**, per the latest recorded CI run
-- Last code gates: CI run `40621205956` (#66) on `5537ecd` — **PASS**
+- Last code gates: CI run `40622633644` (#68) on `e6a8632` — **PASS**
   (980 collected; ruff/format/mypy/shellcheck/pytest/coverage 91%/smoke/soak/
   deb/freeze on 3.10/3.12/3.13). Linux VM deep re-run: 972 ok, 2 environment
   skips (dashboard JS needed Node, install namespace needs root; both passed
   after installing Node / running as root). Coverage 91%.
-  Earlier green: ci#64 `40618427581` (979-case baseline).
+  Earlier green: ci#66 `40621205956` (980-case baseline).
 - Documentation checks: relative links checked in 22 changed Markdown files; `git diff --check` clean
 - Local test limitation: Windows cannot collect the full Linux suite (`fcntl`, `termios`,
   and `os.geteuid` are unavailable); this is not counted as a project test failure
