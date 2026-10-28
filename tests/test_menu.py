@@ -314,6 +314,15 @@ def test_read_key_decodes_a_sequence_and_times_out():
         os.close(write_fd)
 
 
+def test_read_key_quits_on_eof_instead_of_busy_looping():
+    read_fd, write_fd = os.pipe()
+    os.close(write_fd)
+    try:
+        assert menu._read_key(read_fd, timeout=0.1) == 'quit'
+    finally:
+        os.close(read_fd)
+
+
 def test_cbreak_disables_canonical_mode_and_restores_it():
     master, slave = pty.openpty()
     try:

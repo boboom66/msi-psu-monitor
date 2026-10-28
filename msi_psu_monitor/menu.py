@@ -920,6 +920,10 @@ def _read_key(fd, timeout=0.25):
         if not ready:
             return None
         data = os.read(fd, 1)
+        if data == b'':
+            # EOF (SSH drop, closed pty, detached stdin) must not become a
+            # busy loop: select() stays ready, os.read() returns b'' forever.
+            return 'quit'
         if data == b'\x1b':
             # Stop at a complete sequence: reading the whole burst swallowed the
             # next key (e.g. the q that follows an arrow) and lost it.  A lone
